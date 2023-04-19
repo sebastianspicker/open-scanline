@@ -1,4 +1,5 @@
 # open-scanline file
 cli: bootstrap
 # cli: maintenance:bootstrap
+backends: exploration
 
