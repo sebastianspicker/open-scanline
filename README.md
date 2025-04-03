@@ -3,11 +3,11 @@
 A working tree for open-scanline with an evolving implementation history.
 
 ## Overview
-open-scanline tracks the practical state of the current maintenance pass.
+open-scanline is moving through steady build work.
 
 ## Status
-Working state: bootstrap.
+Project phase: expansion.
 
 ## Usage
-- Made the cli assumptions easier to check later.
+- Rewrote the release explanation around the maintained behavior.
 

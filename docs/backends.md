@@ -2,12 +2,12 @@
 
 
 ## Context
-This page tracks core-build-out decisions for backends during steady build work.
+This page keeps the current backends guidance concise after earlier rough notes.
 
 ## Usage
 - Made the backends assumptions easier to check later.
 
-## Scratch Notes
+## Notes Folded Into Current Flow
 Early notes are still uneven and may be folded into clearer sections later.
 
 ## Features
@@ -15,4 +15,9 @@ Early notes are still uneven and may be folded into clearer sections later.
 
 ## Caveats
 Some setup details still depend on the current local workflow and may change again.
+
+## Reliability
+- Closed a concrete backends edge found during core-build-out work.
+
+- Earlier scratch notes were compressed into the current guidance.
 
