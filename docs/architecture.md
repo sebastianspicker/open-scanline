@@ -11,7 +11,9 @@ This page keeps the current architecture guidance concise after earlier rough no
 Early notes are still uneven and may be folded into clearer sections later.
 
 ## Usage
-- Made the processing assumptions easier to check later.
+- Merged scattered processing guidance into the docs.
+
+- Earlier scratch notes were compressed into the current guidance.
 
 ## Architecture
 - Moved processing behind a narrower boundary.
