@@ -13,6 +13,8 @@ Early notes are still uneven and may be folded into clearer sections later.
 ## Usage
 - Made the processing assumptions easier to check later.
 
+- Earlier scratch notes were compressed into the current guidance.
+
 ## Architecture
 - Moved processing behind a narrower boundary.
 
