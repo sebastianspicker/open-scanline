@@ -17,7 +17,7 @@ Early notes are still uneven and may be folded into clearer sections later.
 Some setup details still depend on the current local workflow and may change again.
 
 ## Reliability
-- Closed a concrete backends edge found during core-build-out work.
+- Closed a concrete backends edge found during maintenance work.
 
 - Earlier scratch notes were compressed into the current guidance.
 
