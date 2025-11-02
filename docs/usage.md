@@ -17,7 +17,7 @@ Early notes are still uneven and may be folded into clearer sections later.
 Some setup details still depend on the current local workflow and may change again.
 
 ## Architecture
-- Simplified the next maintenance pass through cli.
+- Reduced the cli surface that later fixes have to touch.
 
 - Earlier scratch notes were compressed into the current guidance.
 
