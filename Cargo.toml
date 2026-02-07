@@ -3,4 +3,5 @@ cli: bootstrap
 # cli: maintenance:bootstrap
 backends: exploration
 processing: expansion
+cli: maintenance
 
