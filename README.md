@@ -3,11 +3,14 @@
 A working tree for open-scanline with an evolving implementation history.
 
 ## Overview
-open-scanline is moving through steady build work.
+open-scanline keeps the active revival work visible.
 
 ## Status
-Project phase: expansion.
+Working state: maintenance. Activity resumed after a longer gap.
 
 ## Usage
-- Rewrote the release explanation around the maintained behavior.
+- Merged scattered release guidance into the docs.
+
+## Roadmap
+Keep the next pass focused on verification and smaller changes.
 
