@@ -2,5 +2,3 @@
 
 // release: bootstrap
 
-// release: stabilization
-
