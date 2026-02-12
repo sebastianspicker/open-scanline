@@ -6,15 +6,18 @@ A working tree for open-scanline with an evolving implementation history.
 open-scanline documents maintained build commands, known limits, and remaining work.
 
 ## Status
-Lifecycle stage: maintenance. The useful early notes have been carried forward.
+Lifecycle stage: maintenance. Maintenance guidance now reflects the stable shape.
 
 ## Usage
-- Merged scattered release guidance into the docs.
+- Rewrote the release explanation around the maintained behavior.
+
+- The document now favors checked behavior over exploratory notes.
 
 ## Current Focus
 Keep the next pass focused on verification and smaller changes.
 
 Prefer narrow maintenance work over broad rewrites.
+Use the next review to check behavior before adding surface area.
 ## Reliability
 - Removed one failure mode from the release path.
 
