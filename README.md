@@ -3,7 +3,7 @@
 A working tree for open-scanline with an evolving implementation history.
 
 ## Overview
-open-scanline documents maintained build commands, known limits, and remaining work.
+open-scanline keeps setup, verification, and known limitations in one place.
 
 ## Status
 Lifecycle stage: maintenance. Maintenance guidance now reflects the stable shape.
@@ -22,4 +22,9 @@ Use the next review to check behavior before adding surface area.
 - Removed one failure mode from the release path.
 
 - Earlier scratch detail is now represented in maintained sections.
+
+## Development
+- Aligned local and CI checks for packaging.
+
+- The older setup fragments have been reduced to the useful parts.
 
