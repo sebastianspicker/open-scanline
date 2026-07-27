@@ -5,7 +5,9 @@
 This page keeps the current usage guidance concise after earlier rough notes.
 
 ## Usage
-- Rewrote the cli explanation around the maintained behavior.
+- Merged scattered cli guidance into the docs.
+
+- Earlier scratch notes were compressed into the current guidance.
 
 ## Notes Folded Into Current Flow
 Early notes are still uneven and may be folded into clearer sections later.
