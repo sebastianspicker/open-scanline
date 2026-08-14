@@ -53,5 +53,5 @@ quick-xml = "0.41"
 egui = { version = "0.32.3", optional = true }
 lopdf = "0.44"
 stringprep = "0.1"
-rfd = { version = "0.15", optional = true }
+rfd = { version = "0.17", optional = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
