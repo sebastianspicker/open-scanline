@@ -1,8 +1,57 @@
-# open-scanline file
-cli: bootstrap
-# cli: maintenance:bootstrap
-backends: exploration
-processing: expansion
-cli: maintenance
-release: maintenance
+[package]
+name = "open-scanline"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.91"
+description = "Local scanning, processing, and OCR in Rust."
+license = "MIT"
+publish = false
+default-run = "open-scanline"
+include = [
+    "/src/**/*.rs",
+    "/tests/**/*.rs",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
+    "/THIRD_PARTY_NOTICES.md",
+    "/assets/**",
+    "/docs/**",
+]
 
+[[bin]]
+name = "open-scanline"
+path = "src/main.rs"
+
+[lib]
+name = "open_scanline"
+path = "src/lib.rs"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:egui", "dep:rfd"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff", "webp", "bmp", "gif"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+getrandom = "0.4"
+sha2 = "0.10"
+libc = "0.2"
+dirs = "5"
+tiff = "0.11"
+tract-onnx = "0.23.4"
+eframe = { version = "0.32.3", optional = true, default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "web_screen_reader", "x11"] }
+mdns-sd = "0.13"
+ureq = { version = "3.1", default-features = false, features = ["rustls"] }
+quick-xml = "0.41"
+egui = { version = "0.32.3", optional = true }
+lopdf = "0.44"
+stringprep = "0.1"
+rfd = { version = "0.15", optional = true }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
