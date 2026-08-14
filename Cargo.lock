@@ -2936,7 +2936,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "stringprep",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tiff",
  "tract-onnx",
  "ureq",
