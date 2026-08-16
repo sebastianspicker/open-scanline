@@ -35,7 +35,10 @@ Desktop.ini
 .kilo/
 .cursor/
 .repowise/
-.codacy/
+/.codacy/*
+!/.codacy/codacy.config.json
+!/.codacy/codacy.yaml
+!/.codacy/codacy.yml
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md
