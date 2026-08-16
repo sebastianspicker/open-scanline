@@ -110,6 +110,7 @@ fn cli_runs_user_model_in_the_contained_worker() {
     );
 }
 
+#[cfg(not(windows))]
 #[test]
 fn library_default_resolves_the_sibling_worker_instead_of_respawning_the_test_host() {
     let directory = std::env::temp_dir().join(format!(
