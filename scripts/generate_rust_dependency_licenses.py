@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "assets/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md"
 LICENSE_FILE_PREFIXES = ("license", "copying", "notice", "copyright")
 TREE_LINE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.+-]*) v([^\s]+)(?: \([^)]*\))?$")
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 VENDORED_SOURCES = os.environ.get("OPEN_SCANLINE_LICENSE_SOURCE_DIR")
 
 
@@ -54,7 +55,7 @@ def tree_packages() -> set[tuple[str, str]]:
     )
     packages = set()
     for raw_line in completed.stdout.splitlines():
-        line = raw_line.removesuffix(" (*)").removesuffix(" (proc-macro)")
+        line = ANSI_ESCAPE.sub("", raw_line).removesuffix(" (*)").removesuffix(" (proc-macro)")
         match = TREE_LINE.fullmatch(line)
         if match is None:
             raise RuntimeError(f"could not parse cargo tree line: {raw_line!r}")

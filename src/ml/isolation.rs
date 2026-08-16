@@ -131,9 +131,48 @@ struct TrustedWorkerHandle {
 }
 
 #[cfg(windows)]
+fn has_exactly_one_hard_link(file: &std::fs::File) -> std::io::Result<bool> {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileInformation {
+        file_attributes: u32,
+        creation_time_low: u32,
+        creation_time_high: u32,
+        last_access_time_low: u32,
+        last_access_time_high: u32,
+        last_write_time_low: u32,
+        last_write_time_high: u32,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetFileInformationByHandle(file: *mut c_void, information: *mut FileInformation) -> i32;
+    }
+
+    let mut information = std::mem::MaybeUninit::<FileInformation>::uninit();
+    // SAFETY: `file` is an open Windows file handle and `information` points to writable
+    // storage with the exact layout required by GetFileInformationByHandle.
+    let success =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful GetFileInformationByHandle call initializes all fields.
+    Ok(unsafe { information.assume_init() }.number_of_links == 1)
+}
+
+#[cfg(windows)]
 impl TrustedWorkerHandle {
     fn acquire(path: &Path, role: &str) -> Result<Self> {
-        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        use std::os::windows::fs::OpenOptionsExt;
 
         const FILE_SHARE_READ: u32 = 0x0000_0001;
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -162,7 +201,12 @@ impl TrustedWorkerHandle {
             )));
         }
 
-        if metadata.number_of_links() != Some(1) {
+        if !has_exactly_one_hard_link(&file).map_err(|error| {
+            default_worker_unavailable(format!(
+                "could not inspect retained {role} {} link count: {error}",
+                path.display()
+            ))
+        })? {
             return Err(default_worker_unavailable(format!(
                 "retained {role} {} must have exactly one hard link",
                 path.display()
