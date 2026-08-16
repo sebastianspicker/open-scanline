@@ -4,7 +4,7 @@ use super::onnx::run_trusted_user_onnx_with_options;
 use super::{OnnxInferenceOptions, OnnxInputLayout, OnnxNormalization};
 use crate::backend_process::{run_command, CommandSpec, TemporaryOutput};
 use crate::core::{Result, ScanError};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -21,8 +21,10 @@ pub(crate) fn run_isolated_onnx(
     options: &OnnxInferenceOptions,
 ) -> Result<super::OnnxReport> {
     validate_onnx_paths(input, model)?;
-    let executable = resolve_default_worker_executable()?;
-    run_isolated_onnx_with_executable(input, model, options, &executable)
+    let _ = options;
+    Err(default_worker_unavailable(
+        "automatic worker discovery is disabled because a current-executable-derived path cannot authenticate the worker image; use run_user_onnx_with_worker with an explicit worker path",
+    ))
 }
 
 fn validate_onnx_paths(input: &Path, model: &Path) -> Result<()> {
@@ -41,40 +43,17 @@ fn validate_onnx_paths(input: &Path, model: &Path) -> Result<()> {
     Ok(())
 }
 
-fn resolve_default_worker_executable() -> Result<PathBuf> {
-    let current = std::env::current_exe().map_err(|error| {
-        ScanError::Unsupported(format!(
-            "could not locate an Open Scanline ONNX worker: {error}"
-        ))
-    })?;
-    resolve_default_worker_from(&current).ok_or_else(|| {
-        ScanError::Unsupported(
-            "no version-matched Open Scanline ONNX worker is available beside the host executable; use run_user_onnx_with_worker with an explicit worker path".into(),
-        )
-    })
+fn default_worker_unavailable(reason: impl std::fmt::Display) -> ScanError {
+    ScanError::Unsupported(format!(
+        "no trusted Open Scanline ONNX worker is available: {reason}"
+    ))
 }
 
-fn resolve_default_worker_from(current: &Path) -> Option<PathBuf> {
-    let worker_name = if cfg!(windows) {
-        "open-scanline.exe"
-    } else {
-        "open-scanline"
-    };
-    let current_is_worker = current
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case(worker_name));
-    if current_is_worker && current.is_file() {
-        return Some(current.to_path_buf());
-    }
-    let parent = current.parent()?;
-    let mut candidates = vec![parent.join(worker_name)];
-    if parent.file_name().is_some_and(|name| name == "deps") {
-        if let Some(target_directory) = parent.parent() {
-            candidates.push(target_directory.join(worker_name));
-        }
-    }
-    candidates.into_iter().find(|candidate| candidate.is_file())
+#[cfg(windows)]
+fn is_reparse_or_symlink(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0
 }
 
 pub(crate) fn run_isolated_onnx_with_executable(
@@ -84,13 +63,20 @@ pub(crate) fn run_isolated_onnx_with_executable(
     executable: &Path,
 ) -> Result<super::OnnxReport> {
     validate_onnx_paths(input, model)?;
+    let executable = executable.canonicalize().map_err(|error| {
+        ScanError::Invalid(format!(
+            "ONNX worker executable not found: {} ({error})",
+            executable.display()
+        ))
+    })?;
     if !executable.is_file() {
         return Err(ScanError::Invalid(format!(
             "ONNX worker executable not found: {}",
             executable.display()
         )));
     }
-    validate_worker_executable(executable)?;
+    let _trusted_identity = TrustedWorkerHandle::acquire(&executable, "ONNX worker executable")?;
+    validate_worker_executable(&executable)?;
     let report = TemporaryOutput::new("onnx-report", "json")?;
     let mut args = vec![
         "__onnx-worker".to_string(),
@@ -111,7 +97,7 @@ pub(crate) fn run_isolated_onnx_with_executable(
         args.push("--input-name".to_string());
         args.push(input_name.to_string());
     }
-    let status = supervise_worker(executable, &args, ONNX_WALL_TIMEOUT)?;
+    let status = supervise_worker(&executable, &args, ONNX_WALL_TIMEOUT)?;
     if !status.success() {
         return Err(ScanError::Other(format!(
             "ONNX worker exited with status {status}"
@@ -127,6 +113,107 @@ pub(crate) fn run_isolated_onnx_with_executable(
     let bytes = std::fs::read(report.path())?;
     serde_json::from_slice(&bytes)
         .map_err(|error| ScanError::Other(format!("invalid ONNX worker report: {error}")))
+}
+
+#[cfg(not(windows))]
+struct TrustedWorkerHandle;
+
+#[cfg(not(windows))]
+impl TrustedWorkerHandle {
+    fn acquire(_path: &Path, _role: &str) -> Result<Self> {
+        Ok(Self)
+    }
+}
+
+#[cfg(windows)]
+struct TrustedWorkerHandle {
+    _file: std::fs::File,
+}
+
+#[cfg(windows)]
+fn has_exactly_one_hard_link(file: &std::fs::File) -> std::io::Result<bool> {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileInformation {
+        file_attributes: u32,
+        creation_time_low: u32,
+        creation_time_high: u32,
+        last_access_time_low: u32,
+        last_access_time_high: u32,
+        last_write_time_low: u32,
+        last_write_time_high: u32,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetFileInformationByHandle(file: *mut c_void, information: *mut FileInformation) -> i32;
+    }
+
+    let mut information = std::mem::MaybeUninit::<FileInformation>::uninit();
+    // SAFETY: `file` is an open Windows file handle and `information` points to writable
+    // storage with the exact layout required by GetFileInformationByHandle.
+    let success =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful GetFileInformationByHandle call initializes all fields.
+    Ok(unsafe { information.assume_init() }.number_of_links == 1)
+}
+
+#[cfg(windows)]
+impl TrustedWorkerHandle {
+    fn acquire(path: &Path, role: &str) -> Result<Self> {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|error| {
+                default_worker_unavailable(format!(
+                    "could not retain {role} {} without write/delete sharing: {error}",
+                    path.display()
+                ))
+            })?;
+        let metadata = file.metadata().map_err(|error| {
+            default_worker_unavailable(format!(
+                "could not inspect retained {role} {}: {error}",
+                path.display()
+            ))
+        })?;
+        if is_reparse_or_symlink(&metadata) || !metadata.is_file() || metadata.len() == 0 {
+            return Err(default_worker_unavailable(format!(
+                "retained {role} {} is empty, non-regular, or a reparse point",
+                path.display()
+            )));
+        }
+
+        if !has_exactly_one_hard_link(&file).map_err(|error| {
+            default_worker_unavailable(format!(
+                "could not inspect retained {role} {} link count: {error}",
+                path.display()
+            ))
+        })? {
+            return Err(default_worker_unavailable(format!(
+                "retained {role} {} must have exactly one hard link",
+                path.display()
+            )));
+        }
+        Ok(Self { _file: file })
+    }
 }
 
 fn validate_worker_executable(executable: &Path) -> Result<()> {
@@ -230,8 +317,10 @@ fn supervise_worker_with_memory_limit_and_sampler<F>(
 where
     F: FnMut(u32) -> std::io::Result<Option<u64>>,
 {
+    let working_directory = worker_working_directory(executable)?;
     let mut child = Command::new(executable)
         .args(args)
+        .current_dir(working_directory)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -284,6 +373,21 @@ where
             }
         }
     }
+}
+
+fn worker_working_directory(executable: &Path) -> Result<&Path> {
+    if !executable.is_absolute() {
+        return Err(ScanError::Invalid(format!(
+            "ONNX worker executable must be absolute: {}",
+            executable.display()
+        )));
+    }
+    executable.parent().ok_or_else(|| {
+        ScanError::Invalid(format!(
+            "ONNX worker executable has no parent directory: {}",
+            executable.display()
+        ))
+    })
 }
 
 /// A process can exit after `try_wait` but before a macOS RSS sample. Give that
@@ -524,19 +628,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_worker_resolution_never_self_respawns_an_unrelated_host() {
-        let fixture = TemporaryOutput::new("onnx-worker-resolution", "host").unwrap();
-        std::fs::write(fixture.path(), b"host").unwrap();
-        assert!(resolve_default_worker_from(fixture.path()).is_none());
+    fn default_worker_launch_is_fail_closed_even_with_a_worker_lookalike() {
+        let input = TemporaryOutput::new("onnx-default-worker", "png").unwrap();
+        let model = TemporaryOutput::new("onnx-default-worker", "onnx").unwrap();
+        std::fs::write(input.path(), b"input").unwrap();
+        std::fs::write(model.path(), b"model").unwrap();
 
-        let worker_name = if cfg!(windows) {
+        let lookalike = input.directory().join(if cfg!(windows) {
             "open-scanline.exe"
         } else {
             "open-scanline"
-        };
-        let worker = fixture.directory().join(worker_name);
+        });
+        std::fs::write(&lookalike, b"replaceable worker lookalike").unwrap();
+
+        let error = run_isolated_onnx(input.path(), model.path(), &OnnxInferenceOptions::default())
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("automatic worker discovery is disabled"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_worker_launch_never_executes_a_replaceable_sibling() {
+        let input = TemporaryOutput::new("onnx-default-worker", "png").unwrap();
+        let model = TemporaryOutput::new("onnx-default-worker", "onnx").unwrap();
+        std::fs::write(input.path(), b"input").unwrap();
+        std::fs::write(model.path(), b"model").unwrap();
+
+        let marker = input.directory().join("replacement-ran");
+        let replacement = input.directory().join("open-scanline");
+        std::fs::write(
+            &replacement,
+            format!("#!/bin/sh\ntouch {}\n", marker.display()),
+        )
+        .unwrap();
+        make_executable(&replacement);
+
+        assert!(
+            run_isolated_onnx(input.path(), model.path(), &OnnxInferenceOptions::default())
+                .is_err()
+        );
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn worker_cwd_is_its_package_directory_not_the_callers_cwd() {
+        let fixture = TemporaryOutput::new("onnx-worker-cwd", "host").unwrap();
+        let worker = fixture.directory().join("worker");
         std::fs::write(&worker, b"worker").unwrap();
-        assert_eq!(resolve_default_worker_from(fixture.path()), Some(worker));
+
+        assert_eq!(
+            worker_working_directory(&worker).unwrap(),
+            fixture.directory()
+        );
+        assert_ne!(worker_working_directory(&worker).unwrap(), Path::new("."));
+    }
+
+    #[cfg(unix)]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]
