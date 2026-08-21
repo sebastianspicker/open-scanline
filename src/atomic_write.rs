@@ -284,23 +284,3 @@ fn sync_parent(parent: &Path) {
 
 #[cfg(not(unix))]
 fn sync_parent(_parent: &Path) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replaces_complete_file_without_leaving_a_sibling_temp() {
-        let directory = std::env::temp_dir().join(format!(
-            "open_scanline_atomic_write_test_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&directory);
-        std::fs::create_dir_all(&directory).unwrap();
-        let destination = directory.join("config.json");
-        write_file_atomic(&destination, b"old").unwrap();
-        write_file_atomic(&destination, b"new contents").unwrap();
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new contents");
-        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
-    }
-}

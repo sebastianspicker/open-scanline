@@ -9,7 +9,6 @@ publish = false
 default-run = "open-scanline"
 include = [
     "/src/**/*.rs",
-    "/tests/**/*.rs",
     "/Cargo.toml",
     "/Cargo.lock",
     "/README.md",

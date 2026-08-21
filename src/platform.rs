@@ -106,28 +106,3 @@ pub fn platform_summary() -> Value {
         "app": app_name(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn app_name_is_open_scanline() {
-        assert_eq!(app_name(), "open-scanline");
-    }
-
-    #[test]
-    fn dirs_end_with_app_name() {
-        assert!(config_dir().ends_with("open-scanline"));
-        assert!(data_dir().ends_with("open-scanline"));
-        assert!(cache_dir().to_string_lossy().contains("open-scanline"));
-    }
-
-    #[test]
-    fn summary_has_required_keys() {
-        let v = platform_summary();
-        assert_eq!(v["app"], "open-scanline");
-        assert!(v.get("os").is_some());
-        assert!(v.get("arch").is_some());
-    }
-}

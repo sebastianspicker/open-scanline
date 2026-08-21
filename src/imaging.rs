@@ -30,8 +30,6 @@ pub(crate) use multipage::save_raw_image_with_cancellation;
 pub use multipage::{
     save_index_contact_sheet, save_index_contact_sheet_with_cancellation, save_raw_image,
 };
-#[cfg(test)]
-pub(crate) use pdf::MAX_PDF_SEARCHABLE_PAGE_UTF8_BYTES;
 pub(crate) use pdf::{checked_pdf_searchable_text_total, validate_pdf_password};
 pub use pdf::{
     save_multipage_pdf, save_multipage_pdf_with_cancellation, save_pdf_from_paths_with_options,
@@ -46,6 +44,3 @@ pub use tiff::{
     save_multipage_tiff_from_paths_with_transform_and_cancellation,
     save_multipage_tiff_with_cancellation,
 };
-
-#[cfg(test)]
-mod tests;

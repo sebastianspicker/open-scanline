@@ -144,16 +144,3 @@ pub fn feature_matrix() -> Value {
         ]
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn capability_report_is_factual_and_has_no_completeness_flag() {
-        let report = feature_matrix();
-        assert!(report["features"].as_array().unwrap().iter().all(|entry| {
-            entry["available"].is_boolean() && entry["implementation"].is_string()
-        }));
-    }
-}

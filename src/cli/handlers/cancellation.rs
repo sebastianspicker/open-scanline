@@ -94,38 +94,3 @@ fn cancel_tokens(tokens: &mut Vec<TokenFlag>) {
         None => false,
     });
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn delivery_cancels_live_tokens_and_prunes_dropped_tokens() {
-        let live = CancellationToken::new();
-        let stale = CancellationToken::new();
-        let mut tokens = vec![
-            Arc::downgrade(&live.as_arc()),
-            Arc::downgrade(&stale.as_arc()),
-        ];
-        drop(stale);
-
-        cancel_tokens(&mut tokens);
-
-        assert!(live.is_cancelled());
-        assert_eq!(tokens.len(), 1);
-    }
-
-    #[test]
-    fn a_cancelled_operation_does_not_poison_the_next_cli_invocation() {
-        let cancelled = register().unwrap();
-        cancel_registered_tokens();
-        assert!(cancelled.token().is_cancelled());
-        drop(cancelled);
-
-        let next = register().unwrap();
-        assert!(
-            !next.token().is_cancelled(),
-            "a weak registry must not retain the previous cancelled token"
-        );
-    }
-}

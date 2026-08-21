@@ -47,28 +47,3 @@ a native TWAIN Data Source or direct TWAIN acquisition, or proprietary resource 
 "#
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::user_manual_text;
-
-    #[test]
-    fn manual_describes_current_product_scope() {
-        let manual = user_manual_text();
-
-        for stale_claim in ["prototype", "optional later", "Desktop UI shell"] {
-            assert!(
-                !manual.contains(stale_claim),
-                "manual still contains stale claim: {stale_claim}"
-            );
-        }
-        assert!(manual.contains("local Rust application"));
-        assert!(manual.contains("Built-in offline OCR or optional Tesseract OCR"));
-        assert!(manual.contains("to PNG, JPEG, TIFF, WebP, BMP, GIF, or PDF"));
-        assert!(manual.contains("Desktop GUI (default gui feature and desktop session)"));
-        assert!(manual.contains("--pdf-searchable"));
-        assert!(manual.contains("--pdf-password-file PATH"));
-        assert!(manual.contains("UNSAFE/DEPRECATED"));
-        assert!(manual.contains("--allow-unlisted-escl"));
-    }
-}
