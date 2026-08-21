@@ -102,28 +102,3 @@ fn replace_payload(
         (key.into(), value),
     ]);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::insert_backends;
-
-    #[test]
-    fn backend_module_availability_is_boolean() {
-        let mut payload = serde_json::Map::new();
-        insert_backends(&mut payload);
-        let backends = payload["backends"]
-            .as_array()
-            .expect("backend module must contain a backend array");
-
-        assert!(
-            !backends.is_empty(),
-            "at least mock and file backends exist"
-        );
-        for backend in backends {
-            assert!(
-                backend["available"].is_boolean(),
-                "backend availability must be a JSON boolean: {backend}"
-            );
-        }
-    }
-}

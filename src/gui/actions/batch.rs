@@ -3,11 +3,10 @@ use super::super::state::GuiState;
 use crate::batch::{run_batch_scan, BatchScanArgs};
 use crate::config::validate_output_name;
 use crate::core::Result;
-#[cfg(any(test, not(feature = "gui")))]
-use crate::ocr::ocr_file;
 use std::path::PathBuf;
 
 /// Immutable OCR request assembled on the UI thread before a worker starts.
+#[cfg(feature = "gui")]
 #[derive(Debug, Clone)]
 pub(in crate::gui) struct OcrAction {
     pub(in crate::gui) src: PathBuf,
@@ -41,6 +40,7 @@ impl GuiState {
     }
 
     /// Validate and snapshot an OCR request without performing any OCR.
+    #[cfg(feature = "gui")]
     pub(in super::super) fn prepare_ocr(&mut self) -> Option<OcrAction> {
         let Some(src) = self.last_image.clone() else {
             self.set_open_error();
@@ -52,26 +52,6 @@ impl GuiState {
             language: language.into(),
             offline,
         })
-    }
-
-    /// Synchronous test/non-GUI compatibility path. The desktop UI always
-    /// uses `prepare_ocr` and runs this work through `OpenScanlineApp`.
-    #[cfg(any(test, not(feature = "gui")))]
-    pub(in super::super) fn do_ocr(&mut self) {
-        let Some(action) = self.prepare_ocr() else {
-            return;
-        };
-        match ocr_file(&action.src, &action.language, action.offline) {
-            Ok(result) => {
-                self.status = format!(
-                    "{} ({}): {}",
-                    self.translator.t("ocr"),
-                    result.engine,
-                    result.text
-                )
-            }
-            Err(error) => self.set_error(error),
-        }
     }
 
     pub(in super::super) fn batch_args(
