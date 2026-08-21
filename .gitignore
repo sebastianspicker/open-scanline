@@ -95,3 +95,16 @@ node_modules/
 *.local.sqlite
 *.local.sqlite3
 /.mcp.json
+
+# Generated test and coverage output (local only)
+/coverage/
+/htmlcov/
+/.coverage
+/.coverage.*
+/.pytest_cache/
+/test-results/
+/playwright-report/
+/blob-report/
+/coverage.xml
+/junit.xml
+/junit-*.xml

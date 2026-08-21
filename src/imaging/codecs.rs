@@ -268,16 +268,6 @@ fn save_jpeg_xl_with_cancellation(
     )
 }
 
-#[cfg(test)]
-pub(super) fn save_jpeg_xl_with_program(
-    path: &Path,
-    image: &ImageBuffer,
-    quality: u8,
-    program: &Path,
-) -> Result<PathBuf> {
-    save_jpeg_xl_with_program_and_cancellation(path, image, quality, program, None)
-}
-
 pub(super) fn save_jpeg_xl_with_program_and_cancellation(
     path: &Path,
     image: &ImageBuffer,

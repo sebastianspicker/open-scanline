@@ -5,7 +5,7 @@ use super::super::open_image_file;
 use super::super::save_image_to_with_export_options;
 use super::super::state::GuiState;
 #[cfg(any(test, not(feature = "gui")))]
-use crate::export::save_final_multipage_from_paths;
+use crate::export::save_final_multipage_from_paths_with_cancellation;
 #[cfg(any(test, not(feature = "gui")))]
 use crate::process::process_image_file_with_export_options;
 use crate::process::ProcessOptions;
@@ -267,11 +267,12 @@ impl GuiState {
     #[cfg(any(test, not(feature = "gui")))]
     fn run_save_action(&mut self, action: SaveAction) {
         let result = match action.candidate.as_ref() {
-            Some(candidate) => save_final_multipage_from_paths(
+            Some(candidate) => save_final_multipage_from_paths_with_cancellation(
                 &action.dest,
                 &candidate.sources,
                 action.dpi,
                 &action.export,
+                None,
             ),
             None => save_image_to_with_export_options(
                 &action.src,

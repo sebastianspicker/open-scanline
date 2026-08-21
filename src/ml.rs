@@ -9,7 +9,7 @@ mod isolation;
 #[path = "ml/onnx.rs"]
 mod onnx;
 
-pub(crate) use isolation::{run_isolated_onnx, run_onnx_worker};
+pub(crate) use isolation::{run_isolated_onnx_with_executable, run_onnx_worker};
 pub use onnx::{
     run_user_onnx, run_user_onnx_with_options, run_user_onnx_with_worker, OnnxInferenceOptions,
     OnnxInputLayout, OnnxNormalization, OnnxOutputSummary, OnnxReport,

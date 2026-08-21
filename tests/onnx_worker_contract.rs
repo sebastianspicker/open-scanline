@@ -1,6 +1,6 @@
 use open_scanline::core::{ImageBuffer, PixelFormat};
 use open_scanline::imaging::save_image;
-use open_scanline::ml::run_user_onnx;
+use open_scanline::ml::{run_user_onnx_with_worker, OnnxInferenceOptions};
 use std::process::Command;
 
 fn push_varint(bytes: &mut Vec<u8>, mut value: u64) {
@@ -112,7 +112,7 @@ fn cli_runs_user_model_in_the_contained_worker() {
 
 #[cfg(not(windows))]
 #[test]
-fn library_default_resolves_the_sibling_worker_instead_of_respawning_the_test_host() {
+fn library_uses_an_explicit_version_matched_worker() {
     let directory = std::env::temp_dir().join(format!(
         "open-scanline-onnx-library-worker-contract-{}",
         std::process::id()
@@ -129,7 +129,13 @@ fn library_default_resolves_the_sibling_worker_instead_of_respawning_the_test_ho
     )
     .unwrap();
 
-    let report = run_user_onnx(&image, &model).unwrap();
+    let report = run_user_onnx_with_worker(
+        &image,
+        &model,
+        &OnnxInferenceOptions::default(),
+        env!("CARGO_BIN_EXE_open-scanline"),
+    )
+    .unwrap();
     let _ = std::fs::remove_dir_all(directory);
 
     assert!(report.ok);

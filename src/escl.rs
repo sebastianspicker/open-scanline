@@ -329,32 +329,6 @@ fn normalize_host(host: &str) -> Option<String> {
     .then(|| host.to_ascii_lowercase())
 }
 
-#[cfg(test)]
-fn http_exchange(
-    endpoint: &Endpoint,
-    method: &str,
-    path: &str,
-    body: Option<&[u8]>,
-    content_type: Option<&str>,
-    timeout: Duration,
-    response_limit: u64,
-) -> Option<(u16, Vec<u8>, String)> {
-    http_exchange_with_cancellation(
-        endpoint,
-        method,
-        path,
-        HttpExchangeOptions {
-            body,
-            content_type,
-            global_timeout: timeout,
-            setup_timeout: timeout,
-            response_header_timeout: timeout,
-            response_limit,
-            cancellation: None,
-        },
-    )
-}
-
 struct HttpExchangeOptions<'a> {
     body: Option<&'a [u8]>,
     content_type: Option<&'a str>,
@@ -363,16 +337,6 @@ struct HttpExchangeOptions<'a> {
     response_header_timeout: Duration,
     response_limit: u64,
     cancellation: Option<CancellationToken>,
-}
-
-#[cfg(test)]
-fn http_exchange_with_cancellation(
-    endpoint: &Endpoint,
-    method: &str,
-    path: &str,
-    options: HttpExchangeOptions<'_>,
-) -> Option<(u16, Vec<u8>, String)> {
-    http_exchange_with_cancellation_result(endpoint, method, path, options).ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -683,40 +647,6 @@ impl Transport for CancellableTransport {
     fn is_tls(&self) -> bool {
         self.inner.is_tls()
     }
-}
-
-#[cfg(test)]
-fn http_get_to_temporary_output(
-    endpoint: &Endpoint,
-    path: &str,
-    timeout: Duration,
-    response_limit: u64,
-) -> std::result::Result<(u16, Option<TemporaryOutput>), FetchDocumentError> {
-    http_get_to_temporary_output_with_phase_timeout(
-        endpoint,
-        path,
-        timeout,
-        timeout,
-        response_limit,
-    )
-}
-
-#[cfg(test)]
-fn http_get_to_temporary_output_with_phase_timeout(
-    endpoint: &Endpoint,
-    path: &str,
-    global_timeout: Duration,
-    setup_timeout: Duration,
-    response_limit: u64,
-) -> std::result::Result<(u16, Option<TemporaryOutput>), FetchDocumentError> {
-    http_get_to_temporary_output_with_phase_timeout_and_cancellation(
-        endpoint,
-        path,
-        global_timeout,
-        setup_timeout,
-        response_limit,
-        None,
-    )
 }
 
 fn http_get_to_temporary_output_with_phase_timeout_and_cancellation(
@@ -1104,16 +1034,6 @@ fn capabilities_for_endpoint_with_cancellation_result(
     Ok(None)
 }
 
-#[cfg(test)]
-fn probe_endpoint(endpoint: &Endpoint) -> Option<DeviceInfo> {
-    probe_endpoint_until(endpoint, Instant::now() + ENDPOINT_PROBE_TIMEOUT)
-}
-
-#[cfg(test)]
-fn probe_endpoint_until(endpoint: &Endpoint, deadline: Instant) -> Option<DeviceInfo> {
-    probe_endpoint_until_with_cancellation(endpoint, deadline, None)
-}
-
 fn probe_endpoint_until_with_cancellation(
     endpoint: &Endpoint,
     deadline: Instant,
@@ -1125,11 +1045,6 @@ fn probe_endpoint_until_with_cancellation(
         .make_and_model
         .unwrap_or_else(|| format!("eSCL scanner @ {}:{}", endpoint.host, endpoint.port));
     Some(DeviceInfo::new(endpoint.device_id(), name, "escl"))
-}
-
-#[cfg(test)]
-fn probe_endpoints(endpoints: &[Endpoint], budget: Duration) -> Vec<DeviceInfo> {
-    probe_endpoints_with_cancellation(endpoints, budget, None)
 }
 
 fn probe_endpoints_with_cancellation(

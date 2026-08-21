@@ -12,7 +12,7 @@ use crate::manufacturers::{
     format_manufacturers_text, list_manufacturers, manufacturer_support_summary,
     resolve_manufacturer,
 };
-use crate::ml::{run_isolated_onnx, run_onnx_worker, OnnxInferenceOptions};
+use crate::ml::{run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions};
 use crate::ocr::ocr_file_with_cancellation;
 use crate::packaging::{build_portable, PackagingOptions};
 use crate::plugin::run_plugin_mode_with_token;
@@ -200,7 +200,14 @@ pub(super) fn onnx(
         layout: layout.as_ml(),
         normalization: normalization.as_ml(),
     };
-    match run_isolated_onnx(&inp, &model, &options) {
+    let worker = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("onnx error: could not resolve the Open Scanline worker: {error}");
+            return 1;
+        }
+    };
+    match run_isolated_onnx_with_executable(&inp, &model, &options, &worker) {
         Ok(report) => {
             println!(
                 "{}",

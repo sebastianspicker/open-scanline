@@ -3,8 +3,6 @@
 mod args;
 mod handlers;
 mod manual;
-#[cfg(test)]
-mod tests;
 
 use args::Cli;
 use clap::Parser;

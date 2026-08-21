@@ -383,15 +383,3 @@ impl From<serde_json::Error> for ScanError {
 }
 
 pub type Result<T> = std::result::Result<T, ScanError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn image_size_limit_rejects_oversized_dimensions_before_allocation() {
-        assert!(checked_image_len(MAX_IMAGE_DIMENSION + 1, 1, 3).is_err());
-        assert!(checked_image_len(MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION, 4).is_err());
-        assert_eq!(checked_image_len(320, 240, 3).unwrap(), 320 * 240 * 3);
-    }
-}

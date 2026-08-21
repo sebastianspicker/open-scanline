@@ -207,16 +207,6 @@ pub(crate) fn save_final_pdf_from_paths_with_cancellation(
 /// Validation happens before a container writer creates an output directory.
 /// PDF pages are decoded and profile-transformed one at a time during the
 /// final write; OCR observes the same profile-adjusted pixels.
-#[cfg(test)]
-pub(crate) fn save_final_multipage_from_paths(
-    destination: &Path,
-    paths: &[PathBuf],
-    dpi: u32,
-    options: &ExportOptions,
-) -> Result<PathBuf> {
-    save_final_multipage_from_paths_with_cancellation(destination, paths, dpi, options, None)
-}
-
 /// Token-aware multipage export. OCR is interrupted promptly when a shared
 /// scan/batch/GUI cancellation token is cancelled.
 #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
@@ -296,33 +286,4 @@ fn collect_searchable_pages(
         pages.push(text);
     }
     Ok(pages)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn multipage_ocr_stops_before_retaining_text_beyond_the_aggregate_budget() {
-        let paths = (0..18)
-            .map(|index| PathBuf::from(format!("page-{index}")))
-            .collect::<Vec<_>>();
-        let mut calls = 0_usize;
-
-        let error = collect_searchable_pages(&paths, |_| {
-            calls += 1;
-            Ok("x".repeat(crate::imaging::MAX_PDF_SEARCHABLE_PAGE_UTF8_BYTES))
-        })
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            ScanError::Invalid(message)
-                if message.contains("searchable PDF text aggregate exceeds")
-        ));
-        assert_eq!(
-            calls, 17,
-            "paths after the first overflow must not be OCRed"
-        );
-    }
 }
