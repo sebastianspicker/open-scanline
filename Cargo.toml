@@ -49,7 +49,7 @@ eframe = { version = "0.32.3", optional = true, default-features = false, featur
 mdns-sd = "0.13"
 ureq = { version = "3.1", default-features = false, features = ["rustls"] }
 quick-xml = "0.41"
-egui = { version = "0.32.3", optional = true }
+egui = { version = "0.36.1", optional = true }
 lopdf = "0.44"
 stringprep = "0.1"
 rfd = { version = "0.15", optional = true }
