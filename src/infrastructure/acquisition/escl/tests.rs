@@ -49,6 +49,14 @@ fn wait_for_connection_close(stream: &mut TcpStream, timeout: Duration) {
             Err(error)
                 if matches!(
                     error.kind(),
+                    std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                ) =>
+            {
+                return;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
                 ) && Instant::now() < deadline => {}
             Err(error)
