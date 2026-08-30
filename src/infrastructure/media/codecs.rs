@@ -447,6 +447,8 @@ pub(super) fn create_output_temp(destination: &Path) -> Result<OutputTemp> {
                     let _ = std::fs::remove_file(&path);
                     return Err(error.into());
                 }
+                #[cfg(not(unix))]
+                drop(file);
                 return Ok(OutputTemp {
                     path,
                     destination: destination.to_path_buf(),

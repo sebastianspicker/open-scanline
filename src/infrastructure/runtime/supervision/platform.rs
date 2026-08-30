@@ -149,7 +149,7 @@ impl Drop for WindowsJob {
 }
 
 #[cfg(windows)]
-const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
 #[cfg(windows)]
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
 
@@ -210,7 +210,7 @@ unsafe extern "system" {
     ) -> *mut std::ffi::c_void;
     fn SetInformationJobObject(
         job: *mut std::ffi::c_void,
-        information_class: u32,
+        information_class: i32,
         information: *const std::ffi::c_void,
         information_length: u32,
     ) -> i32;
@@ -594,7 +594,7 @@ fn quote_windows_command_line_argument(argument: &str) -> String {
 }
 
 #[cfg(windows)]
-struct PlatformChild {
+pub(super) struct PlatformChild {
     process: std::os::windows::io::OwnedHandle,
     stdout: Option<std::fs::File>,
     stderr: Option<std::fs::File>,
@@ -674,12 +674,8 @@ impl SupervisedChild for PlatformChild {
         if unsafe { WaitForSingleObject(self.process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
             return Err(std::io::Error::last_os_error());
         }
-        self.poll()?.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "process wait completed without an exit status",
-            )
-        })
+        self.poll()?
+            .ok_or_else(|| std::io::Error::other("process wait completed without an exit status"))
     }
 
     fn kill(&mut self) -> std::io::Result<()> {

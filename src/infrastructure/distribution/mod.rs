@@ -168,15 +168,16 @@ fn files_have_same_identity(binary: &Path, out: &Path) -> std::io::Result<bool> 
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn GetFileInformationByHandle(file: *mut c_void, information: *mut FileInformation) -> i32;
+        fn GetFileInformationByHandle(file: *mut c_void, information: *mut c_void) -> i32;
     }
 
     fn identity(file: &File) -> std::io::Result<(u32, u32, u32)> {
         let mut information = std::mem::MaybeUninit::<FileInformation>::uninit();
         // SAFETY: `file` is an open Windows file handle and `information` points to writable
         // storage with the exact layout required by GetFileInformationByHandle.
-        let success =
-            unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+        let success = unsafe {
+            GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr().cast())
+        };
         if success == 0 {
             return Err(std::io::Error::last_os_error());
         }

@@ -154,14 +154,15 @@ fn has_exactly_one_hard_link(file: &std::fs::File) -> std::io::Result<bool> {
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn GetFileInformationByHandle(file: *mut c_void, information: *mut FileInformation) -> i32;
+        fn GetFileInformationByHandle(file: *mut c_void, information: *mut c_void) -> i32;
     }
 
     let mut information = std::mem::MaybeUninit::<FileInformation>::uninit();
     // SAFETY: `file` is an open Windows file handle and `information` points to writable
     // storage with the exact layout required by GetFileInformationByHandle.
-    let success =
-        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    let success = unsafe {
+        GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr().cast())
+    };
     if success == 0 {
         return Err(std::io::Error::last_os_error());
     }
