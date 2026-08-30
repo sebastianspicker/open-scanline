@@ -1,6 +1,9 @@
 # Backend and tool requirements
 
-Open Scanline always includes mock and file-image sources. Hardware access depends on the operating system, installed software, device permissions, and network conditions. Check the current machine with `open-scanline devices` and `open-scanline info --module all`.
+Open Scanline always includes mock and file-image sources. Hardware access
+depends on the operating system, installed software, device permissions, and
+network conditions. Check the current machine with `open-scanline devices` and
+`open-scanline info --module all`.
 
 ## Scanner sources
 
@@ -52,4 +55,6 @@ TWAIN is not a scanner backend in Open Scanline. The application ships no native
 
 The desktop GUI requires the default `gui` Cargo feature and a usable desktop session. Build the core without it with `cargo build --no-default-features`.
 
-Automated tests use simulation, injected command runners, and local HTTP/TLS fixtures. They do not prove physical WIA, SANE, feeder, film-unit, or vendor eSCL compatibility.
+Automated tests use simulation, injected command runners, and local HTTP/TLS
+servers. They do not prove physical WIA, SANE, feeder, film-unit, or vendor
+eSCL compatibility.

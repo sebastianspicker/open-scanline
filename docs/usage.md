@@ -1,6 +1,9 @@
 # Using Open Scanline
 
-Run `open-scanline --help` to see the available commands. The examples below use `cargo run --` while developing; replace that prefix with the installed executable when appropriate.
+Run `open-scanline --help` to see the available commands. The examples below use
+`cargo run --` while developing; replace that prefix with the installed
+executable when appropriate. The default feature profile includes the GUI; use
+`--no-default-features` for a headless build or run.
 
 ## Acquire and process an image
 
@@ -72,12 +75,18 @@ For `scan`, `process`, and `batch`, omitted `--ocr-engine` and `--ocr-lang` valu
 
 The searchable layer uses 1% text opacity because commonly deployed PDF readers omit fully invisible text from extraction. It is normally imperceptible over the scanned page but can be faintly visible over very light content at high magnification.
 
-PDF passwords are runtime-only and are never written to the JSON configuration. Prefer `--pdf-password-file -` with standard input, as above, or a private file:
+PDF passwords are runtime-only and are never written to the JSON configuration.
+Prefer `--pdf-password-file -` with standard input, as above. If a file is
+required, create it outside the repository with permissions limited to the
+current user, then remove it immediately after use:
 
 ```bash
-umask 077
-printf '%s\n' "$PDF_PASSWORD" > .pdf-password
-cargo run -- process --in scan.png --out private.pdf --pdf-password-file .pdf-password
+password_file=$(mktemp)
+trap 'rm -f "$password_file"' EXIT
+chmod 600 "$password_file"
+printf '%s\n' "$PDF_PASSWORD" > "$password_file"
+cargo run -- process --in scan.png --out private.pdf \
+  --pdf-password-file "$password_file"
 ```
 
 Password input is limited to 4 KiB, must be nonempty valid UTF-8 without NUL bytes, and removes one trailing line ending. PDF encryption applies the PDF 2.0 SASLprep normalization and accepts at most 127 resulting UTF-8 bytes; longer or invalid normalized passwords are rejected rather than truncated. `--pdf-password` remains only for compatibility and is unsafe/deprecated: it requires `--allow-insecure-password-argv`, because command-line values can be retained in shell history or exposed to local process inspection. Neither password source is logged.
@@ -111,8 +120,9 @@ This boundary contains crashes, timeouts, and excessive resource use; it is not 
 Build the application first, then package the existing executable. The command checks the source metadata and verifies the archived copy by size and SHA-256 hash without executing the supplied program:
 
 ```bash
-cargo build --release
-cargo run -- package --binary target/release/open-scanline --out open-scanline-portable.zip
+cargo build --release --no-default-features --locked
+cargo run --release --no-default-features --locked -- package \
+  --binary target/release/open-scanline --out open-scanline-portable.zip
 ```
 
 On Windows, use `target/release/open-scanline.exe` for `--binary`.

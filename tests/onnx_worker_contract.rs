@@ -1,5 +1,6 @@
 use open_scanline::core::{ImageBuffer, PixelFormat};
 use open_scanline::imaging::save_image;
+#[cfg(not(windows))]
 use open_scanline::ml::{run_user_onnx_with_worker, OnnxInferenceOptions};
 use std::process::Command;
 
@@ -61,12 +62,14 @@ fn identity_onnx() -> Vec<u8> {
 
 #[test]
 fn cli_runs_user_model_in_the_contained_worker() {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).unwrap();
     let directory = std::env::temp_dir().join(format!(
-        "open-scanline-onnx-worker-contract-{}",
-        std::process::id()
+        "open-scanline-onnx-worker-contract-{}-{}",
+        std::process::id(),
+        u128::from_le_bytes(nonce)
     ));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::create_dir(&directory).unwrap();
     let input = directory.join("input.png");
     let model = directory.join("identity.onnx");
     save_image(
@@ -84,7 +87,19 @@ fn cli_runs_user_model_in_the_contained_worker() {
     .unwrap();
     std::fs::write(&model, identity_onnx()).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_open-scanline"))
+    #[cfg(windows)]
+    let executable = {
+        // Cargo may hard-link Windows integration-test binaries into target/debug.
+        // Copy the same bytes so this installed-artifact contract still exercises the
+        // production worker's fail-closed single-link policy.
+        let executable = directory.join("open-scanline.exe");
+        assert!(std::fs::copy(env!("CARGO_BIN_EXE_open-scanline"), &executable).unwrap() > 0);
+        executable
+    };
+    #[cfg(not(windows))]
+    let executable = std::path::PathBuf::from(env!("CARGO_BIN_EXE_open-scanline"));
+
+    let output = Command::new(executable)
         .args([
             "onnx",
             "--in",
