@@ -11,37 +11,42 @@ use clap::Parser;
 pub fn run(argv: &[String]) -> i32 {
     #[cfg(windows)]
     {
-        return run_with_windows_stack(argv);
+        return match parse_with_windows_stack(argv) {
+            Ok(result) => dispatch_parse_result(result),
+            Err(error) => {
+                eprintln!("{error}");
+                1
+            }
+        };
     }
     #[cfg(not(windows))]
-    parse_and_dispatch(argv)
+    dispatch_parse_result(parse(argv))
 }
 
 #[cfg(windows)]
-fn run_with_windows_stack(argv: &[String]) -> i32 {
+fn parse_with_windows_stack(argv: &[String]) -> Result<Result<Cli, clap::Error>, String> {
     const CLI_STACK_SIZE: usize = 8 * 1024 * 1024;
 
     let argv = argv.to_vec();
     let worker = std::thread::Builder::new()
         .name("open-scanline-cli".into())
         .stack_size(CLI_STACK_SIZE)
-        .spawn(move || parse_and_dispatch(&argv));
-    match worker {
-        Ok(worker) => worker.join().unwrap_or_else(|_| {
-            eprintln!("CLI worker thread panicked");
-            1
-        }),
-        Err(error) => {
-            eprintln!("could not start CLI worker thread: {error}");
-            1
-        }
+        .spawn(move || parse(&argv))
+        .map_err(|error| format!("could not start CLI parser thread: {error}"))?;
+    match worker.join() {
+        Ok(result) => Ok(result),
+        Err(payload) => std::panic::resume_unwind(payload),
     }
 }
 
-fn parse_and_dispatch(argv: &[String]) -> i32 {
+fn parse(argv: &[String]) -> Result<Cli, clap::Error> {
     let mut full = vec!["open-scanline".to_string()];
     full.extend(argv.iter().cloned());
-    match Cli::try_parse_from(&full) {
+    Cli::try_parse_from(&full)
+}
+
+fn dispatch_parse_result(result: Result<Cli, clap::Error>) -> i32 {
+    match result {
         Ok(cli) => handlers::dispatch(cli),
         Err(e) => {
             // clap handles --version / --help via print
