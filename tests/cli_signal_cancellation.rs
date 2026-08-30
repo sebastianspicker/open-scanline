@@ -191,7 +191,10 @@ fn path_with_tools(tools: &Path) -> std::ffi::OsString {
 }
 
 fn wait_for_pid(path: &Path) -> libc::pid_t {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Loaded CI runners can take several seconds to reach scanner discovery
+    // after the CLI process starts. The PID file is the readiness signal, so
+    // keep polling it without weakening the later cancellation deadlines.
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Ok(pid) = fs::read_to_string(path).and_then(|pid| {
             pid.trim()
