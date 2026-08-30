@@ -1,27 +1,91 @@
 # Architecture
 
-Open Scanline is an application with one Rust library used by its command-line, desktop, and headless host entry points. The library is internal application code rather than a compatibility promise for third-party crates.
+Open Scanline is a native Rust application. Its library serves the command-line
+program, the optional desktop GUI, and the headless plugin and host entry
+points. Existing top-level modules remain as compatibility facades; the
+implementation lives in the layers below.
 
-## Shared workflow
+## Layers
 
-The CLI and GUI construct typed scan, processing, batch, export, ONNX, and packaging options. A single scan returns one in-memory image buffer. The processing pipeline applies geometry, color, cleanup, film, automatic orientation, and automatic crop operations before one final encode. A validated scanner profile can then correct the final pixels, and searchable PDF OCR runs on those same pixels.
+`src/domain/` contains the typed scan request, image buffer and geometry,
+processing preferences, calibration, and pure processing operations. It may
+depend on its own modules and shared error values, never on adapters, entry
+points, or compatibility modules.
 
-Batch acquisition is a streaming device-session contract. One open hardware session or protocol job emits bounded logical image sides to the pipeline and page saver; decoded acquisition buffers are not accumulated. SANE uses one `scanimage --batch` process, WIA one PowerShell/COM connection, and eSCL one created scan job with repeated `NextDocument` requests. After acquisition, optional PDF, TIFF, and contact-sheet outputs consume the ordered page paths. PDF assembly releases each decoded source page before loading the next, while the document retains compressed streams.
+`src/workflows/` implements the capture, batch, processing, publication, and
+settings use cases. Its narrow `AcquisitionPort` and `MediaPort` describe only
+the capabilities capture and publication workflows need. A workflow expresses
+the operation and its cancellation, validation, ordering, and publication
+rules; it does not choose a scanner, codec, configuration format, or UI.
 
-Mock and file sources are built in and provide deterministic repeated-page simulation, not physical ADF semantics. WIA, SANE, and eSCL implement the same device-session interface and retain one native session or protocol job for feeder batches. WIA and SANE command execution is isolated behind adapters so argument construction, parsing, cancellation, timeouts, cleanup, and decoding can be tested without physical hardware. Scanner-generated artifacts and Tesseract inputs use atomically reserved private temporary directories with drop cleanup. eSCL handles explicit hosts, mDNS, and bounded local subnet candidates through a rustls-backed HTTP client with response-size and discovery-deadline limits.
+`src/infrastructure/` supplies those concrete capabilities: mock/file/SANE/WIA
+and eSCL acquisition, JSON settings, media codecs/PDF/OCR/ICC, ONNX worker
+isolation, process supervision, atomic publication, and portable archives.
 
-External scanner commands run in a contained process tree: a dedicated Unix process group or a Windows kill-on-close Job Object. Cancellation, timeout, and inherited-pipe failures terminate that tree before the parent returns. A deliberately daemonized Unix descendant that creates a new session can escape process-group containment; scanner tools are therefore still trusted local executables.
+`src/inbound/` adapts external requests into workflows. It owns CLI parsing and
+output, the optional GUI, diagnostics, plugin mode, and host integration.
+`src/composition.rs` is the native composition root: it wires
+`NativeAcquisition` and `NativeMedia` for workflow entry points. Device catalog
+and maintenance operations, and JSON settings persistence, are direct inbound
+adapter concerns rather than workflow ports.
 
-## OCR, models, and documents
+The dependency direction is:
 
-OCR has two explicitly selected engines. The standalone `ocr` command uses Tesseract unless `--offline` is supplied. Searchable PDF export defaults to the built-in offline recognizer and uses Tesseract only when explicitly selected. Missing executables and failed external runs are reported rather than silently changing engines.
+```text
+inbound -> composition -> workflows <- infrastructure
+                         |
+                         v
+                       domain
+```
 
-User-supplied ONNX models run locally through `tract` in a supervised child process. The parent uses bounded private-file IPC, a versioned worker protocol, a wall-time deadline, and kill-and-reap supervision; the worker applies static graph/tensor limits, single-thread environment controls, and hard memory limits on Linux and Windows. On macOS the parent samples resident memory and kills workers above the same 2 GiB ceiling because ordinary child-process address-space ceilings are unavailable; a brief allocation spike can occur between samples. If that sampling cannot be performed, the parent kills a still-running worker and fails closed. This is process and resource containment, not a filesystem or syscall sandbox. The input adapter supports static image sizes, RGB or single-channel tensors, NCHW and NHWC layouts, an optional input name, and typed tensor summaries.
+Infrastructure implements workflow ports. Domain has no outward dependency;
+workflows do not import infrastructure or inbound modules.
 
-PDF output is built as a structured document with `lopdf`. Pages contain encoded image objects and can include Unicode-searchable text, metadata, and PDF 2.0 AES-256 password encryption. Image, PDF, TIFF, config, scanner-profile, and portable-package publishers use same-directory temporary files and validate where appropriate before atomic publication. JPEG XL encoding is delegated to an installed `cjxl` executable so it remains an explicit optional tool.
+## State and data flow
 
-## State and platform boundaries
+An inbound adapter constructs typed input and invokes a workflow with the
+needed port. Capture opens one device session, produces one image or a bounded
+stream of logical sides, applies domain processing, then publishes through the
+media port. Batch keeps page paths in order and assembles optional documents
+after page publication, rather than retaining every decoded page. JSON settings
+are loaded and saved by the inbound edge through the settings adapter;
+configuration and language are application-instance state, while translation
+catalogs are immutable data.
 
-Configuration and selected language belong to an application instance. Translation catalogs are immutable data, so one caller cannot change another caller's language through process-global state.
+Scanner artifacts, OCR input, configuration, profiles, and package outputs are
+validated before same-directory atomic publication. Cancellation is carried
+through the operation and into command-backed adapters.
 
-Native open and save dialogs are part of the optional GUI feature. Hardware and external-tool availability is discovered at runtime and reported factually. TWAIN-related code launches the headless host integration path; it does not implement a native TWAIN Data Source or acquire through TWAIN itself.
+## External contracts
+
+`DeviceSession` is the acquisition-session contract. Mock and file backends
+are deterministic hardware-free sources; physical backends supply the same
+contract. Batch limits are logical image sides, from 1 through 1,000. A
+single-image duplex request is rejected rather than losing a side.
+
+SANE needs `scanimage`; WIA needs Windows PowerShell/COM and compatible
+hardware; eSCL uses bounded HTTP(S) discovery or an explicit endpoint. An
+unlisted eSCL endpoint requires the strict `--allow-unlisted-escl` opt-in.
+TWAIN support starts a separate host integration: it is not a native TWAIN Data
+Source or an acquisition backend.
+
+OCR and JPEG XL rely on explicitly selected optional executables. User ONNX
+models run locally in a supervised worker with resource limits, not in a
+filesystem or syscall sandbox. A working build or test suite cannot prove a
+physical scanner, driver, feeder, firmware, desktop session, or optional tool
+on a target machine.
+
+## Compatibility and placement
+
+The top-level `core`, `device`, `scan`, `batch`, `process`, `export`,
+`imaging`, `config`, `cli`, `gui`, and backend-named modules preserve established
+library paths. Keep those facades thin; `tests/public_api_contract.rs` protects
+the names and signatures consumed outside the new layer tree. The domain,
+workflow, infrastructure, inbound, and composition modules are private so
+adapter implementations do not become accidental public API.
+
+Put new pure value/processing logic in domain, use-case coordination and port
+traits in workflows, concrete I/O and platform behavior in infrastructure, and
+CLI/GUI/plugin translation in inbound. Add production wiring only in
+composition. `scripts/check_architecture.sh` enforces these mechanical
+boundaries and rejects path-module wiring.
