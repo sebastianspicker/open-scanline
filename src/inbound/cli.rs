@@ -11,13 +11,13 @@ use clap::Parser;
 pub fn run(argv: &[String]) -> i32 {
     #[cfg(windows)]
     {
-        return match parse_with_windows_stack(argv) {
+        match parse_with_windows_stack(argv) {
             Ok(result) => dispatch_parse_result(result),
             Err(error) => {
                 eprintln!("{error}");
                 1
             }
-        };
+        }
     }
     #[cfg(not(windows))]
     dispatch_parse_result(parse(argv))
