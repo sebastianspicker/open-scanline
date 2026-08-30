@@ -14,14 +14,20 @@ The application can run without scanner hardware by using its built-in mock sour
 
 ## Build and test
 
-Install Rust 1.91 or newer, then run:
+The repository pins Rust 1.91.0. For the complete local gate, run:
 
 ```bash
-cargo build --release
-cargo test --all-features
+sh scripts/check_architecture.sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --no-default-features --locked -- -D warnings
+cargo test --all-features --locked
+cargo test --no-default-features --locked
+cargo build --release --all-features --locked
+cargo build --release --no-default-features --locked
 ```
 
-The release executable is `target/release/open-scanline` on Linux and macOS, or `target/release/open-scanline.exe` on Windows. To build without the GUI, use `cargo build --no-default-features`.
+The release executable is `target/release/open-scanline` on Linux and macOS, or `target/release/open-scanline.exe` on Windows. The headless profile is `--no-default-features`.
 
 ## Try it
 
@@ -36,19 +42,6 @@ cargo run -- batch --device 'escl:https@scanner.local:443' --allow-unlisted-escl
 ```
 
 `devices` reports the sources visible on the current machine. A reported backend does not guarantee that a particular scanner is installed, connected, or accessible.
-
-## Local demo and GitHub Pages
-
-The mock commands above are the supported hardware-free local demo. To exercise
-the desktop surface, run `cargo run -- gui` and select the synthetic mock source
-or a local image file; neither path requires a physical scanner.
-
-GitHub Pages is not configured for this repository. The working product is a
-native executable whose GUI, scanner adapters, local OCR and model processes,
-and network-device access depend on operating-system capabilities that a static
-Pages site cannot provide. A Pages site could document Open Scanline, but it
-could not run or validate the application, so this repository does not ship a
-browser mock that could be mistaken for the product.
 
 ## What is included
 
@@ -72,7 +65,7 @@ Mock and file batches are deterministic repeated-page simulations for testing th
 
 TWAIN support is host integration only. Open Scanline can run its headless plugin mode for a separate TWAIN-capable host or bridge; it does not ship a native TWAIN Data Source or acquire images directly through TWAIN.
 
-The adapters negotiate the capabilities they can observe, but no compatibility table can guarantee a particular scanner, feeder, driver, firmware, or vendor extension. The automated suite uses simulated adapters and protocol fixtures; validate production hardware on its target operating system before relying on it.
+The adapters negotiate the capabilities they can observe, but no compatibility table can guarantee a particular scanner, feeder, driver, firmware, or vendor extension. The automated suite uses simulated adapters and local protocol servers; validate production hardware on its target operating system before relying on it.
 
 Open Scanline does not include proprietary scanner drivers, firmware, or third-party activation and licensing systems.
 
