@@ -1,5 +1,6 @@
 use open_scanline::core::{ImageBuffer, PixelFormat};
 use open_scanline::imaging::save_image;
+#[cfg(not(windows))]
 use open_scanline::ml::{run_user_onnx_with_worker, OnnxInferenceOptions};
 use std::process::Command;
 
