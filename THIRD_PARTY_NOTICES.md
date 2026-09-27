@@ -2,43 +2,40 @@
 
 ## Locked Rust dependency closure
 
-`assets/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md` records the package name,
-version, and declared license metadata for every third-party package reported
-by `cargo tree --locked --all-features --target all -e normal` when this
-bundle was generated. It covers the locked all-feature closure for every
-target Cargo reports, so it covers every feature and target variant of an
-open-scanline binary built from this locked workspace, rather than only the
-packaging host or a no-GUI build. It also reproduces
-every locally cached crate file named `LICENSE*`, `COPYING*`, `NOTICE*`, or
-`COPYRIGHT*` for that closure. The deterministic
-`scripts/generate_rust_dependency_licenses.py --check` command verifies that
-the tracked bundle still matches the locked dependency metadata and sources.
+[`assets/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md`](assets/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md)
+records the package name, version, and declared license for every third-party
+package in the locked all-feature build. It is generated from
+`cargo tree --locked --all-features --target all -e normal`, so it covers every
+feature and target variant Cargo reports — including Windows-only packages — not
+only the packaging host or a no-GUI build. It also reproduces every cached crate
+file named `LICENSE*`, `COPYING*`, `NOTICE*`, or `COPYRIGHT*`. Run
+`scripts/generate_rust_dependency_licenses.py --check` to confirm that the tracked
+bundle still matches the locked dependency metadata and sources.
 
-The portable archive embeds that file verbatim at
-`open-scanline/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md`. The recorded metadata
-includes `ring` 0.17.14 (`Apache-2.0 AND ISC`), `rustls-webpki` 0.103.13
-(`ISC`), and `webpki-roots` 1.0.9 (`CDLA-Permissive-2.0`), together with the
-remaining locked all-feature, all-target dependency closure, including Windows-only
-packages. This is a source-metadata record; it does not make a legal claim
-beyond the cached crate metadata and files.
+The portable archive embeds the file verbatim at
+`open-scanline/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md`. It records, for
+example, `ring` 0.17.14 (`Apache-2.0 AND ISC`), `rustls-webpki` 0.103.13 (`ISC`),
+and `webpki-roots` 1.0.9 (`CDLA-Permissive-2.0`), along with the rest of the
+locked all-feature, all-target closure. This is a source-metadata record: it
+makes no legal claim beyond the cached crate metadata and files.
 
-The `package` command can archive an arbitrary supplied executable. This
-bundle does not identify dependencies in a binary built outside this locked
-workspace; its distributor remains responsible for third-party notices for
-such an executable.
+The `package` command can also archive an arbitrary supplied executable. This
+bundle does not identify dependencies in a binary built outside the locked
+workspace, so the distributor of such a binary remains responsible for its
+third-party notices.
 
 ## Cantarell Regular font
 
-`assets/fonts/Cantarell-Regular.ttf` is copied unchanged from
-`sctk-adwaita` version 0.10.1, file `src/title/Cantarell-Regular.ttf`, as
-distributed by crates.io. It is embedded only as the glyph carrier for
-low-opacity searchable-PDF text. Its SHA-256 is
+`assets/fonts/Cantarell-Regular.ttf` is copied unchanged from `sctk-adwaita`
+0.10.1, file `src/title/Cantarell-Regular.ttf`, as distributed by crates.io. It is
+embedded only as the glyph carrier for low-opacity searchable-PDF text. Its
+SHA-256 is
 `d15f25bcdaba2e25f54c32d4e29e68fedeb1b7a1d8fbc83f7c4475916e93b55f`.
 
 The source crate's MIT license does not apply to this font asset. The font's
-embedded metadata identifies the following copyright holders, and the asset is
-licensed under SIL Open Font License 1.1. It is not covered by this project's
-`LICENSE`.
+embedded metadata identifies the copyright holders below, and the asset is
+licensed under the SIL Open Font License 1.1. It is not covered by this project's
+[`LICENSE`](LICENSE).
 
 ```text
 Copyright (c) 2009-2011, Understanding Limited (dave@understandinglimited.com),

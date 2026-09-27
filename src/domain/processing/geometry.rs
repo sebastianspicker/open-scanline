@@ -60,9 +60,9 @@ pub fn flip_vertical(image: &ImageBuffer) -> Result<ImageBuffer> {
 pub fn rotate(image: &ImageBuffer, how: Rotate) -> Result<ImageBuffer> {
     match how {
         Rotate::None => Ok(image.clone()),
-        Rotate::R180 => flip_horizontal(&flip_vertical(image)?),
+        Rotate::R180 => rotate180(image),
         Rotate::R90 => rotate90_cw(image),
-        Rotate::R270 => rotate90_cw(&rotate90_cw(&rotate90_cw(image)?)?),
+        Rotate::R270 => rotate270_cw(image),
     }
 }
 
@@ -87,6 +87,105 @@ fn rotate90_cw(image: &ImageBuffer) -> Result<ImageBuffer> {
         image.pixel_format,
         output,
     )
+}
+
+fn rotate180(image: &ImageBuffer) -> Result<ImageBuffer> {
+    let output = match image.pixel_format {
+        PixelFormat::Gray8 => reverse_pixels::<1>(&image.data),
+        PixelFormat::Rgb8 => reverse_pixels::<3>(&image.data),
+        PixelFormat::Rgba8 => reverse_pixels::<4>(&image.data),
+    };
+    ImageBuffer::new(image.width, image.height, image.pixel_format, output)
+}
+
+fn reverse_pixels<const BYTES_PER_PIXEL: usize>(source: &[u8]) -> Vec<u8> {
+    let mut output: Vec<u8> = source.iter().rev().copied().collect();
+    for pixel in output.chunks_exact_mut(BYTES_PER_PIXEL) {
+        pixel.reverse();
+    }
+    output
+}
+
+fn rotate270_cw(image: &ImageBuffer) -> Result<ImageBuffer> {
+    let width = image.width as usize;
+    let height = image.height as usize;
+    let output = match image.pixel_format {
+        PixelFormat::Gray8 => rotate270_pixels::<1>(&image.data, width, height),
+        PixelFormat::Rgb8 => rotate270_pixels::<3>(&image.data, width, height),
+        PixelFormat::Rgba8 => rotate270_pixels::<4>(&image.data, width, height),
+    };
+    ImageBuffer::new(image.height, image.width, image.pixel_format, output)
+}
+
+const ROTATION_TILE: usize = 32;
+
+fn rotate270_pixels<const BYTES_PER_PIXEL: usize>(
+    source: &[u8],
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    let mut output = vec![0; width * height * BYTES_PER_PIXEL];
+    for tile_x in (0..width).step_by(ROTATION_TILE) {
+        for tile_y in (0..height).step_by(ROTATION_TILE) {
+            rotate270_tile::<BYTES_PER_PIXEL>(source, &mut output, width, height, tile_x, tile_y);
+        }
+    }
+    output
+}
+
+fn rotate270_tile<const BYTES_PER_PIXEL: usize>(
+    source: &[u8],
+    output: &mut [u8],
+    width: usize,
+    height: usize,
+    tile_x: usize,
+    tile_y: usize,
+) {
+    let x_end = (tile_x + ROTATION_TILE).min(width);
+    let y_end = (tile_y + ROTATION_TILE).min(height);
+    for x in tile_x..x_end {
+        copy_rotated_column::<BYTES_PER_PIXEL>(source, output, width, height, x, tile_y, y_end);
+    }
+}
+
+fn copy_rotated_column<const BYTES_PER_PIXEL: usize>(
+    source: &[u8],
+    output: &mut [u8],
+    width: usize,
+    height: usize,
+    x: usize,
+    y_start: usize,
+    y_end: usize,
+) {
+    for y in y_start..y_end {
+        let source_offset = (y * width + x) * BYTES_PER_PIXEL;
+        let output_offset = ((width - 1 - x) * height + y) * BYTES_PER_PIXEL;
+        output[output_offset..output_offset + BYTES_PER_PIXEL]
+            .copy_from_slice(&source[source_offset..source_offset + BYTES_PER_PIXEL]);
+    }
+}
+
+/// Nearest-neighbor resize to `width`/`height`.
+pub fn resize_nearest(image: &ImageBuffer, width: u32, height: u32) -> Result<ImageBuffer> {
+    if width == image.width && height == image.height {
+        return Ok(image.clone());
+    }
+    let bytes_per_pixel = image.bpp();
+    let output_len = crate::domain::image::checked_image_len(width, height, bytes_per_pixel)?;
+    let mut output = vec![0_u8; output_len];
+    let source_width = image.width as usize;
+    let source_height = image.height as usize;
+    for y in 0..height as usize {
+        let source_y = y * source_height / height as usize;
+        for x in 0..width as usize {
+            let source_x = x * source_width / width as usize;
+            let source_index = (source_y * source_width + source_x) * bytes_per_pixel;
+            let output_index = (y * width as usize + x) * bytes_per_pixel;
+            output[output_index..output_index + bytes_per_pixel]
+                .copy_from_slice(&image.data[source_index..source_index + bytes_per_pixel]);
+        }
+    }
+    ImageBuffer::new(width, height, image.pixel_format, output)
 }
 
 /// Estimate skew via horizontal projection variance over candidate angles.
@@ -389,5 +488,84 @@ fn copy_deskewed_pixels(source: &[u8], output: &mut [u8], mapping: DeskewMapping
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cardinal_rotations_match_composed_reference_for_all_formats() {
+        for format in [PixelFormat::Gray8, PixelFormat::Rgb8, PixelFormat::Rgba8] {
+            let image = seeded_image(7, 5, format, 0x5eed_cafe);
+            for (rotation, turns) in [(Rotate::R90, 1), (Rotate::R180, 2), (Rotate::R270, 3)] {
+                let expected = repeated_reference_rotation(&image, turns);
+                assert_eq!(rotate(&image, rotation).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn rotate_270_matches_reference_across_tile_boundaries() {
+        for format in [PixelFormat::Gray8, PixelFormat::Rgb8, PixelFormat::Rgba8] {
+            let image = seeded_image(37, 35, format, 0x2700_b10c);
+            assert_eq!(
+                rotate(&image, Rotate::R270).unwrap(),
+                repeated_reference_rotation(&image, 3)
+            );
+        }
+    }
+
+    #[test]
+    fn rotate_270_preserves_zero_dimension_validation() {
+        for (width, height) in [(0, 1), (1, 0)] {
+            let image = ImageBuffer {
+                width,
+                height,
+                pixel_format: PixelFormat::Gray8,
+                data: Vec::new(),
+            };
+            let expected = ImageBuffer::new(height, width, PixelFormat::Gray8, Vec::new())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                rotate(&image, Rotate::R270).unwrap_err().to_string(),
+                expected
+            );
+        }
+    }
+
+    fn repeated_reference_rotation(image: &ImageBuffer, turns: usize) -> ImageBuffer {
+        let mut output = image.clone();
+        for _ in 0..turns {
+            output = reference_rotate_90(&output);
+        }
+        output
+    }
+
+    fn reference_rotate_90(image: &ImageBuffer) -> ImageBuffer {
+        let bpp = image.bpp();
+        let mut output = vec![0; image.data.len()];
+        for y in 0..image.height as usize {
+            for x in 0..image.width as usize {
+                let source = (y * image.width as usize + x) * bpp;
+                let destination = (x * image.height as usize + image.height as usize - 1 - y) * bpp;
+                output[destination..destination + bpp]
+                    .copy_from_slice(&image.data[source..source + bpp]);
+            }
+        }
+        ImageBuffer::new(image.height, image.width, image.pixel_format, output).unwrap()
+    }
+
+    fn seeded_image(width: u32, height: u32, format: PixelFormat, seed: u32) -> ImageBuffer {
+        let mut state = seed;
+        let data = (0..width as usize * height as usize * format.bpp())
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 24) as u8
+            })
+            .collect();
+        ImageBuffer::new(width, height, format, data).unwrap()
     }
 }

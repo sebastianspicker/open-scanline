@@ -1,0 +1,1124 @@
+[
+  {
+    "input": "Gray8",
+    "prefs": {},
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "rotate": "R180"
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "57904477006134f90d1ef5bef76b268c1708d9db635d82e838ae42551ad21713",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 19,
+      "sha256": "46c05e6dc65573e5d327382218507080f1a1b63895566a0a41edecd728bc22e1",
+      "width": 17
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "flip_h": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "6338bd9eb86e7f45c57f81a4c932a9013940ac1774921ae80f9c13f3f782ba2a",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "flip_v": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "4b9d5be8a7b87f1d40d1bd0b1af5f4f58440b1fca3cc687220fdbc8e5f5ea568",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "crop": {
+        "height": 11,
+        "width": 13,
+        "x": 1,
+        "y": 2
+      }
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 11,
+      "sha256": "47c929114a898b9bd1cd1aafcec3ab4c0ab5262596f8addb47eda141e38ace12",
+      "width": 13
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "deskew_angle": 2.0
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 18,
+      "sha256": "4399b6a3d7affa5a9bfe6d761475f60737f62037ba5c6a98f6a6899f80c9156e",
+      "width": 20
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "auto_deskew": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 21,
+      "sha256": "b64450f834d1510a76eeca8a137cca70e6e14245ab246c5a2a8da58e1250fbb8",
+      "width": 23
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "5266b5dfb9552b944ad6e687ca6156c10f92353ec26e1985a01511f795c72165",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "desaturate": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "e527f896893132639613d7c210d47ee4f79dd33a783b6e55f2ea790d2ee468f3",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "white_balance": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "hue": 23.0,
+      "saturation": 0.2
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "curves": [
+        [
+          0,
+          5
+        ],
+        [
+          100,
+          120
+        ],
+        [
+          255,
+          250
+        ]
+      ]
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "333f9d2a53adc467691fe4368e8a6f839b54b85a86096dc7c91852aacbc0e334",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "auto_levels": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "910d49ee261aec624400c343c6d01ca0c36f3a2565eb3358904d6dfe04bdf3d5",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "invert": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "0d00a438bb6b2fbf6110bc5010d2d90352f98c1754eb499435a688762bf383b2",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "19b03df676ef495f13130cb5d755d82457244abfd2a6584dc944bf1b3e021f60",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "infrared_clean": "medium"
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "de47437ea2df985545e18c11bb2b3f7c7826748f053801591f5ed8abae452c75",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "descreen": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "400769cee65a1c697c5c33ffd7acd7be932ee3336aa2f76160d868eb042be9e7",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "grain_reduction": "heavy"
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "04d355ef2f2e88134aae9b6e1914dc841a595ea1434edf9de36f258c7c2011fa",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "restore_colors": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "restore_fading": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "ec8295397b48961eec0baad2ddb0bae3a143205c61d4bce3271147db6b9fd772",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "flatten": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "299e572161eccd02170cff8d6dd194cc27d043533332768ed724c9a55252346d",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "hole_punch": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "089fbcd8dbc0368755fd0e039040551da1c5b072ce7c32264d306fbad04332b1",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "colorize_mode": "sepia"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "ebaebf3402c952f81bfde6a2f7759a56df6786e1802f50469cb4593ef3dfe6d6",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "film_type": "color-negative"
+    },
+    "result": {
+      "error": "invalid: film profile not found: color-negative"
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "auto_crop": true,
+      "auto_orient": true
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "57904477006134f90d1ef5bef76b268c1708d9db635d82e838ae42551ad21713",
+      "width": 19
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11,
+      "flip_h": true,
+      "invert": true,
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230,
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 19,
+      "sha256": "81d3f6199fc7cb533fb96c531f021c09e2caaabc941b203305ee7c6202bb48ad",
+      "width": 17
+    }
+  },
+  {
+    "input": "Gray8",
+    "prefs": {
+      "auto_crop": true,
+      "desaturate": true,
+      "descreen": true,
+      "flatten": true,
+      "grain_reduction": "light",
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "format": "Gray8",
+      "height": 17,
+      "sha256": "8d1ee56c9dca0a1d24f2c1fed8c9802b1e14c45111897ac28bbe606e3ced7b9f",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {},
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "381574d54fb25cf10f6633f24df2241985af5c6e443ac487bce2f0f1fed9ea8e",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "rotate": "R180"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "6a662fe4372a4377f3d26d0ce33dc5102d223dded1dff8be357b486dca0e5c61",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 19,
+      "sha256": "301153278b0e18b8fffdb918277860b80528dda15ed6d9e49fa4f557ba270b29",
+      "width": 17
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "flip_h": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "aaecd362e60ca636e29751d77db70459b6b6ff153deeb12486f613f362795b52",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "flip_v": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "16c67e3c206db65f881d898d05b50e3217b9da9fd54a39da2150b0909ff66561",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "crop": {
+        "height": 11,
+        "width": 13,
+        "x": 1,
+        "y": 2
+      }
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 11,
+      "sha256": "27d4cf318f18ba6bd20bb0c4b639a1ce0f96ff8d3d0d4ce5adceb34253424f0e",
+      "width": 13
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "deskew_angle": 2.0
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 18,
+      "sha256": "db16410d32767e781ba9382ac3b5e1200feb512d08f79638847f70a591662ba3",
+      "width": 20
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "auto_deskew": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 21,
+      "sha256": "4a6e9c744aa057de01442aa77bb96df65b808d70d3170d730df28feb87d5a3d5",
+      "width": 23
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "df6edbb7ef3d9f5e1062e2b432cee989781d787ce0d99c6546b802ad1354338e",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "desaturate": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "3561c3468af8a9689c3042176afdb46ec276850f0f264372a68da90310fb8d5f",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "f59d8c5d035cb1b765786e7d8bee6ea2ac5ac70fe5985805848635313d52fc7a",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "white_balance": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "3037e903744864586214d144f49a66f730e1d5360dce2b1a3a7e72fe54a7482d",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "hue": 23.0,
+      "saturation": 0.2
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "6e7256ed71fb68c670ab4401f90bcfe0b1f5d8e0784e59c9af4298b647a6f9b9",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "curves": [
+        [
+          0,
+          5
+        ],
+        [
+          100,
+          120
+        ],
+        [
+          255,
+          250
+        ]
+      ]
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "44b2e9c4254fe1a12164018ae0039b04ba9e147cdae5b2d19bf6677f1e3d55e8",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "auto_levels": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "cb50c255002ae8bbdaddca5eee87a57c899847d7b3e62af4bc0333dffd79b2ea",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "invert": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "e54990d5041be6f37ed58ce578cbbe3443bc06d237d670883d503fe35ba575a7",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "b03096c440996098cb026b6422ac52fe8ef6422be65e38eb5d881293bc5ece41",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "infrared_clean": "medium"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "8be6242c3689978c50f0a4c9418c69f7fadab9d13f80927069f753fc6ec07369",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "descreen": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "ba67587b1ba4f24a8b6955331eb23181537fb327110fcaa90adeeb922ab67023",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "grain_reduction": "heavy"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "5dcdfea257e7541567a58c936b57c603b07bdbdb1da2beb943923065d352f03e",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "restore_colors": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "a20bef776e8049fa76873e03f7b391af67b27ef86634deed02fd767e91fdf871",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "restore_fading": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "f8946745d51339fc187b842f443bae02d6019e98c260710675926db2a1cddd0a",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "flatten": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "93d5631d89a9c1ab4f6478e26122d02b12ceb1decfb40880a63d117f86511940",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "hole_punch": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "a769ef750bdd7d26998c1fab5026d6fe521a587db8bb74b5ce3a71c6266d1967",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "colorize_mode": "sepia"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "00be49e62d28191912f3ae1b16e87246096b964e4f814a717899cdbc1bd614bc",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "film_type": "color-negative"
+    },
+    "result": {
+      "error": "invalid: film profile not found: color-negative"
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "auto_crop": true,
+      "auto_orient": true
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 19,
+      "sha256": "9a544ec9f33b58a614c7a6f4370e1b0ef5f513427678b2de38401839b361ccca",
+      "width": 17
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11,
+      "flip_h": true,
+      "invert": true,
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230,
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 19,
+      "sha256": "804bbb94a065305a57b301f0db8461d5849d18c63a3b974e7cc445f9d1fe2794",
+      "width": 17
+    }
+  },
+  {
+    "input": "Rgb8",
+    "prefs": {
+      "auto_crop": true,
+      "desaturate": true,
+      "descreen": true,
+      "flatten": true,
+      "grain_reduction": "light",
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "9115a28ab35486c5efb33c2d0b2edf3650d1e5ff05b2f7ce1029660ef78020f8",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {},
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "826c353dea160047f0ed27d3d87f1fb30e8861b8e04277f833a0c107e3114e48",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "rotate": "R180"
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "e161db83ed7ddcc38923ded9d6ebebf17ba8ae56725ea77132abf27c39393d77",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 19,
+      "sha256": "27ab36a5e626966a9ee891d481ba5ad1363c3dac7ebcbad40ba36d3bff0a3c81",
+      "width": 17
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "flip_h": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "9da5f41313c82955a7463999320e8067067ffd588de212f650d81c0278e6c3c0",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "flip_v": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "6ad3b79e3f4e40233623ef54f6cf224ea272a3f49499d4bf710a7cf6a5680978",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "crop": {
+        "height": 11,
+        "width": 13,
+        "x": 1,
+        "y": 2
+      }
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 11,
+      "sha256": "fa19878d02a1851f4c150cdc00a086467f661f7916685f333e4b776194cb4f3b",
+      "width": 13
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "deskew_angle": 2.0
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 18,
+      "sha256": "1b2d605301e0172d4c3e0a643006ecb6dfa7f79120e2359b3a1fa2f46a993941",
+      "width": 20
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "auto_deskew": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 21,
+      "sha256": "5976bc89908aa2d37259794cdda4dc2c4206f483d8bb4e25c290966e06fa1275",
+      "width": 23
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "863e8c13df4e1a7a718fbd8ce7bbd67b1cb4b526566162f2eab1ffe1235fe5e6",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "desaturate": true
+    },
+    "result": {
+      "error": "unsupported: desaturate: Rgba8"
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "eee086f707c3ea2f5a2449e1d3303b96a2e87d039d96cfcd9e1f31f6e467a7c9",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "white_balance": true
+    },
+    "result": {
+      "error": "unsupported: white_balance: Rgba8"
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "hue": 23.0,
+      "saturation": 0.2
+    },
+    "result": {
+      "error": "unsupported: adjust_saturation: Rgba8"
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "curves": [
+        [
+          0,
+          5
+        ],
+        [
+          100,
+          120
+        ],
+        [
+          255,
+          250
+        ]
+      ]
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "caf676d01983fb95548f704cc5b4574f15b1710d60061d1a6a4d67f35dd2446e",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "auto_levels": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "373ad3c2c9a4b4e5ad90e8fe8c08128e7e515726a92eda7eb98921e8bdf5d47f",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "invert": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "717a06d432397eb3ccb52cd36d1c9e8acdff71e81ab5ef5123aba0cf22325f44",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "26394c890ca89b56b6b543a6a260b1edcc84574afd788e5c9cb753ce15597161",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "infrared_clean": "medium"
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "b81888848da223b5cdec1839aca3e7482994bfb489f1939bf36dffe32db216a7",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "descreen": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "cf9b7239298f145a7e45906e37179fa96b7f2f6f07cf824adb385e991c972b03",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "grain_reduction": "heavy"
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "22e1b764e75a18071e20e001f3c9b2849d89c907e07388ab543507be77e1d460",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "restore_colors": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "18f76d24e863a3c2e7c49b99af828124c38d78cef1afc9dfead6806997e93678",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "restore_fading": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "f336e656bdf343273ae9371c9c31b5351521290f62d97969969d0c5e9c75abb4",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "flatten": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "c459ab4835ff826f306869a00499438f61958b07a753c95fda4a0df6fbf95563",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "hole_punch": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "89c020700de4562d9782f8ccb81beacf24ad91cf687dafcc37f3b4f32e6b1a49",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "colorize_mode": "sepia"
+    },
+    "result": {
+      "format": "Rgb8",
+      "height": 17,
+      "sha256": "4c7615e399e0ecb21fd13576dbccdca725ce6399e3b0d64b6992fc51e2244593",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "film_type": "color-negative"
+    },
+    "result": {
+      "error": "invalid: film profile not found: color-negative"
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "auto_crop": true,
+      "auto_orient": true
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 17,
+      "sha256": "826c353dea160047f0ed27d3d87f1fb30e8861b8e04277f833a0c107e3114e48",
+      "width": 19
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "brightness": 17,
+      "contrast": -11,
+      "flip_h": true,
+      "invert": true,
+      "levels_black": 8,
+      "levels_gamma": 1.3,
+      "levels_white": 230,
+      "rotate": "R270"
+    },
+    "result": {
+      "format": "Rgba8",
+      "height": 19,
+      "sha256": "aea14ce301be7efcbaf40164698a5340704857fb4db5cd890435dc20d0563302",
+      "width": 17
+    }
+  },
+  {
+    "input": "Rgba8",
+    "prefs": {
+      "auto_crop": true,
+      "desaturate": true,
+      "descreen": true,
+      "flatten": true,
+      "grain_reduction": "light",
+      "sharpen_amount": 0.7
+    },
+    "result": {
+      "error": "unsupported: desaturate: Rgba8"
+    }
+  }
+]

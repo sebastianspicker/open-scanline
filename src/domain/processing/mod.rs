@@ -9,6 +9,7 @@ mod geometry;
 mod plan;
 
 pub use apply::apply_pipeline;
+pub(crate) use apply::apply_pipeline_owned;
 pub use auto::{
     apply_auto_crop, apply_auto_crop_with_params, apply_orientation,
     apply_orientation_with_degrees, auto_crop_bounds, detect_orientation, AutoCropResult,
@@ -16,7 +17,7 @@ pub use auto::{
 };
 pub use color::{
     adjust_brightness_contrast, adjust_hue, adjust_levels, adjust_saturation, apply_curves,
-    auto_levels, desaturate, histogram, invert, white_balance,
+    auto_levels, desaturate, gray_mean, histogram, invert, rgb_channel_means, white_balance,
 };
 pub use film::{convert_film, get_film_profile, list_film_profiles, FilmProfile};
 pub use filters::{
@@ -24,6 +25,7 @@ pub use filters::{
     infrared_clean, median_filter, restore_colors, restore_fading, sharpen,
 };
 pub use geometry::{
-    auto_deskew, crop, deskew, estimate_skew_degrees, flip_horizontal, flip_vertical, rotate,
+    auto_deskew, crop, deskew, estimate_skew_degrees, flip_horizontal, flip_vertical,
+    resize_nearest, rotate,
 };
 pub use plan::PipelinePrefs;

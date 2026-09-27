@@ -1,22 +1,35 @@
 use super::super::state::GuiState;
 use crate::domain::acquisition::ScanRequest;
-use crate::domain::image::{ImageBuffer, PixelFormat};
-use crate::error::Result;
-use crate::infrastructure::acquisition::{
-    calibrate_device, exposure_from_preview, find_scanners, focus_device,
+use crate::domain::image::PixelFormat;
+use crate::workflows::maintenance::{
+    calibrate_device, create_scanner_profile, exposure_from_preview, focus_device,
 };
-use crate::infrastructure::media::load_image;
-use crate::infrastructure::media::{make_it8_target_image, profile_scanner_it8, save_profile_json};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
     pub(in super::super) fn do_calibrate(&mut self) {
+        if !self.calibration_available() {
+            self.status = format!(
+                "calibrate {}: unsupported ({})",
+                self.device,
+                self.calibration_explanation()
+            );
+            return;
+        }
         self.set_device_result("calibrate", calibrate_device(&self.device));
     }
 
     pub(in super::super) fn do_focus(&mut self) {
+        if !self.focus_available() {
+            self.status = format!(
+                "focus {}: unsupported ({})",
+                self.device,
+                self.focus_explanation()
+            );
+            return;
+        }
         self.set_device_result("focus", focus_device(&self.device, 0.5, 0.5));
     }
 
@@ -40,7 +53,7 @@ impl GuiState {
     }
 
     pub(in super::super) fn do_profile_scanner(&mut self) {
-        match self.create_scanner_profile() {
+        match create_scanner_profile(self.last_image.as_deref(), Path::new(&self.output_dir)) {
             Ok((dest, profile)) => {
                 self.scanner_profile_path = dest.display().to_string();
                 self.status = format!(
@@ -57,49 +70,24 @@ impl GuiState {
     }
 
     pub(in super::super) fn refresh_devices(&mut self) {
-        self.devices = find_scanners(true)
-            .into_iter()
-            .map(|device| device.id)
-            .collect();
-        if !self.devices.iter().any(|device| device == &self.device) {
-            self.device = self
-                .devices
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "mock".into());
-        }
-        self.status = format!("{}: {}", self.translator.t("devices"), self.devices.len());
-    }
-
-    fn create_scanner_profile(&self) -> Result<(PathBuf, Value)> {
-        let image = self.scanner_profile_image()?;
-        let profile = profile_scanner_it8(&image)?;
-        let dest = PathBuf::from(&self.output_dir).join("scanner_it8_profile.json");
-        save_profile_json(&dest, &profile)?;
-        Ok((dest, profile))
-    }
-
-    fn scanner_profile_image(&self) -> Result<ImageBuffer> {
-        match &self.last_image {
-            Some(path) => load_image(path),
-            None => make_it8_target_image(120, 80),
-        }
+        self.discovery_refresh = true;
+        self.refresh_maintenance_capabilities();
     }
 
     fn set_device_result(&mut self, action: &str, value: Value) {
         let outcome = value
             .get("status")
             .and_then(|status| status.as_str())
-            .or_else(|| {
-                value.get("ok").map(|ok| {
-                    if ok.as_bool() == Some(true) {
-                        "ok"
-                    } else {
-                        "error"
-                    }
-                })
-            })
+            .or_else(|| value.get("ok").map(device_action_outcome))
             .unwrap_or("done");
         self.status = format!("{action} {}: {outcome}", self.device);
+    }
+}
+
+fn device_action_outcome(ok: &Value) -> &'static str {
+    if ok.as_bool() == Some(true) {
+        "ok"
+    } else {
+        "error"
     }
 }

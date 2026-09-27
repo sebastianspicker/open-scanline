@@ -5,23 +5,23 @@ use crate::domain::manufacturers::{
     format_manufacturers_text, list_manufacturers, manufacturer_support_summary,
     resolve_manufacturer,
 };
-use crate::inbound::api::batch::{
-    run_batch_scan_with_export_options_and_token_and_policy, BatchScanArgs,
-};
 use crate::inbound::cli::args::{OnnxLayout, OnnxNormalization, ScanSource};
 use crate::inbound::cli::handlers::scan;
 use crate::inbound::gui::run_gui;
 use crate::inbound::plugin::run_plugin_mode_with_token;
 use crate::infrastructure::acquisition::{list_all_devices, list_backends};
 use crate::infrastructure::config::json::{default_config_path, load_config, save_config};
+use crate::infrastructure::config::AppConfig;
 use crate::infrastructure::distribution::{build_portable, PackagingOptions};
 use crate::infrastructure::media::convert_image_with_cancellation;
-use crate::infrastructure::media::ocr::ocr_file_with_cancellation;
+use crate::infrastructure::media::ocr::{model_pack, ocr_file_with_engine_with_cancellation};
 use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::settings::AppConfig;
+use crate::operation::CancellationToken;
+use crate::workflows::capture::batch::{
+    self, plan_batch_outputs, BatchCaptureOptions, BatchOutputRequest, BatchScanArgs,
+};
 use std::path::{Path, PathBuf};
 
 pub(super) fn devices() -> i32 {
@@ -176,10 +176,10 @@ pub(super) fn convert(
 pub(super) fn ocr(
     inp: PathBuf,
     lang: String,
-    offline: bool,
+    engine: crate::OcrEngine,
     cancellation: CancellationToken,
 ) -> i32 {
-    match ocr_file_with_cancellation(&inp, &lang, offline, cancellation) {
+    match ocr_file_with_engine_with_cancellation(&inp, &lang, engine, cancellation) {
         Ok(result) => {
             println!(
                 "{}",
@@ -189,6 +189,38 @@ pub(super) fn ocr(
         }
         Err(e) => {
             eprintln!("ocr error: {e}");
+            1
+        }
+    }
+}
+
+pub(super) fn ocr_model_install(detection: PathBuf, recognition: PathBuf) -> i32 {
+    match model_pack::install(&detection, &recognition) {
+        Ok(pack) => {
+            println!(
+                "{}",
+                serde_json::json!({"installed": true, "active": pack.id, "ok": true})
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("ocr-model install error: {error}");
+            1
+        }
+    }
+}
+
+pub(super) fn ocr_model_status() -> i32 {
+    match model_pack::status() {
+        Ok(status) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".into())
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("ocr-model status error: {error}");
             1
         }
     }
@@ -283,12 +315,15 @@ pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) 
         args.multipage_out.clone(),
         args.contact_sheet.clone(),
     ];
-    let result = run_batch_scan_with_export_options_and_token_and_policy(
+    let result = batch::run_batch_scan(
         args,
-        &request.export,
-        cancellation,
-        DeviceOpenPolicy {
-            allow_unlisted_escl: request.allow_unlisted_escl,
+        BatchCaptureOptions {
+            export: request.export.clone(),
+            token: Some(cancellation),
+            policy: DeviceOpenPolicy {
+                allow_unlisted_escl: request.allow_unlisted_escl,
+            },
+            ..BatchCaptureOptions::default()
         },
     );
     super::router::clear_pdf_password(&mut request.export.pdf_password);
@@ -311,32 +346,7 @@ impl BatchRequest {
         scan::apply_explicit_bool(&mut pipeline.auto_crop, self.auto_crop);
         scan::apply_explicit_bool(&mut pipeline.auto_orient, self.auto_orient);
         scan::apply_explicit_bool(&mut pipeline.invert, self.invert);
-        let configured_format = self
-            .format
-            .clone()
-            .unwrap_or_else(|| config.output_format.clone());
-        let page_format = if configured_format.eq_ignore_ascii_case("pdf") {
-            "png".to_string()
-        } else {
-            configured_format.clone()
-        };
-        let mut multipage_out = self.multipage_out.clone();
-        if multipage_out.is_none() && self.multipage_pdf.is_none() && self.multipage_tiff.is_none()
-        {
-            let format = if configured_format.eq_ignore_ascii_case("pdf") {
-                Some("pdf")
-            } else if config.multipage {
-                Some(config.multipage_format.as_str())
-            } else {
-                None
-            };
-            if let Some(format) = format {
-                multipage_out = Some(
-                    self.out_dir
-                        .join(format!("{}_multipage.{}", config.output_name, format)),
-                );
-            }
-        }
+        let outputs = self.output_targets(config);
         BatchScanArgs {
             device: self
                 .device
@@ -353,20 +363,48 @@ impl BatchRequest {
                 .map(ScanSource::mode)
                 .unwrap_or(config.scan_mode),
             duplex: self.duplex.unwrap_or(config.duplex),
-            format: page_format,
+            format: outputs.page_format,
             multipage_tiff: self.multipage_tiff.clone(),
             multipage_pdf: self.multipage_pdf.clone(),
-            multipage_out,
-            contact_sheet: self.contact_sheet.clone().or_else(|| {
-                config.contact_sheet.then(|| {
-                    self.out_dir
-                        .join(format!("{}_contact.bmp", config.output_name))
-                })
-            }),
+            multipage_out: outputs.multipage_out,
+            contact_sheet: outputs.contact_sheet,
             pipeline,
             on_progress: None,
         }
     }
+
+    fn output_targets(&self, config: &AppConfig) -> BatchOutputTargets {
+        let configured_format = self
+            .format
+            .clone()
+            .unwrap_or_else(|| config.output_format.clone());
+        let has_explicit_multipage = self.multipage_out.is_some()
+            || self.multipage_pdf.is_some()
+            || self.multipage_tiff.is_some();
+        let plan = plan_batch_outputs(BatchOutputRequest {
+            out_dir: &self.out_dir,
+            output_name: &config.output_name,
+            configured_format: &configured_format,
+            want_multipage: config.multipage,
+            multipage_format: &config.multipage_format,
+            want_contact_sheet: config.contact_sheet,
+        });
+        BatchOutputTargets {
+            page_format: plan.page_format,
+            multipage_out: if has_explicit_multipage {
+                self.multipage_out.clone()
+            } else {
+                plan.multipage_out
+            },
+            contact_sheet: self.contact_sheet.clone().or(plan.contact_sheet),
+        }
+    }
+}
+
+struct BatchOutputTargets {
+    page_format: String,
+    multipage_out: Option<PathBuf>,
+    contact_sheet: Option<PathBuf>,
 }
 
 fn report_batch_outputs(paths: &[PathBuf], requested_outputs: &[Option<PathBuf>; 4]) {

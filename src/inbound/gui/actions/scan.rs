@@ -1,30 +1,10 @@
 use super::super::state::GuiState;
-use crate::inbound::api::scan::{run_scan_to_file, ScanToFileArgs};
+use crate::workflows::capture::single::ScanToFileArgs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-#[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
-    #[allow(dead_code)]
-    pub(in super::super) fn do_scan(&mut self, preview: bool) {
-        if let Err(error) = self.validate_color_controls() {
-            self.set_error(format!("invalid color controls: {error}"));
-            return;
-        }
-        self.cancel_requested.store(false, Ordering::SeqCst);
-        self.scanning = true;
-        let result = self.scan_args(preview).and_then(run_scan_to_file);
-        self.scanning = false;
-        match result {
-            Ok(path) => self.set_image_success(path),
-            Err(crate::error::ScanError::Cancelled(_)) => {
-                self.status = self.translator.t("status.cancelled");
-            }
-            Err(error) => self.set_error(error),
-        }
-    }
-
     pub(in super::super) fn do_cancel(&mut self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
         self.status = self.translator.t(if self.scanning {
@@ -68,8 +48,7 @@ impl GuiState {
 
     fn scan_output_path(&self, preview: bool) -> crate::error::Result<PathBuf> {
         if preview {
-            let output_name =
-                crate::infrastructure::config::json::validate_output_name(&self.output_name)?;
+            let output_name = crate::domain::settings::validate_output_name(&self.output_name)?;
             Ok(PathBuf::from(&self.output_dir).join(format!("{output_name}_preview.png")))
         } else {
             self.out_path("scan")
@@ -87,7 +66,7 @@ impl GuiState {
     fn raw_output_path(&self, preview: bool) -> crate::error::Result<Option<PathBuf>> {
         (!preview && self.save_raw)
             .then(|| {
-                crate::infrastructure::config::json::validate_output_name(&self.output_name).map(
+                crate::domain::settings::validate_output_name(&self.output_name).map(
                     |output_name| {
                         PathBuf::from(&self.output_dir).join(format!("{output_name}_raw.tif"))
                     },

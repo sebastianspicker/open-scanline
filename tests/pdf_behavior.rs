@@ -162,36 +162,39 @@ fn aes256_accepts_unicode_passwords_and_rejects_pdf_limit_overflow() {
             .len(),
         1
     );
-    let error = save_pdf_with_options(
-        dir.join("aes256-overflow-password.pdf"),
-        &[sample(32, 24, 80)],
-        &PdfOptions {
-            password: Some("a".repeat(128)),
-            ..PdfOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("127 UTF-8 bytes"));
-    let error = save_pdf_with_options(
-        dir.join("aes256-empty-password.pdf"),
-        &[sample(32, 24, 80)],
-        &PdfOptions {
-            password: Some(String::new()),
-            ..PdfOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("must not be empty"));
-    let error = save_pdf_with_options(
-        dir.join("aes256-saslprep-empty-password.pdf"),
-        &[sample(32, 24, 80)],
-        &PdfOptions {
-            password: Some("\u{00ad}".into()),
-            ..PdfOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("after SASLprep"));
+    assert_rejected_passwords(&dir);
+}
+
+fn assert_rejected_passwords(dir: &std::path::Path) {
+    let password_cases = [
+        (
+            "aes256-overflow-password.pdf",
+            "a".repeat(128),
+            "127 UTF-8 bytes",
+        ),
+        (
+            "aes256-empty-password.pdf",
+            String::new(),
+            "must not be empty",
+        ),
+        (
+            "aes256-saslprep-empty-password.pdf",
+            "\u{00ad}".into(),
+            "after SASLprep",
+        ),
+    ];
+    for (filename, password, expected_error) in password_cases {
+        let error = save_pdf_with_options(
+            dir.join(filename),
+            &[sample(32, 24, 80)],
+            &PdfOptions {
+                password: Some(password),
+                ..PdfOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(expected_error));
+    }
 }
 
 #[test]

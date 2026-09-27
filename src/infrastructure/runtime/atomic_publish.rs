@@ -128,7 +128,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
 
     let left = fs::metadata(left)?;
@@ -137,7 +137,7 @@ fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> 
 }
 
 #[cfg(windows)]
-fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
     use std::ffi::c_void;
     use std::os::windows::io::AsRawHandle;
 
@@ -188,7 +188,7 @@ fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> 
 }
 
 #[cfg(not(any(unix, windows)))]
-fn files_have_same_identity(_left: &Path, _right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(_left: &Path, _right: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 

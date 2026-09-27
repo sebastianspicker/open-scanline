@@ -8,4 +8,4 @@ mod helpers;
 mod scan;
 
 #[cfg(feature = "gui")]
-pub(in crate::inbound::gui) use files::SaveAction;
+pub(in crate::inbound::gui) use files::{ReprocessAction, SaveAction};

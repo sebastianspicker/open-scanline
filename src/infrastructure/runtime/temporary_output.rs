@@ -11,6 +11,7 @@ static ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// An isolated, per-acquisition output directory that is removed on every
 /// return path. The directory is created atomically, so concurrent scans never
 /// share an output path; on Unix its contents are private to the current user.
+#[derive(Debug)]
 pub(crate) struct TemporaryOutput {
     directory: std::path::PathBuf,
     path: std::path::PathBuf,

@@ -1,8 +1,10 @@
+use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
+use crate::infrastructure::acquisition::{DeviceInfo, DeviceSession};
 use crate::infrastructure::media::load_image;
-use crate::workflows::ports::acquisition::{reject_single_page_duplex, DeviceInfo, DeviceSession};
+use crate::infrastructure::runtime::CommandSession;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -33,8 +35,7 @@ impl FileBackend {
 
 pub struct FileDeviceSession {
     path: PathBuf,
-    closed: Mutex<bool>,
-    cancelled: Mutex<bool>,
+    session: CommandSession,
     source: Mutex<Option<ImageBuffer>>,
 }
 
@@ -42,8 +43,7 @@ impl FileDeviceSession {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            closed: Mutex::new(false),
-            cancelled: Mutex::new(false),
+            session: CommandSession::default(),
             source: Mutex::new(None),
         }
     }
@@ -66,70 +66,52 @@ impl FileDeviceSession {
     }
 
     /// Nearest-neighbor resize to request width/height.
+    ///
+    /// Kept as a delegating associated function because it is reachable
+    /// through the `device` facade; the pure algorithm now lives in
+    /// [`crate::domain::processing::resize_nearest`].
     pub fn resize_nearest(image: &ImageBuffer, width: u32, height: u32) -> Result<ImageBuffer> {
-        if width == image.width && height == image.height {
-            return Ok(image.clone());
-        }
-        let bytes_per_pixel = image.bpp();
-        let output_len = crate::domain::image::checked_image_len(width, height, bytes_per_pixel)?;
-        let mut output = vec![0_u8; output_len];
-        let source_width = image.width as usize;
-        let source_height = image.height as usize;
-        for y in 0..height as usize {
-            let source_y = y * source_height / height as usize;
-            for x in 0..width as usize {
-                let source_x = x * source_width / width as usize;
-                let source_index = (source_y * source_width + source_x) * bytes_per_pixel;
-                let output_index = (y * width as usize + x) * bytes_per_pixel;
-                output[output_index..output_index + bytes_per_pixel]
-                    .copy_from_slice(&image.data[source_index..source_index + bytes_per_pixel]);
-            }
-        }
-        ImageBuffer::new(width, height, image.pixel_format, output)
+        crate::domain::processing::resize_nearest(image, width, height)
     }
 }
 
 impl DeviceSession for FileDeviceSession {
     fn scan(&self, request: &ScanRequest) -> Result<ImageBuffer> {
         reject_single_page_duplex(request)?;
-        if *self
-            .closed
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-        {
-            return Err(ScanError::Other("session closed".into()));
-        }
-        if *self
-            .cancelled
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-        {
-            return Err(ScanError::Cancelled("scan cancelled".into()));
-        }
-        let mut image = self.load()?;
-        if request.width > 0 && request.height > 0 {
-            image = Self::resize_nearest(&image, request.width, request.height)?;
-        }
-        if let Some(region) = request.region {
-            image = crate::domain::processing::crop(&image, region)?;
-        }
-        Ok(image)
+        super::batch::validate_session_state(
+            self.session.is_closed(),
+            self.session.is_cancelled(),
+        )?;
+        self.apply_request(self.load()?, request)
     }
 
     fn cancel(&self) {
-        if let Ok(mut cancelled) = self.cancelled.lock() {
-            *cancelled = true;
-        }
+        self.session.cancel();
     }
 
     fn close(&self) {
-        if let Ok(mut closed) = self.closed.lock() {
-            *closed = true;
-        }
+        self.session.close();
         if let Ok(mut source) = self.source.lock() {
             *source = None;
         }
     }
+}
+
+impl FileDeviceSession {
+    fn apply_request(&self, image: ImageBuffer, request: &ScanRequest) -> Result<ImageBuffer> {
+        let image = resize_for_request(image, request)?;
+        match request.region {
+            Some(region) => crate::domain::processing::crop(&image, region),
+            None => Ok(image),
+        }
+    }
+}
+
+fn resize_for_request(image: ImageBuffer, request: &ScanRequest) -> Result<ImageBuffer> {
+    if request.width > 0 && request.height > 0 {
+        return crate::domain::processing::resize_nearest(&image, request.width, request.height);
+    }
+    Ok(image)
 }
 
 pub(super) fn parse_file_device_id(device_id: &str) -> PathBuf {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflows::ports::acquisition::DeviceSession;
+use crate::infrastructure::acquisition::DeviceSession;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{mpsc, Arc};
@@ -74,6 +74,43 @@ fn wait_for_connection_close(stream: &mut TcpStream, timeout: Duration) {
     }
 }
 
+fn serve_stalled_document_job(
+    listener: TcpListener,
+    body_started_tx: mpsc::Sender<()>,
+    document_closed_tx: mpsc::Sender<()>,
+) -> Vec<String> {
+    let mut requests = Vec::new();
+    for (status, headers, body) in [
+        (
+            "200 OK",
+            "Content-Type: text/xml\r\n",
+            b"<ScannerCapabilities><Platen/></ScannerCapabilities>".as_slice(),
+        ),
+        (
+            "201 Created",
+            "Location: /eSCL/ScanJobs/stalled-job\r\n",
+            b"".as_slice(),
+        ),
+    ] {
+        let (mut stream, _) = listener.accept().unwrap();
+        requests.push(read_request(&mut stream));
+        write_chunked(&mut stream, status, headers, body);
+    }
+    let (mut document_stream, _) = listener.accept().unwrap();
+    requests.push(read_request(&mut document_stream));
+    document_stream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n1234")
+        .unwrap();
+    document_stream.flush().unwrap();
+    body_started_tx.send(()).unwrap();
+    wait_for_connection_close(&mut document_stream, Duration::from_secs(2));
+    document_closed_tx.send(()).unwrap();
+    let (mut delete_stream, _) = listener.accept().unwrap();
+    requests.push(read_request(&mut delete_stream));
+    write_chunked(&mut delete_stream, "200 OK", "", b"");
+    requests
+}
+
 #[test]
 fn stalled_next_document_cancellation_cleans_output_and_deletes_the_job() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -81,65 +118,9 @@ fn stalled_next_document_cancellation_cleans_output_and_deletes_the_job() {
     let (body_started_tx, body_started_rx) = mpsc::channel();
     let (document_closed_tx, document_closed_rx) = mpsc::channel();
     let server = thread::spawn(move || {
-        let mut requests = Vec::new();
-        for (status, headers, body) in [
-            (
-                "200 OK",
-                "Content-Type: text/xml\r\n",
-                b"<ScannerCapabilities><Platen/></ScannerCapabilities>".as_slice(),
-            ),
-            (
-                "201 Created",
-                "Location: /eSCL/ScanJobs/stalled-job\r\n",
-                b"".as_slice(),
-            ),
-        ] {
-            let (mut stream, _) = listener.accept().unwrap();
-            requests.push(read_request(&mut stream));
-            write_chunked(&mut stream, status, headers, body);
-        }
-
-        let (mut document_stream, _) = listener.accept().unwrap();
-        requests.push(read_request(&mut document_stream));
-        document_stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n1234")
-            .unwrap();
-        document_stream.flush().unwrap();
-        body_started_tx.send(()).unwrap();
-        wait_for_connection_close(&mut document_stream, Duration::from_secs(2));
-        document_closed_tx.send(()).unwrap();
-
-        let (mut delete_stream, _) = listener.accept().unwrap();
-        requests.push(read_request(&mut delete_stream));
-        write_chunked(&mut delete_stream, "200 OK", "", b"");
-        requests
+        serve_stalled_document_job(listener, body_started_tx, document_closed_tx)
     });
-    let session = Arc::new(EsclDeviceSession::new(
-        format!("escl:127.0.0.1:{port}"),
-        Endpoint {
-            host: "127.0.0.1".into(),
-            port,
-            secure: false,
-        },
-        false,
-    ));
-    let cancellation = CancellationToken::new();
-    session.bind_cancellation(cancellation.clone());
-    let (result_tx, result_rx) = mpsc::channel();
-    let scanning_session = Arc::clone(&session);
-    let scan = thread::spawn(move || {
-        result_tx
-            .send(scanning_session.scan_pages(
-                &ScanRequest {
-                    width: 1,
-                    height: 1,
-                    ..Default::default()
-                },
-                1,
-                &mut |_| Ok(()),
-            ))
-            .unwrap();
-    });
+    let (cancellation, result_rx, scan) = start_stalled_scan(port);
 
     body_started_rx
         .recv_timeout(Duration::from_secs(2))
@@ -158,4 +139,39 @@ fn stalled_next_document_cancellation_cleans_output_and_deletes_the_job() {
     let requests = server.join().unwrap();
     assert!(requests[2].starts_with("GET /eSCL/ScanJobs/stalled-job/NextDocument "));
     assert!(requests[3].starts_with("DELETE /eSCL/ScanJobs/stalled-job "));
+}
+
+fn start_stalled_scan(
+    port: u16,
+) -> (
+    CancellationToken,
+    mpsc::Receiver<Result<ScanPagesResult>>,
+    thread::JoinHandle<()>,
+) {
+    let session = Arc::new(EsclDeviceSession::new(
+        format!("escl:127.0.0.1:{port}"),
+        Endpoint {
+            host: "127.0.0.1".into(),
+            port,
+            secure: false,
+        },
+        false,
+    ));
+    let cancellation = CancellationToken::new();
+    session.bind_cancellation(cancellation.clone());
+    let (result_tx, result_rx) = mpsc::channel();
+    let scan = thread::spawn(move || {
+        result_tx
+            .send(session.scan_pages(
+                &ScanRequest {
+                    width: 1,
+                    height: 1,
+                    ..Default::default()
+                },
+                1,
+                &mut |_| Ok(()),
+            ))
+            .unwrap();
+    });
+    (cancellation, result_rx, scan)
 }

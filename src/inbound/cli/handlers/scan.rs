@@ -2,12 +2,10 @@ use super::common::{parse_crop, print_wrote};
 use crate::domain::acquisition::DeviceOpenPolicy;
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
-use crate::inbound::api::scan::{
-    run_scan_to_file_with_export_options_and_token_and_policy, ScanToFileArgs,
-};
 use crate::inbound::cli::args::ScanSource;
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::settings::AppConfig;
+use crate::infrastructure::config::AppConfig;
+use crate::operation::CancellationToken;
+use crate::workflows::capture::single::{self, CaptureOptions, ScanToFileArgs};
 use std::path::PathBuf;
 
 pub(super) struct Request {
@@ -87,12 +85,14 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
 
     let allow_unlisted_escl = request.acquisition.allow_unlisted_escl;
     let args = scan_args(request.acquisition, request.config, pipeline);
-    let result = run_scan_to_file_with_export_options_and_token_and_policy(
+    let result = single::run_scan_to_file(
         args,
-        &request.export,
-        cancellation,
-        DeviceOpenPolicy {
-            allow_unlisted_escl,
+        CaptureOptions {
+            export: request.export.clone(),
+            cancellation,
+            policy: DeviceOpenPolicy {
+                allow_unlisted_escl,
+            },
         },
     );
     super::router::clear_pdf_password(&mut request.export.pdf_password);
@@ -171,6 +171,13 @@ fn apply_crop(pipeline: &mut PipelinePrefs, value: Option<&str>) {
 }
 
 fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
+    apply_basic_color_overrides(pipeline, overrides);
+    apply_level_overrides(pipeline, overrides);
+    apply_explicit_bool(&mut pipeline.white_balance, overrides.white_balance);
+    apply_explicit_bool(&mut pipeline.auto_levels, overrides.auto_levels);
+}
+
+fn apply_basic_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
     if let Some(brightness) = overrides.brightness {
         pipeline.brightness = brightness;
     }
@@ -187,6 +194,9 @@ fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverride
         pipeline.curves = Some(curves.clone());
     }
     apply_explicit_bool(&mut pipeline.desaturate, overrides.desaturate);
+}
+
+fn apply_level_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
     if let Some(levels_black) = overrides.levels_black {
         pipeline.levels_black = levels_black;
     }
@@ -196,8 +206,6 @@ fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverride
     if let Some(levels_gamma) = overrides.levels_gamma {
         pipeline.levels_gamma = levels_gamma;
     }
-    apply_explicit_bool(&mut pipeline.white_balance, overrides.white_balance);
-    apply_explicit_bool(&mut pipeline.auto_levels, overrides.auto_levels);
 }
 
 fn apply_filter_overrides(pipeline: &mut PipelinePrefs, overrides: &FilterOverrides) {
@@ -228,32 +236,16 @@ fn apply_filter_overrides(pipeline: &mut PipelinePrefs, overrides: &FilterOverri
 }
 
 fn apply_enabled_tier(target: &mut Option<String>, value: Option<&str>) {
-    let Some(value) = value else {
-        return;
-    };
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    if matches!(
-        value.to_ascii_lowercase().as_str(),
-        "off" | "none" | "false"
-    ) {
-        *target = None;
-    } else {
-        *target = Some(value.to_string());
+    if let Some(effective) =
+        crate::domain::settings::override_disableable_setting(value, &["false"])
+    {
+        *target = effective;
     }
 }
 
 fn apply_optional_value(target: &mut Option<String>, value: Option<&str>) {
-    let Some(value) = value else {
-        return;
-    };
-    let value = value.trim();
-    if matches!(value.to_ascii_lowercase().as_str(), "off" | "none") {
-        *target = None;
-    } else if !value.is_empty() {
-        *target = Some(value.to_string());
+    if let Some(effective) = crate::domain::settings::override_disableable_setting(value, &[]) {
+        *target = effective;
     }
 }
 

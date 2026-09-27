@@ -6,6 +6,8 @@ use crate::error::{Result, ScanError};
 mod color;
 mod fading;
 mod infrared;
+#[cfg(test)]
+mod tests;
 
 fn clamp_f(v: f64) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
@@ -116,13 +118,21 @@ impl MedianContext<'_> {
                 vals.push(self.data[(yy * self.width as usize + xx) * self.bpp + channel]);
             }
         }
-        vals.sort_unstable();
-        vals[vals.len() / 2]
+        let middle = vals.len() / 2;
+        if vals.len() >= 49 {
+            *vals.select_nth_unstable(middle).1
+        } else {
+            vals.sort_unstable();
+            vals[middle]
+        }
     }
 }
 
 /// Separable box blur.
 pub fn box_blur(image: &ImageBuffer, radius: i32) -> Result<ImageBuffer> {
+    if image.width == 0 || image.height == 0 {
+        return ImageBuffer::new(image.width, image.height, image.pixel_format, Vec::new());
+    }
     let r = radius.max(1) as usize;
     let bpp = image.bpp();
     let w = image.width as usize;
@@ -148,36 +158,88 @@ struct BlurContext {
 }
 
 impl BlurContext {
-    fn pass(&self, src: &[u8], out: &mut [u8], horizontal: bool) {
-        let (line_count, line_len) = if horizontal {
-            (self.height, self.width)
+    fn pass(&self, source: &[u8], output: &mut [u8], horizontal: bool) {
+        if horizontal {
+            self.pass_horizontal(source, output);
         } else {
-            (self.width, self.height)
-        };
-        for line in 0..line_count {
+            self.pass_vertical(source, output);
+        }
+    }
+
+    fn pass_horizontal(&self, source: &[u8], output: &mut [u8]) {
+        for row in 0..self.height {
             for channel in 0..self.bpp {
-                let mut prefix = vec![0u32; line_len + 1];
-                for pos in 0..line_len {
-                    prefix[pos + 1] =
-                        prefix[pos] + src[self.index(line, pos, channel, horizontal)] as u32;
-                }
-                for pos in 0..line_len {
-                    let lo = pos.saturating_sub(self.radius);
-                    let hi = (pos + self.radius).min(line_len - 1);
-                    let value = (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1) as u32;
-                    out[self.index(line, pos, channel, horizontal)] = value as u8;
-                }
+                let start = row * self.width * self.bpp + channel;
+                self.blur_line(source, output, start, self.bpp, self.width);
             }
         }
     }
 
-    fn index(&self, line: usize, pos: usize, channel: usize, horizontal: bool) -> usize {
-        let pixel = if horizontal {
-            line * self.width + pos
-        } else {
-            pos * self.width + line
-        };
-        pixel * self.bpp + channel
+    fn pass_vertical(&self, source: &[u8], output: &mut [u8]) {
+        let row_bytes = self.width * self.bpp;
+        let initial_end = self.radius.min(self.height - 1);
+        let mut sums = vec![0_u32; row_bytes];
+        for row in 0..=initial_end {
+            add_row(&mut sums, image_row(source, row, row_bytes));
+        }
+        for row in 0..self.height {
+            let lo = row.saturating_sub(self.radius);
+            let hi = (row + self.radius).min(self.height - 1);
+            write_average_row(image_row_mut(output, row, row_bytes), &sums, hi - lo + 1);
+            if row >= self.radius {
+                subtract_row(&mut sums, image_row(source, row - self.radius, row_bytes));
+            }
+            if row + self.radius + 1 < self.height {
+                add_row(
+                    &mut sums,
+                    image_row(source, row + self.radius + 1, row_bytes),
+                );
+            }
+        }
+    }
+
+    fn blur_line(&self, source: &[u8], output: &mut [u8], start: usize, stride: usize, len: usize) {
+        let initial_end = self.radius.min(len - 1);
+        let mut sum = (0..=initial_end)
+            .map(|position| source[start + position * stride] as u32)
+            .sum::<u32>();
+        for pos in 0..len {
+            let lo = pos.saturating_sub(self.radius);
+            let hi = (pos + self.radius).min(len - 1);
+            output[start + pos * stride] = (sum / (hi - lo + 1) as u32) as u8;
+            if pos >= self.radius {
+                sum -= source[start + (pos - self.radius) * stride] as u32;
+            }
+            if pos + self.radius + 1 < len {
+                sum += source[start + (pos + self.radius + 1) * stride] as u32;
+            }
+        }
+    }
+}
+
+fn image_row(data: &[u8], row: usize, row_bytes: usize) -> &[u8] {
+    &data[row * row_bytes..(row + 1) * row_bytes]
+}
+
+fn image_row_mut(data: &mut [u8], row: usize, row_bytes: usize) -> &mut [u8] {
+    &mut data[row * row_bytes..(row + 1) * row_bytes]
+}
+
+fn add_row(sums: &mut [u32], row: &[u8]) {
+    for (sum, &value) in sums.iter_mut().zip(row) {
+        *sum += value as u32;
+    }
+}
+
+fn subtract_row(sums: &mut [u32], row: &[u8]) {
+    for (sum, &value) in sums.iter_mut().zip(row) {
+        *sum -= value as u32;
+    }
+}
+
+fn write_average_row(output: &mut [u8], sums: &[u32], count: usize) {
+    for (value, &sum) in output.iter_mut().zip(sums) {
+        *value = (sum / count as u32) as u8;
     }
 }
 
