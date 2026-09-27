@@ -2,15 +2,15 @@
 
 use crate::composition::Runtime;
 use crate::domain::acquisition::DeviceOpenPolicy;
+use crate::domain::export::ExportOptions;
 use crate::error::Result;
+use crate::operation::CancellationToken;
 use crate::workflows::capture::batch::run_batch_scan_with_export_options_inner_with_ports;
 #[cfg(feature = "gui")]
 use crate::workflows::capture::batch::{
     run_batch_scan_with_report_inner_with_ports, BatchEventObserver, BatchScanReport,
 };
 pub use crate::workflows::capture::batch::{BatchCancelCheck, BatchScanArgs, MAX_BATCH_PAGES};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::publication::ExportOptions;
 use std::path::PathBuf;
 
 pub fn run_batch_scan(args: BatchScanArgs) -> Result<Vec<PathBuf>> {

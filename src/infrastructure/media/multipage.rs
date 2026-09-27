@@ -1,7 +1,7 @@
 use super::{load_image, save_image_with_cancellation};
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use image::Rgb;
 use std::path::{Path, PathBuf};
 

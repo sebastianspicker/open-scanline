@@ -2,7 +2,7 @@ use super::searchable::{encode_searchable_text, SearchableFont};
 use crate::domain::image::{ImageBuffer, MAX_IMAGE_BYTES};
 use crate::error::{Result, ScanError};
 use crate::infrastructure::media::to_rgb_bytes;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Document, Object, ObjectId, Stream, StringFormat};
 

@@ -14,19 +14,18 @@ fn parse_saturation(value: &str) -> Result<f64, String> {
     let value = value
         .parse::<f64>()
         .map_err(|_| "saturation must be a number from -100 to 100".to_string())?;
-    crate::infrastructure::config::json::validate_saturation(value)
-        .map_err(|error| error.to_string())
+    crate::domain::settings::validate_saturation(value).map_err(|error| error.to_string())
 }
 
 fn parse_hue(value: &str) -> Result<f64, String> {
     let value = value
         .parse::<f64>()
         .map_err(|_| "hue must be a number of degrees from -180 to 180".to_string())?;
-    crate::infrastructure::config::json::validate_hue(value).map_err(|error| error.to_string())
+    crate::domain::settings::validate_hue(value).map_err(|error| error.to_string())
 }
 
 fn parse_curves(value: &str) -> Result<CurvePoints, String> {
-    crate::infrastructure::config::json::parse_curve_points(value)
+    crate::domain::settings::parse_curve_points(value)
         .map_err(|error| error.to_string())?
         .map(CurvePoints)
         .ok_or_else(|| "curves must contain at least two x:y points".to_string())

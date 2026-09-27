@@ -1,6 +1,6 @@
 use super::{scanner_agent_with_phase_timeout, Endpoint};
 use crate::infrastructure::runtime::TemporaryOutput;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::time::Duration;

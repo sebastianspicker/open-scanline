@@ -1,6 +1,6 @@
 use super::check_pdf_cancellation;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use lopdf::{dictionary, Document, Object, ObjectId, Stream};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;

@@ -15,6 +15,7 @@ pub use probing::{
 };
 pub use session::{open, open_with_cancellation, WiaDeviceSession};
 
+pub use crate::infrastructure::media::NativeImageDecoder;
 pub use crate::infrastructure::runtime::{
-    ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder, NativeImageDecoder,
+    ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder,
 };

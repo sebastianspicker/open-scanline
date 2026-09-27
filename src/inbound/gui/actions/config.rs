@@ -1,6 +1,7 @@
 use super::super::parse_crop_string;
 use super::super::state::GuiState;
-use crate::infrastructure::config::json::{parse_curve_points, save_config};
+use crate::domain::settings::parse_curve_points;
+use crate::infrastructure::config::json::save_config;
 
 type SaveConfigValues = (Option<[i32; 4]>, Option<Vec<[i32; 2]>>);
 
@@ -112,7 +113,7 @@ impl GuiState {
         &self,
         crop: Option<[i32; 4]>,
         curves: Option<Vec<[i32; 2]>>,
-    ) -> crate::workflows::settings::AppConfig {
+    ) -> crate::infrastructure::config::AppConfig {
         let mut config = self.config.clone();
         apply_gui_config_fields!(config, self, crop, curves);
         config

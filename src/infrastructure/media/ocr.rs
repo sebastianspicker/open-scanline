@@ -3,7 +3,7 @@
 use super::load_image;
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -38,19 +38,17 @@ impl crate::workflows::ports::media::OcrJob for ExportOcrJob {
 }
 
 pub(crate) fn prepare_job(
-    engine: crate::workflows::publication::OcrEngine,
+    engine: crate::domain::export::OcrEngine,
 ) -> Result<Arc<dyn crate::workflows::ports::media::OcrJob>> {
-    if engine == crate::workflows::publication::OcrEngine::Ocrs && !cfg!(feature = "ocrs") {
+    if engine == crate::domain::export::OcrEngine::Ocrs && !cfg!(feature = "ocrs") {
         return Err(crate::error::ScanError::Unsupported(
             "OCRS support was not compiled into this build".into(),
         ));
     }
     let job = match engine {
-        crate::workflows::publication::OcrEngine::Offline => ExportOcrJob::Offline,
-        crate::workflows::publication::OcrEngine::Ocrs => {
-            ExportOcrJob::Ocrs(ocrs_runner::OcrsJob::new())
-        }
-        crate::workflows::publication::OcrEngine::Tesseract => ExportOcrJob::Tesseract,
+        crate::domain::export::OcrEngine::Offline => ExportOcrJob::Offline,
+        crate::domain::export::OcrEngine::Ocrs => ExportOcrJob::Ocrs(ocrs_runner::OcrsJob::new()),
+        crate::domain::export::OcrEngine::Tesseract => ExportOcrJob::Tesseract,
     };
     Ok(Arc::new(job))
 }
@@ -116,17 +114,17 @@ pub fn ocr_image_with_cancellation(
 pub fn ocr_image_with_engine_with_cancellation(
     image: &ImageBuffer,
     language: &str,
-    engine: crate::workflows::publication::OcrEngine,
+    engine: crate::domain::export::OcrEngine,
     cancellation: Option<&CancellationToken>,
 ) -> Result<OcrResult> {
     match engine {
-        crate::workflows::publication::OcrEngine::Offline => ocr_image_offline(image),
-        crate::workflows::publication::OcrEngine::Ocrs => ocrs_runner::recognize(
+        crate::domain::export::OcrEngine::Offline => ocr_image_offline(image),
+        crate::domain::export::OcrEngine::Ocrs => ocrs_runner::recognize(
             image,
             if language.is_empty() { "eng" } else { language },
             cancellation,
         ),
-        crate::workflows::publication::OcrEngine::Tesseract => {
+        crate::domain::export::OcrEngine::Tesseract => {
             ocr_image_tesseract_with_cancellation(image, language, cancellation)
         }
     }
@@ -148,10 +146,10 @@ pub fn ocr_file_with_cancellation(
 pub fn ocr_file_with_engine_with_cancellation(
     path: impl AsRef<Path>,
     language: &str,
-    engine: crate::workflows::publication::OcrEngine,
+    engine: crate::domain::export::OcrEngine,
     cancellation: CancellationToken,
 ) -> Result<OcrResult> {
-    if engine == crate::workflows::publication::OcrEngine::Ocrs && !cfg!(feature = "ocrs") {
+    if engine == crate::domain::export::OcrEngine::Ocrs && !cfg!(feature = "ocrs") {
         return Err(crate::error::ScanError::Unsupported(
             "OCRS support was not compiled into this build".into(),
         ));
@@ -183,9 +181,9 @@ pub fn ocr_module_info() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::export::OcrEngine;
     use crate::domain::image::PixelFormat;
     use crate::error::ScanError;
-    use crate::workflows::publication::OcrEngine;
     fn sample() -> ImageBuffer {
         ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![255; 3]).unwrap()
     }

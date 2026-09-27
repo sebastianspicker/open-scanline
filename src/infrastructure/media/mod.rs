@@ -1,8 +1,6 @@
 //! Native image, profile, OCR, and document-media integrations.
 
-mod aggregate_cache;
-#[cfg(test)]
-mod aggregate_integration_tests;
+pub(crate) mod aggregate_cache;
 mod codecs;
 pub mod icc;
 mod multipage;
@@ -15,7 +13,7 @@ mod tiff;
 pub use codecs::{
     convert_image, detect_format, detect_format_bytes, is_png_magic, load_image,
     load_image_with_limits, read_magic, save_image, save_image_with_cancellation,
-    supported_extensions, to_rgb_bytes, validate_png_magic, PNG_MAGIC,
+    supported_extensions, to_rgb_bytes, validate_png_magic, NativeImageDecoder, PNG_MAGIC,
 };
 pub use icc::*;
 pub(crate) use multipage::save_raw_image_with_cancellation;
@@ -43,7 +41,7 @@ pub fn convert_image_with_cancellation(
     input: impl AsRef<std::path::Path>,
     output: impl AsRef<std::path::Path>,
     dpi: Option<u32>,
-    cancellation: crate::workflows::operation::CancellationToken,
+    cancellation: crate::operation::CancellationToken,
 ) -> crate::error::Result<std::path::PathBuf> {
     let image = load_image(input)?;
     save_image_with_cancellation(output, &image, dpi, None, Some(&cancellation))
@@ -53,8 +51,8 @@ pub fn convert_image_with_cancellation(
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NativeMedia;
 
-struct NativeAggregateSession {
-    loader: aggregate_cache::SharedPageLoader,
+pub(crate) struct NativeAggregateSession {
+    pub(crate) loader: aggregate_cache::SharedPageLoader,
 }
 
 impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSession {
@@ -97,7 +95,7 @@ impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSe
         destination: &std::path::Path,
         dpi: Option<u32>,
         transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         tiff::save_multipage_tiff_with_loader_and_transform(
             paths,
@@ -116,7 +114,7 @@ impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSe
         &mut self,
         paths: &[std::path::PathBuf],
         destination: &std::path::Path,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         multipage::save_index_contact_sheet_with_loader(
             paths,
@@ -184,7 +182,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
 
     fn prepare_ocr_job(
         &self,
-        engine: crate::workflows::publication::OcrEngine,
+        engine: crate::domain::export::OcrEngine,
     ) -> crate::error::Result<Option<std::sync::Arc<dyn crate::workflows::ports::media::OcrJob>>>
     {
         ocr::prepare_job(engine).map(Some)
@@ -220,8 +218,8 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         &self,
         image: &crate::domain::image::ImageBuffer,
         language: &str,
-        engine: crate::workflows::publication::OcrEngine,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        engine: crate::domain::export::OcrEngine,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<String> {
         Ok(ocr_image_with_engine_with_cancellation(image, language, engine, cancellation)?.text)
     }
@@ -232,7 +230,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         image: &crate::domain::image::ImageBuffer,
         dpi: Option<u32>,
         quality: Option<u8>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         save_image_with_cancellation(destination, image, dpi, quality, cancellation)
     }
@@ -242,7 +240,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         destination: &std::path::Path,
         image: &crate::domain::image::ImageBuffer,
         dpi: Option<u32>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         save_raw_image_with_cancellation(destination, image, dpi, cancellation)
     }
@@ -265,7 +263,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         title: &str,
         password: Option<&str>,
         searchable_pages: Option<Vec<String>>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         save_pdf_with_options_and_cancellation(
             destination,
@@ -324,7 +322,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         destination: &std::path::Path,
         dpi: Option<u32>,
         transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         match transform {
             Some(transform) => tiff::save_multipage_tiff_with_loader_and_transform(
@@ -343,7 +341,7 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         &self,
         paths: &[std::path::PathBuf],
         destination: &std::path::Path,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         save_index_contact_sheet_with_cancellation(
             paths,

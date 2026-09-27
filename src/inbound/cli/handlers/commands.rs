@@ -14,14 +14,14 @@ use crate::inbound::gui::run_gui;
 use crate::inbound::plugin::run_plugin_mode_with_token;
 use crate::infrastructure::acquisition::{list_all_devices, list_backends};
 use crate::infrastructure::config::json::{default_config_path, load_config, save_config};
+use crate::infrastructure::config::AppConfig;
 use crate::infrastructure::distribution::{build_portable, PackagingOptions};
 use crate::infrastructure::media::convert_image_with_cancellation;
 use crate::infrastructure::media::ocr::{model_pack, ocr_file_with_engine_with_cancellation};
 use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::settings::AppConfig;
+use crate::operation::CancellationToken;
 use std::path::{Path, PathBuf};
 
 pub(super) fn devices() -> i32 {

@@ -6,7 +6,7 @@ use crate::infrastructure::runtime::{
     run_contained_command_with_artifact_quota, ArtifactQuota, ArtifactWatch, CommandSpec,
     TemporaryOutput,
 };
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -37,7 +37,7 @@ pub fn recognize(
     language: &str,
     cancellation: Option<&CancellationToken>,
 ) -> Result<super::OcrResult> {
-    crate::workflows::settings::validate_ocr_language(if language.is_empty() {
+    crate::domain::settings::validate_ocr_language(if language.is_empty() {
         "eng"
     } else {
         language

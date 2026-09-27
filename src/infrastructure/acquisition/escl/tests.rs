@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflows::ports::acquisition::DeviceSession;
+use crate::infrastructure::acquisition::DeviceSession;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{mpsc, Arc};

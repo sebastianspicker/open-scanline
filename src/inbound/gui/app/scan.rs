@@ -29,7 +29,7 @@ impl OpenScanlineApp {
         .ok()?;
         if let Some(output) = working_image.as_ref() {
             args.out = output.path().to_path_buf();
-            export = crate::workflows::publication::ExportOptions::default();
+            export = crate::domain::export::ExportOptions::default();
         }
         Some(ScanJobPlan {
             args,
@@ -43,7 +43,7 @@ impl OpenScanlineApp {
         })
     }
 
-    fn scan_export(&mut self, preview: bool) -> crate::workflows::publication::ExportOptions {
+    fn scan_export(&mut self, preview: bool) -> crate::domain::export::ExportOptions {
         if preview {
             let mut export = self.state.export_options();
             export.pdf_password = None;

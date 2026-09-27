@@ -23,6 +23,7 @@ mod infrastructure;
 pub mod manufacturers;
 pub mod ml;
 pub mod ocr;
+mod operation;
 pub mod packaging;
 pub mod pipeline;
 pub mod platform;

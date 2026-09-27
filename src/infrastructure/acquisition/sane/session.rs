@@ -6,17 +6,19 @@ use super::capabilities::{
 use super::command::build_scanimage_command;
 use super::probing::{which, SystemCommandRunner};
 use super::{emit_simulated_pages, emit_single_pages};
+use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
+use crate::infrastructure::acquisition::{
+    DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
+};
+use crate::infrastructure::media::NativeImageDecoder;
 use crate::infrastructure::runtime::{
     artifact_quota_for_request, document_batch_timeout, validate_artifact_quota, CommandOutput,
-    CommandRunner, CommandSession, CommandSpec, ImageDecoder, NativeImageDecoder, TemporaryOutput,
+    CommandRunner, CommandSession, CommandSpec, ImageDecoder, TemporaryOutput,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    reject_single_page_duplex, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
-};
+use crate::operation::CancellationToken;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;

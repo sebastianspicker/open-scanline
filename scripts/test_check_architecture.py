@@ -33,6 +33,23 @@ class ArchitectureTests(unittest.TestCase):
         self.check("fn x<'a>(x: &'a crate::core::X) {}", True)
         self.check("let x = '\"'; use crate::{core::X};", True)
 
+    def test_infrastructure_cannot_import_workflows_except_media_port(self):
+        self.check(
+            "use crate::workflows::capture::batch::Foo;",
+            True,
+            "src/infrastructure/x.rs",
+        )
+        self.check(
+            "use crate::workflows::ports::media::MediaPort;",
+            False,
+            "src/infrastructure/x.rs",
+        )
+        self.check(
+            "use crate::workflows::ports::acquisition::AcquisitionPort;",
+            True,
+            "src/infrastructure/x.rs",
+        )
+
     def test_existing_rules(self):
         self.check("let x = crate::workflows::x();", True, "src/domain/x.rs")
         self.check("use crate::infrastructure::x;", True, "src/workflows/x.rs")

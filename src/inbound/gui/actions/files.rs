@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use super::super::state::MultipageSaveCandidate;
-use crate::workflows::publication::ExportOptions;
+use crate::domain::export::ExportOptions;
 
 /// Immutable save request assembled before any container or encoder work.
 #[derive(Debug, Clone)]
@@ -207,8 +207,7 @@ impl GuiState {
     }
 
     pub(in super::super) fn multipage_save_destination(&self) -> crate::error::Result<PathBuf> {
-        let output_name =
-            crate::infrastructure::config::json::validate_output_name(&self.output_name)?;
+        let output_name = crate::domain::settings::validate_output_name(&self.output_name)?;
         Ok(PathBuf::from(&self.output_dir).join(format!(
             "{output_name}_multipage.{}",
             self.multipage_extension()?

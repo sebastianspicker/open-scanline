@@ -150,7 +150,7 @@ fn can_start(state: &GuiState, batch: bool) -> bool {
         state.output_fmt == "pdf" || (batch && state.multipage && state.multipage_format == "pdf");
     !state.device.trim().is_empty()
         && !state.output_dir.trim().is_empty()
-        && crate::infrastructure::config::json::validate_output_name(&state.output_name).is_ok()
+        && crate::domain::settings::validate_output_name(&state.output_name).is_ok()
         && (pdf || (!state.searchable_pdf && state.pdf_password.is_empty()))
         && !(batch && state.output_fmt == "jxl")
         && (!state.duplex

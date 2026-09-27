@@ -4,7 +4,7 @@ use super::seams::{CommandOutput, ImageDecoder};
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -113,9 +113,7 @@ fn resize_materialized_output(image: &mut ImageBuffer, request: &ScanRequest) ->
         .map(|region| (region.width, region.height))
         .unwrap_or((request.width, request.height));
     if width > 0 && height > 0 && (image.width != width || image.height != height) {
-        *image = crate::infrastructure::acquisition::FileDeviceSession::resize_nearest(
-            image, width, height,
-        )?;
+        *image = crate::domain::processing::resize_nearest(image, width, height)?;
     }
     Ok(())
 }

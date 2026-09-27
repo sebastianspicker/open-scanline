@@ -5,7 +5,7 @@ use crate::infrastructure::runtime::{
     run_contained_command_with_artifact_quota, ArtifactQuota, ArtifactWatch, CommandSpec,
     TemporaryOutput,
 };
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgb, Rgba};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -107,6 +107,17 @@ pub fn load_image(path: impl AsRef<Path>) -> Result<ImageBuffer> {
         crate::domain::image::MAX_IMAGE_DIMENSION,
         crate::domain::image::MAX_IMAGE_BYTES as u64,
     )
+}
+
+/// Production decoder that satisfies the runtime [`ImageDecoder`] seam.
+///
+/// [`ImageDecoder`]: crate::infrastructure::runtime::ImageDecoder
+pub struct NativeImageDecoder;
+
+impl crate::infrastructure::runtime::ImageDecoder for NativeImageDecoder {
+    fn decode(&self, path: &Path) -> Result<ImageBuffer> {
+        load_image(path)
+    }
 }
 
 /// Decode an image with explicit dimensions and allocation ceilings.

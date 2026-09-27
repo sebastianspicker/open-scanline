@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflows::ports::acquisition::DeviceMaintenanceCapabilities;
+use crate::infrastructure::acquisition::DeviceMaintenanceCapabilities;
 use std::sync::{Condvar, Mutex};
 
 type DiscoveryResult = crate::error::Result<DiscoverySnapshot>;

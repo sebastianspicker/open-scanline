@@ -3,17 +3,17 @@
 use crate::domain::acquisition::{
     validate_scan_dpi, DeviceOpenPolicy, ScanMode, ScanProgress, ScanRequest,
 };
+use crate::domain::export::ExportOptions;
 use crate::domain::image::{checked_image_len, ImageBuffer, PixelFormat, Rect};
 use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{AcquisitionPort, DeviceSession};
+use crate::infrastructure::acquisition::DeviceSession;
+use crate::infrastructure::config::AppConfig;
+use crate::operation::CancellationToken;
+use crate::workflows::ports::acquisition::AcquisitionPort;
 use crate::workflows::ports::media::MediaPort;
 use crate::workflows::process::{process_and_publish_page_with_media, PageWorkflowRequest};
-use crate::workflows::publication::{
-    prepare_export_options_with_media, ExportOptions, PreparedExportOptions,
-};
-use crate::workflows::settings::AppConfig;
+use crate::workflows::publication::{prepare_export_options_with_media, PreparedExportOptions};
 use std::path::PathBuf;
 
 /// Typed scan arguments shared by each application entry point.

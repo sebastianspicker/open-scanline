@@ -76,7 +76,7 @@ fn execute_reprocess_action(
     token: &CancellationToken,
 ) -> crate::error::Result<PathBuf> {
     let process_export = prepared_export
-        .map(|_| crate::workflows::publication::ExportOptions::default())
+        .map(|_| crate::domain::export::ExportOptions::default())
         .unwrap_or_else(|| action.export.clone());
     let raster = process_image_file_with_export_options_and_token(
         &action.options,

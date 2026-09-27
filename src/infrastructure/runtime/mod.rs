@@ -11,9 +11,7 @@ mod session;
 mod supervision;
 mod temporary_output;
 
-pub use seams::{
-    ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder, NativeImageDecoder,
-};
+pub use seams::{ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder};
 
 pub(crate) use artifact_watch::{
     artifact_quota_for_request, validate_artifact_quota, ArtifactWatch,

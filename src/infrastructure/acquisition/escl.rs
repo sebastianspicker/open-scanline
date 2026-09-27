@@ -1,14 +1,14 @@
 //! eSCL / AirScan network backend — list/open/scan with HTTP CreateScanJob.
 
+use crate::domain::acquisition::{reject_single_page_duplex, validate_page_limit};
 use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::infrastructure::runtime::{simulate_backends, TemporaryOutput};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    reject_single_page_duplex, validate_page_limit, BackendInfo, DeviceInfo, DeviceSession,
-    ScanPagesEnd, ScanPagesResult,
+use crate::infrastructure::acquisition::{
+    BackendInfo, DeviceInfo, DeviceSession, ScanPagesEnd, ScanPagesResult,
 };
+use crate::infrastructure::runtime::{simulate_backends, TemporaryOutput};
+use crate::operation::CancellationToken;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use quick_xml::events::Event;
 use quick_xml::Reader;

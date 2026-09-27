@@ -25,6 +25,7 @@ pub use filters::{
     infrared_clean, median_filter, restore_colors, restore_fading, sharpen,
 };
 pub use geometry::{
-    auto_deskew, crop, deskew, estimate_skew_degrees, flip_horizontal, flip_vertical, rotate,
+    auto_deskew, crop, deskew, estimate_skew_degrees, flip_horizontal, flip_vertical,
+    resize_nearest, rotate,
 };
 pub use plan::PipelinePrefs;

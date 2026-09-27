@@ -4,7 +4,7 @@ use super::{check_pdf_cancellation, validate_pdf_password};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::media::codecs::{create_output_temp, validate_output_container};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{
     dictionary, Document, EncryptionState, EncryptionVersion, Object, ObjectId, Permissions,

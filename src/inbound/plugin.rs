@@ -7,7 +7,7 @@ use crate::infrastructure::acquisition::{
 };
 use crate::infrastructure::config::json::{default_config_path, load_config};
 use crate::infrastructure::runtime::platform::platform_summary;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use crate::{APP_NAME, VERSION};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -181,7 +181,7 @@ fn perform_plugin_scan(
 
 fn selected_plugin_device(
     device: Option<&str>,
-    devices: &[crate::workflows::ports::acquisition::DeviceInfo],
+    devices: &[crate::infrastructure::acquisition::DeviceInfo],
 ) -> String {
     device
         .map(str::to_owned)

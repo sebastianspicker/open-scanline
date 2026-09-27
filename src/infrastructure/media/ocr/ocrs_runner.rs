@@ -3,7 +3,7 @@
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::media::ocr::model_pack;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 #[cfg(feature = "ocrs")]
 use std::borrow::Cow;
 use std::path::Path;

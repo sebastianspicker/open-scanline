@@ -1,3 +1,4 @@
+use crate::domain::acquisition::validate_page_limit;
 use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
@@ -5,7 +6,6 @@ use crate::infrastructure::runtime::{
     validate_artifact_quota, ArtifactQuota, CommandRunner, CommandSession, CommandSpec,
     ImageDecoder, TemporaryOutput,
 };
-use crate::workflows::ports::acquisition::validate_page_limit;
 use std::sync::Mutex;
 use std::time::Duration;
 

@@ -4,7 +4,7 @@ use crate::inbound::cli::args::{
 };
 use crate::inbound::cli::handlers::{cancellation, commands, process, scan};
 use crate::infrastructure::config::json::load_config;
-use crate::workflows::settings::AppConfig;
+use crate::infrastructure::config::AppConfig;
 use std::path::Path;
 
 pub(super) fn scan(options: ScanOptions, config_path: Option<&Path>) -> i32 {

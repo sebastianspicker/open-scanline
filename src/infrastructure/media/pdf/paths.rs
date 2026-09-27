@@ -6,7 +6,7 @@ use super::page::{PdfPageBuilder, PdfPageContext};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::media::load_image;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::path::{Path, PathBuf};
 
 /// Combine on-disk page images into one multipage PDF.

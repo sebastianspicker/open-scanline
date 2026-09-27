@@ -1,9 +1,10 @@
+use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::acquisition::{apply_flat_dark_cal, synthetic_cal_tables};
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::workflows::ports::acquisition::{
-    reject_single_page_duplex, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession,
+use crate::infrastructure::acquisition::{
+    DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession,
 };
 use std::sync::Mutex;
 

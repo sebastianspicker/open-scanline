@@ -1,8 +1,8 @@
 use crate::error::{Result, ScanError};
-use crate::infrastructure::runtime::CommandSpec;
-use crate::workflows::ports::acquisition::{
+use crate::infrastructure::acquisition::{
     DeviceMaintenanceCapabilities, FocusCapability, MaintenanceAvailability,
 };
+use crate::infrastructure::runtime::CommandSpec;
 use std::path::Path;
 
 /// Device-specific options discovered from `scanimage --help -d <device>`.

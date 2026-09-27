@@ -1,9 +1,11 @@
-use super::{save_image, NativeAggregateSession};
+use super::outputs::write_requested_outputs;
+use super::BatchScanArgs;
+use crate::domain::export::ExportOptions;
 use crate::domain::image::{ImageBuffer, PixelFormat};
-use crate::workflows::capture::batch::{outputs::write_requested_outputs, BatchScanArgs};
+use crate::infrastructure::media::{save_image, NativeAggregateSession, NativeMedia};
 use crate::workflows::ports::media::{AggregateMediaSession, PdfPathPublication};
 use crate::workflows::publication::{
-    prepare_export_options_for_pdf_with_media, ExportOptions, PreparedExportOptions,
+    prepare_export_options_for_pdf_with_media, PreparedExportOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -58,7 +60,7 @@ fn batch_args(root: &Path) -> BatchScanArgs {
 }
 
 fn prepared() -> PreparedExportOptions {
-    prepare_export_options_for_pdf_with_media(true, &ExportOptions::default(), &super::NativeMedia)
+    prepare_export_options_for_pdf_with_media(true, &ExportOptions::default(), &NativeMedia)
         .unwrap()
 }
 
@@ -88,7 +90,7 @@ fn all_aggregate_writers_share_one_decode_per_published_jpeg_page() {
     let scratch = Scratch::new();
     let pages = jpeg_pages(&scratch);
     let mut session = NativeAggregateSession {
-        loader: super::aggregate_cache::SharedPageLoader::new(),
+        loader: crate::infrastructure::media::aggregate_cache::SharedPageLoader::new(),
     };
     publish_pdf(&mut session, &pages, &scratch.path("alias.pdf"));
     session
@@ -116,7 +118,7 @@ fn source_failure_in_first_aggregate_stops_later_outputs() {
         Vec::new(),
         None,
         None,
-        &super::NativeMedia,
+        &NativeMedia,
     )
     .is_err());
     assert_later_outputs_absent(&args);
@@ -139,7 +141,7 @@ fn first_encoder_setup_failure_stops_later_outputs() {
         Vec::new(),
         None,
         None,
-        &super::NativeMedia,
+        &NativeMedia,
     )
     .is_err());
     assert_later_outputs_absent(&args);
@@ -160,7 +162,7 @@ fn later_pdf_failure_retains_alias_and_tiff_publications() {
         Vec::new(),
         None,
         None,
-        &super::NativeMedia,
+        &NativeMedia,
     )
     .is_err());
     assert!(args.multipage_out.as_ref().unwrap().is_file());
@@ -183,7 +185,7 @@ fn cancellation_between_outputs_retains_completed_publications() {
         Vec::new(),
         Some(&cancel),
         None,
-        &super::NativeMedia,
+        &NativeMedia,
     );
     assert!(matches!(result, Err(crate::error::ScanError::Cancelled(_))));
     assert!(args.multipage_out.as_ref().unwrap().is_file());

@@ -2,20 +2,21 @@ use super::command::{
     feeder_exhausted, numbered_page_outputs, wia_transfer_command, wia_transfer_pages_command,
 };
 use super::probing::SystemCommandRunner;
+use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{
     apply_flat_dark_cal, synthetic_cal_tables, validate_scan_dpi, ScanMode, ScanRequest,
 };
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
+use crate::infrastructure::acquisition::{
+    DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
+};
+use crate::infrastructure::media::NativeImageDecoder;
 use crate::infrastructure::runtime::{
     artifact_quota_for_request, document_batch_timeout, simulate_backends, validate_artifact_quota,
-    CommandOutput, CommandRunner, CommandSession, ImageDecoder, NativeImageDecoder,
-    TemporaryOutput,
+    CommandOutput, CommandRunner, CommandSession, ImageDecoder, TemporaryOutput,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    reject_single_page_duplex, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
-};
+use crate::operation::CancellationToken;
 use std::sync::{Arc, Mutex};
 
 /// Full WIA session: open succeeds for listed devices; scan attempts transfer.

@@ -1,9 +1,9 @@
 //! Cohesive boundary between workflows and native media handling.
 
+use crate::domain::export::OcrEngine;
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::publication::OcrEngine;
+use crate::operation::CancellationToken;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

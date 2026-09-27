@@ -1,22 +1,25 @@
 //! Batch multi-page scan orchestration.
 
+#[cfg(test)]
+mod aggregate_integration_tests;
 mod destinations;
 pub(crate) mod outputs;
 
+use crate::domain::acquisition::MAX_SCAN_PAGES;
 use crate::domain::acquisition::{
     validate_scan_dpi, DeviceOpenPolicy, ScanMode, ScanProgress, ScanRequest,
 };
+use crate::domain::export::ExportOptions;
 use crate::domain::image::{checked_image_len, ImageBuffer, PixelFormat};
 use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    AcquisitionPort, DeviceSession, ScanPagesEnd, ScanPagesResult, MAX_SCAN_PAGES,
-};
+use crate::infrastructure::acquisition::{DeviceSession, ScanPagesEnd, ScanPagesResult};
+use crate::operation::CancellationToken;
+use crate::workflows::ports::acquisition::AcquisitionPort;
 use crate::workflows::ports::media::MediaPort;
 use crate::workflows::process::{process_and_publish_page_with_media, PageWorkflowRequest};
 use crate::workflows::publication::{
-    prepare_export_options_for_pdf_with_media, ExportOptions, PreparedExportOptions,
+    prepare_export_options_for_pdf_with_media, PreparedExportOptions,
 };
 use destinations::validate_batch_destinations;
 use outputs::{

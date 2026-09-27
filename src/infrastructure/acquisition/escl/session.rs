@@ -190,11 +190,7 @@ impl EsclDeviceSession {
         {
             // The scanner can negotiate a different advertised acquisition DPI;
             // preserve ScanRequest's pixel-dimension output contract.
-            image = super::super::file::FileDeviceSession::resize_nearest(
-                &image,
-                target_width,
-                target_height,
-            )?;
+            image = crate::domain::processing::resize_nearest(&image, target_width, target_height)?;
         }
         Ok(Some(image))
     }

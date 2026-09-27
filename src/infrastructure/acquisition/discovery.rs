@@ -1,8 +1,8 @@
 //! Cancellation-aware maintenance inspection for background discovery.
 use super::{escl, open_device, sane, wia, AnySession};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{DeviceMaintenanceCapabilities, DeviceSession};
+use crate::infrastructure::acquisition::{DeviceMaintenanceCapabilities, DeviceSession};
+use crate::operation::CancellationToken;
 
 /// Bind cancellation before any maintenance command starts, including opening probes.
 pub fn maintenance_capabilities_with_cancellation(

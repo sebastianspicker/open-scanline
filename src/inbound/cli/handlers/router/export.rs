@@ -1,5 +1,5 @@
 use crate::inbound::cli::args::ExportOptions;
-use crate::workflows::settings::AppConfig;
+use crate::infrastructure::config::AppConfig;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
@@ -25,7 +25,7 @@ pub(super) fn build(
         allow_insecure_password_argv,
     )?;
     let ocr_language = ocr_lang.unwrap_or_else(|| config.ocr_language.clone());
-    crate::workflows::settings::validate_ocr_language(&ocr_language)
+    crate::domain::settings::validate_ocr_language(&ocr_language)
         .map_err(|error| error.to_string())?;
     Ok(crate::ExportOptions {
         pdf_password,

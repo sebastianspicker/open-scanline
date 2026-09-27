@@ -1,14 +1,14 @@
 //! Native media binding for inbound GUI publication actions.
 
 use crate::composition::Runtime;
+use crate::domain::export::ExportOptions;
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use crate::workflows::publication::{
     apply_export_profile_with_media, prepare_export_options_with_media,
     save_final_image_with_searchable_text_with_media,
-    save_final_multipage_from_paths_with_cancellation_with_media, ExportOptions,
-    PreparedExportOptions,
+    save_final_multipage_from_paths_with_cancellation_with_media, PreparedExportOptions,
 };
 use std::path::{Path, PathBuf};
 

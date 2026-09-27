@@ -53,6 +53,16 @@ def tokens(source):
             cursor += 1
 
 
+def path_segments(items, start):
+    """Collect the a::b::c segments of a path starting right after `start`."""
+    segments = []
+    index = start + 1
+    while index + 1 < len(items) and items[index][0] == "::":
+        segments.append(items[index + 1][0])
+        index += 2
+    return segments
+
+
 def use_paths(items, prefix=()):
     """Expand nested use groups; aliases name bindings, not dependencies."""
     current = list(prefix)

@@ -1,6 +1,6 @@
 //! Environment-backed simulated discovery and pipe-list parsing.
 
-use crate::workflows::ports::acquisition::DeviceInfo;
+use crate::infrastructure::acquisition::DeviceInfo;
 
 pub(crate) fn simulate_backends() -> bool {
     matches!(

@@ -2,10 +2,10 @@ use super::OpenScanlineApp;
 use crate::domain::acquisition::ScanMode;
 use crate::inbound::api::batch::BatchScanArgs;
 use crate::inbound::api::scan::ScanToFileArgs;
+use crate::infrastructure::acquisition::ScanPagesEnd;
 use crate::workflows::capture::batch::{
     BatchPublishedOutput, BatchPublishedOutputKind, BatchWorkflowEvent,
 };
-use crate::workflows::ports::acquisition::ScanPagesEnd;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

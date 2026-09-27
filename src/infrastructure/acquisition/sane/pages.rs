@@ -1,7 +1,7 @@
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
-use crate::workflows::ports::acquisition::ScanPagesResult;
+use crate::infrastructure::acquisition::ScanPagesResult;
 
 pub(crate) fn emit_simulated_pages(
     request: &ScanRequest,

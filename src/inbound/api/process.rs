@@ -1,11 +1,11 @@
 //! Native entry wrappers for file processing.
 
 use crate::composition::Runtime;
+use crate::domain::export::ExportOptions;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use crate::workflows::process::process_image_file_with_export_options_and_cancellation_with_media;
 pub use crate::workflows::process::ProcessOptions;
-use crate::workflows::publication::ExportOptions;
 use std::path::PathBuf;
 
 pub fn process_image_file(options: &ProcessOptions) -> Result<PathBuf> {

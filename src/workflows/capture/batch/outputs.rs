@@ -3,7 +3,7 @@ use super::{
     BatchPublishedOutputKind, BatchRunHooks, BatchScanArgs, BatchWorkflowEvent,
 };
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use crate::workflows::ports::media::{AggregateMediaSession, MediaPort, PdfPathPublication};
 use crate::workflows::publication::{
     save_final_pdf_from_paths_with_cancellation_with_media, PreparedExportOptions,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};

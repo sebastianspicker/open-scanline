@@ -4,33 +4,14 @@ use super::{escl, file, mock, sane, wia};
 use crate::domain::acquisition::{DeviceOpenPolicy, ScanRequest};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    AcquisitionPort, BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession,
-    ScanPagesResult,
+use crate::infrastructure::acquisition::{
+    BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
 };
+use crate::operation::CancellationToken;
 
 use file::parse_file_device_id;
 pub use file::{FileBackend, FileDeviceSession};
 pub use mock::{MockDevice, MockDeviceSession};
-
-/// Native scanner registry adapter supplied by [`crate::composition::Runtime`].
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NativeAcquisition;
-
-impl AcquisitionPort for NativeAcquisition {
-    fn resolve_device_id(&self, device: Option<&str>) -> String {
-        resolve_device_id(device)
-    }
-
-    fn open_device_with_policy(
-        &self,
-        device_id: &str,
-        policy: DeviceOpenPolicy,
-    ) -> Result<Box<dyn DeviceSession>> {
-        Ok(Box::new(open_device_with_policy(device_id, policy)?))
-    }
-}
 
 /// Concrete session enum (avoids dyn lifetime issues in callers).
 pub enum AnySession {

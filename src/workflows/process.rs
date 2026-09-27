@@ -1,13 +1,14 @@
 //! Shared image process path used by CLI `process` and GUI extended actions.
 
+use crate::domain::export::ExportOptions;
 use crate::domain::image::ImageBuffer;
 use crate::domain::processing::{apply_pipeline_owned, white_balance, PipelinePrefs};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use crate::workflows::ports::media::MediaPort;
 use crate::workflows::publication::{
     apply_export_profile_owned_with_media, prepare_export_options_with_media,
-    save_final_image_with_searchable_text_with_media, ExportOptions, PreparedExportOptions,
+    save_final_image_with_searchable_text_with_media, PreparedExportOptions,
 };
 use std::path::PathBuf;
 

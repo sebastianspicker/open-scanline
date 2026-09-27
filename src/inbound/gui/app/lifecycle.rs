@@ -188,7 +188,7 @@ impl OpenScanlineApp {
     fn finish_batch(
         &mut self,
         paths: Vec<PathBuf>,
-        end: crate::workflows::ports::acquisition::ScanPagesEnd,
+        end: crate::infrastructure::acquisition::ScanPagesEnd,
     ) {
         self.update_job_report(|report| report.finish_batch(&paths, end));
         if let Some(last) = paths.last() {

@@ -44,9 +44,7 @@ pub(super) fn output(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     ui.heading("Output");
     ui.add_space(10.0);
     field(ui, "Filename base", &mut state.output_name);
-    if let Err(error) =
-        crate::infrastructure::config::json::validate_output_name(&state.output_name)
-    {
+    if let Err(error) = crate::domain::settings::validate_output_name(&state.output_name) {
         ui.colored_label(Color32::from_rgb(160, 62, 42), error.to_string());
     }
     ui.add_space(10.0);

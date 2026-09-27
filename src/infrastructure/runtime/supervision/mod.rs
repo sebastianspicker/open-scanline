@@ -7,7 +7,7 @@ use super::command::CommandOutputLimits;
 use super::output_capture::{drain_command_stream, join_command_stream, CommandStreamReader};
 use super::seams::{ArtifactQuota, CommandOutput, CommandSpec};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use platform::SupervisedChild;
 use std::path::Path;
 use std::sync::Mutex;

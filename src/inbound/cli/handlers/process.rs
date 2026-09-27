@@ -2,8 +2,8 @@ use super::{common::print_wrote, scan};
 use crate::inbound::api::process::{
     process_image_file_with_export_options_and_token, ProcessOptions,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::settings::AppConfig;
+use crate::infrastructure::config::AppConfig;
+use crate::operation::CancellationToken;
 use std::path::PathBuf;
 
 pub(super) struct Request {

@@ -13,7 +13,7 @@ use crate::{
     domain::acquisition::ScanProgress, error::ScanError,
     inbound::api::batch::run_batch_scan_with_export_options_and_token_and_report,
     inbound::api::scan::run_scan_to_file_with_export_options_and_token,
-    workflows::capture::batch::BatchWorkflowEvent, workflows::operation::CancellationToken,
+    operation::CancellationToken, workflows::capture::batch::BatchWorkflowEvent,
 };
 #[cfg(feature = "gui")]
 use crate::{
@@ -50,7 +50,7 @@ pub(in crate::inbound::gui::app) enum GuiJobEvent {
     ScanRawPublished(PathBuf),
     BatchFinished {
         paths: Vec<PathBuf>,
-        end: crate::workflows::ports::acquisition::ScanPagesEnd,
+        end: crate::infrastructure::acquisition::ScanPagesEnd,
     },
     BatchWorkflow(BatchWorkflowEvent),
     SaveFinished {
@@ -78,7 +78,7 @@ pub(in crate::inbound::gui::app) struct GuiJob {
 #[cfg(feature = "gui")]
 pub(in crate::inbound::gui) struct ScanJobPlan {
     args: crate::inbound::api::scan::ScanToFileArgs,
-    export: crate::workflows::publication::ExportOptions,
+    export: crate::domain::export::ExportOptions,
     token: CancellationToken,
     pending_pdf_password: Option<String>,
     published_path: PathBuf,
@@ -114,7 +114,7 @@ type PreparedWorkingOutput = (
 #[cfg(feature = "gui")]
 fn prepare_working_output(
     published_path: &Path,
-    export: &crate::workflows::publication::ExportOptions,
+    export: &crate::domain::export::ExportOptions,
     needed: bool,
     label: &str,
 ) -> crate::error::Result<PreparedWorkingOutput> {

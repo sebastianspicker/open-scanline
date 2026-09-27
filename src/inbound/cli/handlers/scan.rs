@@ -6,8 +6,8 @@ use crate::inbound::api::scan::{
     run_scan_to_file_with_export_options_and_token_and_policy, ScanToFileArgs,
 };
 use crate::inbound::cli::args::ScanSource;
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::settings::AppConfig;
+use crate::infrastructure::config::AppConfig;
+use crate::operation::CancellationToken;
 use std::path::PathBuf;
 
 pub(super) struct Request {

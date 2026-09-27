@@ -4,7 +4,7 @@ use super::load_image;
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
 use crate::infrastructure::runtime::TemporaryOutput;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;

@@ -68,8 +68,7 @@ impl GuiState {
 
     fn scan_output_path(&self, preview: bool) -> crate::error::Result<PathBuf> {
         if preview {
-            let output_name =
-                crate::infrastructure::config::json::validate_output_name(&self.output_name)?;
+            let output_name = crate::domain::settings::validate_output_name(&self.output_name)?;
             Ok(PathBuf::from(&self.output_dir).join(format!("{output_name}_preview.png")))
         } else {
             self.out_path("scan")
@@ -87,7 +86,7 @@ impl GuiState {
     fn raw_output_path(&self, preview: bool) -> crate::error::Result<Option<PathBuf>> {
         (!preview && self.save_raw)
             .then(|| {
-                crate::infrastructure::config::json::validate_output_name(&self.output_name).map(
+                crate::domain::settings::validate_output_name(&self.output_name).map(
                     |output_name| {
                         PathBuf::from(&self.output_dir).join(format!("{output_name}_raw.tif"))
                     },

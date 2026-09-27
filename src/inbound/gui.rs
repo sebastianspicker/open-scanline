@@ -2,12 +2,12 @@
 //!
 //! Shares scan/process/batch orchestration with CLI via library entry points.
 
+use crate::domain::export::ExportOptions;
 use crate::domain::processing::histogram;
 use crate::inbound::api::publication::{
     apply_export_profile, prepare_export_options, save_final_image,
 };
 use crate::infrastructure::media::load_image;
-use crate::workflows::publication::ExportOptions;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 

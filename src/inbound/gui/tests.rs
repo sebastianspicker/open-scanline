@@ -1,9 +1,9 @@
 use super::state::GuiState;
 use super::*;
 use crate::domain::acquisition::ScanMode;
+use crate::domain::export::OcrEngine;
+use crate::infrastructure::acquisition::DeviceMaintenanceCapabilities;
 use crate::infrastructure::config::json::load_config;
-use crate::workflows::ports::acquisition::DeviceMaintenanceCapabilities;
-use crate::workflows::publication::OcrEngine;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 

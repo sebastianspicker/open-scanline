@@ -1,17 +1,18 @@
 use super::{normalize_image_ext, parse_crop_string};
 use crate::domain::acquisition::{ScanMode, MIN_SCAN_DPI};
+use crate::domain::export::{ExportOptions, OcrEngine};
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
-use crate::error::Result;
-use crate::inbound::i18n::Translator;
-use crate::infrastructure::config::json::{default_config_path, load_config};
-use crate::infrastructure::config::json::{
+use crate::domain::settings::{
     format_curve_points, parse_curve_points, validate_hue, validate_output_name,
     validate_saturation,
 };
-use crate::workflows::ports::acquisition::DeviceMaintenanceCapabilities;
-use crate::workflows::publication::{ExportOptions, OcrEngine};
-use crate::workflows::settings::{resolve_defaults, AppConfig};
+use crate::error::Result;
+use crate::inbound::i18n::Translator;
+use crate::infrastructure::acquisition::DeviceMaintenanceCapabilities;
+use crate::infrastructure::config::json::{default_config_path, load_config};
+use crate::infrastructure::config::AppConfig;
+use crate::workflows::settings::resolve_defaults;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;

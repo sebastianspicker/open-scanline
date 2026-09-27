@@ -1,8 +1,9 @@
+use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
+use crate::infrastructure::acquisition::{DeviceInfo, DeviceSession};
 use crate::infrastructure::media::load_image;
-use crate::workflows::ports::acquisition::{reject_single_page_duplex, DeviceInfo, DeviceSession};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -66,26 +67,12 @@ impl FileDeviceSession {
     }
 
     /// Nearest-neighbor resize to request width/height.
+    ///
+    /// Kept as a delegating associated function because it is reachable
+    /// through the `device` facade; the pure algorithm now lives in
+    /// [`crate::domain::processing::resize_nearest`].
     pub fn resize_nearest(image: &ImageBuffer, width: u32, height: u32) -> Result<ImageBuffer> {
-        if width == image.width && height == image.height {
-            return Ok(image.clone());
-        }
-        let bytes_per_pixel = image.bpp();
-        let output_len = crate::domain::image::checked_image_len(width, height, bytes_per_pixel)?;
-        let mut output = vec![0_u8; output_len];
-        let source_width = image.width as usize;
-        let source_height = image.height as usize;
-        for y in 0..height as usize {
-            let source_y = y * source_height / height as usize;
-            for x in 0..width as usize {
-                let source_x = x * source_width / width as usize;
-                let source_index = (source_y * source_width + source_x) * bytes_per_pixel;
-                let output_index = (y * width as usize + x) * bytes_per_pixel;
-                output[output_index..output_index + bytes_per_pixel]
-                    .copy_from_slice(&image.data[source_index..source_index + bytes_per_pixel]);
-            }
-        }
-        ImageBuffer::new(width, height, image.pixel_format, output)
+        crate::domain::processing::resize_nearest(image, width, height)
     }
 }
 
@@ -124,7 +111,7 @@ impl FileDeviceSession {
 
 fn resize_for_request(image: ImageBuffer, request: &ScanRequest) -> Result<ImageBuffer> {
     if request.width > 0 && request.height > 0 {
-        return FileDeviceSession::resize_nearest(&image, request.width, request.height);
+        return crate::domain::processing::resize_nearest(&image, request.width, request.height);
     }
     Ok(image)
 }

@@ -2,7 +2,7 @@ use super::codecs::{create_output_temp, validate_output_container};
 use super::load_image;
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 

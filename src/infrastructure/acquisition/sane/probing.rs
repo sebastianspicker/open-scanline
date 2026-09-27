@@ -1,11 +1,11 @@
 use crate::error::Result;
+use crate::infrastructure::acquisition::{BackendInfo, DeviceInfo};
 use crate::infrastructure::runtime::{
     parse_pipe_devices, run_command, run_command_with_cancellation,
     run_contained_command_with_artifact_quota, simulate_backends, ArtifactQuota, ArtifactWatch,
     CommandOutput, CommandRunner, CommandSpec,
 };
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{BackendInfo, DeviceInfo};
+use crate::operation::CancellationToken;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;

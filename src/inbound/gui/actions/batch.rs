@@ -1,9 +1,9 @@
 use super::super::normalize_image_ext;
 use super::super::state::GuiState;
+use crate::domain::export::OcrEngine;
+use crate::domain::settings::validate_output_name;
 use crate::error::Result;
 use crate::inbound::api::batch::{run_batch_scan, BatchScanArgs};
-use crate::infrastructure::config::json::validate_output_name;
-use crate::workflows::publication::OcrEngine;
 use std::path::PathBuf;
 
 /// Immutable OCR request assembled on the UI thread before a worker starts.
