@@ -19,29 +19,34 @@ pub(super) struct CommandStreamReader {
 }
 
 pub(super) fn drain_command_stream<R: Read + Send + 'static>(
-    mut stream: R,
+    stream: R,
     capture_limit: usize,
 ) -> CommandStreamReader {
     let (sender, result) = mpsc::sync_channel(1);
     let thread = std::thread::spawn(move || {
-        let drained = (|| {
-            let mut bytes = Vec::new();
-            let mut overflowed = false;
-            let mut buffer = [0_u8; 16 * 1024];
-            loop {
-                let count = stream.read(&mut buffer)?;
-                if count == 0 {
-                    return Ok(DrainedCommandStream { bytes, overflowed });
-                }
-                let remaining = capture_limit.saturating_sub(bytes.len());
-                let captured = remaining.min(count);
-                bytes.extend_from_slice(&buffer[..captured]);
-                overflowed |= captured < count;
-            }
-        })();
+        let drained = read_command_stream(stream, capture_limit);
         let _ = sender.send(drained);
     });
     CommandStreamReader { result, thread }
+}
+
+fn read_command_stream(
+    mut stream: impl Read,
+    capture_limit: usize,
+) -> std::io::Result<DrainedCommandStream> {
+    let mut bytes = Vec::new();
+    let mut overflowed = false;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = stream.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(DrainedCommandStream { bytes, overflowed });
+        }
+        let remaining = capture_limit.saturating_sub(bytes.len());
+        let captured = remaining.min(count);
+        bytes.extend_from_slice(&buffer[..captured]);
+        overflowed |= captured < count;
+    }
 }
 
 pub(super) fn join_command_stream(reader: CommandStreamReader) -> Result<DrainedCommandStream> {

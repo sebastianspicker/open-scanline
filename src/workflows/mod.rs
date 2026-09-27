@@ -1,8 +1,8 @@
-//! Application workflows and their dependency ports.
+//! Application workflows built directly on concrete infrastructure adapters.
 
 pub mod capture;
-pub mod operation;
-pub mod ports;
+pub mod compat;
+pub mod maintenance;
 pub mod process;
 pub(crate) mod publication;
 pub mod settings;

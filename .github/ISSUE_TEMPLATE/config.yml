@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/sebastianspicker/open-scanline/security/advisories/new
+    about: Report vulnerabilities privately instead of opening a public issue.
+  - name: Read the usage guide
+    url: https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md
+    about: Commands, configuration, OCR, and export options.
+  - name: Check backend and tool requirements
+    url: https://github.com/sebastianspicker/open-scanline/blob/main/docs/backends.md
+    about: Scanner, platform, and optional-tool support before filing a scanner bug.

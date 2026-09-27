@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use std::ops::Range;
 use std::path::Path;
 
+
 pub const IT8_COLS: usize = 6;
 pub const IT8_TOTAL_ROWS: usize = 5;
 pub const PROFILE_FORMAT: &str = "open-scanline-icc-profile";
@@ -34,6 +35,12 @@ pub fn load_scanner_profile(path: impl AsRef<Path>) -> Result<Value> {
 
 /// Validate the portable scanner-profile fields accepted at export time.
 pub fn validate_scanner_profile(profile: &Value) -> Result<()> {
+    validate_profile_header(profile)?;
+    validate_profile_matrix(profile)?;
+    validate_profile_gamma(profile)
+}
+
+fn validate_profile_header(profile: &Value) -> Result<()> {
     if profile.get("format").and_then(Value::as_str) != Some(PROFILE_FORMAT) {
         return Err(ScanError::Invalid(
             "scanner profile has an unsupported format".into(),
@@ -49,27 +56,45 @@ pub fn validate_scanner_profile(profile: &Value) -> Result<()> {
             "scanner profile has an unsupported kind".into(),
         ));
     }
+    Ok(())
+}
+
+fn validate_profile_matrix(profile: &Value) -> Result<()> {
     let matrix = profile
         .get("matrix")
         .and_then(Value::as_array)
         .filter(|rows| rows.len() == 3)
         .ok_or_else(|| ScanError::Invalid("scanner profile matrix must be 3x3".into()))?;
     for row in matrix {
-        let row = row
-            .as_array()
-            .filter(|values| values.len() == 3)
-            .ok_or_else(|| ScanError::Invalid("scanner profile matrix must be 3x3".into()))?;
-        for value in row {
-            let value = value.as_f64().ok_or_else(|| {
-                ScanError::Invalid("scanner profile matrix entries must be numbers".into())
-            })?;
-            if !value.is_finite() || value.abs() > 16.0 {
-                return Err(ScanError::Invalid(
-                    "scanner profile matrix entries must be finite and within +/-16".into(),
-                ));
-            }
-        }
+        validate_profile_matrix_row(row)?;
     }
+    Ok(())
+}
+
+fn validate_profile_matrix_row(row: &Value) -> Result<()> {
+    let row = row
+        .as_array()
+        .filter(|values| values.len() == 3)
+        .ok_or_else(|| ScanError::Invalid("scanner profile matrix must be 3x3".into()))?;
+    for value in row {
+        validate_profile_matrix_value(value)?;
+    }
+    Ok(())
+}
+
+fn validate_profile_matrix_value(value: &Value) -> Result<()> {
+    let value = value.as_f64().ok_or_else(|| {
+        ScanError::Invalid("scanner profile matrix entries must be numbers".into())
+    })?;
+    if !value.is_finite() || value.abs() > 16.0 {
+        return Err(ScanError::Invalid(
+            "scanner profile matrix entries must be finite and within +/-16".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_profile_gamma(profile: &Value) -> Result<()> {
     let gamma = profile
         .get("gamma")
         .and_then(Value::as_array)
@@ -272,6 +297,74 @@ pub fn profile_scanner_it8(image: &ImageBuffer) -> Result<Value> {
     }))
 }
 
+pub(crate) struct PreparedScannerProfile {
+    matrix: [[f64; 3]; 3],
+    inverse_gamma: [f64; 3],
+}
+
+pub(crate) fn prepare_scanner_profile(profile: &Value) -> Result<PreparedScannerProfile> {
+    validate_scanner_profile(profile)?;
+    Ok(PreparedScannerProfile {
+        matrix: parsed_profile_matrix(profile)?,
+        inverse_gamma: parsed_inverse_gamma(profile)?,
+    })
+}
+
+fn parsed_profile_matrix(profile: &Value) -> Result<[[f64; 3]; 3]> {
+    let mut matrix = [[0.0; 3]; 3];
+    for (row, values) in matrix.iter_mut().enumerate() {
+        for (column, value) in values.iter_mut().enumerate() {
+            *value = profile["matrix"][row][column]
+                .as_f64()
+                .ok_or_else(|| ScanError::Invalid("scanner profile matrix entry missing".into()))?;
+        }
+    }
+    Ok(matrix)
+}
+
+fn parsed_inverse_gamma(profile: &Value) -> Result<[f64; 3]> {
+    let mut inverse_gamma = [1.0; 3];
+    for (channel, value) in inverse_gamma.iter_mut().enumerate() {
+        let gamma = profile["gamma"][channel]
+            .as_f64()
+            .ok_or_else(|| ScanError::Invalid("scanner profile gamma entry missing".into()))?;
+        *value = 1.0 / gamma;
+    }
+    Ok(inverse_gamma)
+}
+
+impl PreparedScannerProfile {
+    /// Apply this prepared profile to an owned image, consuming its buffer.
+    pub(crate) fn apply_owned(&self, mut image: ImageBuffer) -> Result<ImageBuffer> {
+        if image.pixel_format != PixelFormat::Rgb8 {
+            return Err(ScanError::Unsupported(
+                "apply_scanner_profile requires Rgb8".into(),
+            ));
+        }
+        for pixel in image.data.chunks_exact_mut(3) {
+            apply_profile_pixel(pixel, &self.matrix, &self.inverse_gamma);
+        }
+        ImageBuffer::new(image.width, image.height, image.pixel_format, image.data)
+    }
+}
+
+fn apply_profile_pixel(pixel: &mut [u8], matrix: &[[f64; 3]; 3], inverse_gamma: &[f64; 3]) {
+    let red = pixel[0] as f64 / 255.0;
+    let green = pixel[1] as f64 / 255.0;
+    let blue = pixel[2] as f64 / 255.0;
+    let transformed = [
+        mixed_channel(&matrix[0], red, green, blue, inverse_gamma[0]),
+        mixed_channel(&matrix[1], red, green, blue, inverse_gamma[1]),
+        mixed_channel(&matrix[2], red, green, blue, inverse_gamma[2]),
+    ];
+    pixel.copy_from_slice(&transformed);
+}
+
+fn mixed_channel(matrix: &[f64; 3], red: f64, green: f64, blue: f64, inverse_gamma: f64) -> u8 {
+    let mixed = (matrix[0] * red + matrix[1] * green + matrix[2] * blue).clamp(0.0, 1.0);
+    clamp_byte(mixed.powf(inverse_gamma) * 255.0)
+}
+
 /// Apply a scanner profile (diagonal gain matrix) to an image.
 pub fn apply_scanner_profile(image: &ImageBuffer, profile: &Value) -> Result<ImageBuffer> {
     if image.pixel_format != PixelFormat::Rgb8 {
@@ -279,27 +372,7 @@ pub fn apply_scanner_profile(image: &ImageBuffer, profile: &Value) -> Result<Ima
             "apply_scanner_profile requires Rgb8".into(),
         ));
     }
-    validate_scanner_profile(profile)?;
-    let matrix = profile["matrix"].as_array().expect("validated 3x3 matrix");
-    let gamma = profile["gamma"].as_array().expect("validated gamma");
-    let mut out = image.data.clone();
-    for i in (0..out.len()).step_by(3) {
-        let input = [
-            out[i] as f64 / 255.0,
-            out[i + 1] as f64 / 255.0,
-            out[i + 2] as f64 / 255.0,
-        ];
-        for channel in 0..3 {
-            let row = matrix[channel].as_array().expect("validated matrix row");
-            let mixed = (0..3)
-                .map(|column| row[column].as_f64().expect("validated matrix entry") * input[column])
-                .sum::<f64>()
-                .clamp(0.0, 1.0);
-            let exponent = 1.0 / gamma[channel].as_f64().expect("validated gamma entry");
-            out[i + channel] = clamp_byte(mixed.powf(exponent) * 255.0);
-        }
-    }
-    ImageBuffer::new(image.width, image.height, PixelFormat::Rgb8, out)
+    prepare_scanner_profile(profile)?.apply_owned(image.clone())
 }
 
 /// Encode float as ICC s15Fixed16Number (big-endian u32 bit pattern).

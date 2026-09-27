@@ -1,6 +1,6 @@
 //! Ctrl-C routing for CLI operations that own cancellable process trees.
 
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 

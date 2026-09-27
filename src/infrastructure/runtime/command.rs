@@ -4,7 +4,7 @@ use super::artifact_watch::ArtifactWatch;
 use super::seams::{CommandOutput, CommandSpec};
 use super::supervision::run_command_with_capture_limit;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::sync::Mutex;
 use std::time::Duration;
 

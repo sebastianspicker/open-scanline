@@ -314,6 +314,33 @@ pub fn apply_curves(image: &ImageBuffer, points: Option<&[[i32; 2]]>) -> Result<
     ImageBuffer::new(image.width, image.height, image.pixel_format, out)
 }
 
+/// Mean gray-channel intensity, used by exposure estimation. The pixel
+/// count is computed in `u64` so `width * height` cannot overflow `u32` for
+/// an `ImageBuffer` built by direct struct construction with large,
+/// unvalidated dimensions.
+pub fn gray_mean(image: &ImageBuffer) -> f64 {
+    let sum: f64 = image.data.iter().map(|&v| v as f64).sum();
+    sum / exposure_pixel_count(image)
+}
+
+/// Mean red/green/blue channel intensity for an interleaved RGB(A) buffer
+/// (any alpha channel is ignored). See [`gray_mean`] for the overflow note.
+pub fn rgb_channel_means(image: &ImageBuffer) -> [f64; 3] {
+    let bpp = image.bpp();
+    let pixel_count = exposure_pixel_count(image);
+    let mut sums = [0.0f64; 3];
+    for index in (0..image.data.len()).step_by(bpp) {
+        sums[0] += image.data[index] as f64;
+        sums[1] += image.data[index + 1] as f64;
+        sums[2] += image.data[index + 2] as f64;
+    }
+    sums.map(|sum| sum / pixel_count)
+}
+
+fn exposure_pixel_count(image: &ImageBuffer) -> f64 {
+    ((image.width as u64) * (image.height as u64)).max(1) as f64
+}
+
 /// Per-channel histograms: `gray` for Gray8, `r/g/b/luma` for RGB.
 pub fn histogram(image: &ImageBuffer) -> Result<serde_json::Value> {
     use serde_json::json;
@@ -350,5 +377,45 @@ pub fn histogram(image: &ImageBuffer) -> Result<serde_json::Value> {
                 "count": count,
             }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `ImageBuffer` fields are public, so a directly constructed buffer can
+    // carry dimensions `ImageBuffer::new`'s cap would reject. `70_000 *
+    // 70_000` overflows `u32` (debug builds panic on overflowing multiply),
+    // so these buffers regression-test that the pixel count is computed in
+    // `u64` instead.
+    const OVERFLOWING_SIDE: u32 = 70_000;
+
+    #[test]
+    fn gray_mean_does_not_overflow_u32_pixel_count() {
+        let pixel_count = OVERFLOWING_SIDE as u64 * OVERFLOWING_SIDE as u64;
+        let image = ImageBuffer {
+            width: OVERFLOWING_SIDE,
+            height: OVERFLOWING_SIDE,
+            pixel_format: PixelFormat::Gray8,
+            data: vec![100, 200, 50, 0],
+        };
+        let expected = (100.0 + 200.0 + 50.0) / pixel_count as f64;
+        assert_eq!(gray_mean(&image), expected);
+    }
+
+    #[test]
+    fn rgb_channel_means_does_not_overflow_u32_pixel_count() {
+        let pixel_count = OVERFLOWING_SIDE as u64 * OVERFLOWING_SIDE as u64;
+        let image = ImageBuffer {
+            width: OVERFLOWING_SIDE,
+            height: OVERFLOWING_SIDE,
+            pixel_format: PixelFormat::Rgb8,
+            data: vec![10, 20, 30, 40, 50, 60],
+        };
+        let means = rgb_channel_means(&image);
+        assert_eq!(means[0], (10.0 + 40.0) / pixel_count as f64);
+        assert_eq!(means[1], (20.0 + 50.0) / pixel_count as f64);
+        assert_eq!(means[2], (30.0 + 60.0) / pixel_count as f64);
     }
 }

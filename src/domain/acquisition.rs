@@ -116,6 +116,31 @@ pub fn apply_flat_dark_cal(img: &ImageBuffer, dark: &[i32], flat: &[f64]) -> Res
     ImageBuffer::new(img.width, img.height, img.pixel_format, out)
 }
 
+/// Upper bound for one acquisition job.
+pub const MAX_SCAN_PAGES: u32 = 1_000;
+
+pub(crate) fn reject_single_page_duplex(request: &ScanRequest) -> Result<()> {
+    if request.duplex {
+        return Err(ScanError::Unsupported(
+            "duplex acquisition produces multiple sides; use the batch API with an even page limit"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_page_limit(max_pages: u32) -> Result<()> {
+    if max_pages == 0 {
+        return Err(ScanError::Invalid("page limit must be positive".into()));
+    }
+    if max_pages > MAX_SCAN_PAGES {
+        return Err(ScanError::Invalid(format!(
+            "page limit {max_pages} exceeds the supported maximum of {MAX_SCAN_PAGES} logical sides"
+        )));
+    }
+    Ok(())
+}
+
 pub fn synthetic_cal_tables() -> (Vec<i32>, Vec<f64>) {
     let n = 64;
     let dark = vec![2_i32; n];

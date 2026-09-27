@@ -4,32 +4,14 @@ use super::{escl, file, mock, sane, wia};
 use crate::domain::acquisition::{DeviceOpenPolicy, ScanRequest};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{
-    AcquisitionPort, BackendInfo, DeviceInfo, DeviceSession, ScanPagesResult,
+use crate::infrastructure::acquisition::{
+    BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
 };
+use crate::operation::CancellationToken;
 
 use file::parse_file_device_id;
 pub use file::{FileBackend, FileDeviceSession};
 pub use mock::{MockDevice, MockDeviceSession};
-
-/// Native scanner registry adapter supplied by [`crate::composition::Runtime`].
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NativeAcquisition;
-
-impl AcquisitionPort for NativeAcquisition {
-    fn resolve_device_id(&self, device: Option<&str>) -> String {
-        resolve_device_id(device)
-    }
-
-    fn open_device_with_policy(
-        &self,
-        device_id: &str,
-        policy: DeviceOpenPolicy,
-    ) -> Result<Box<dyn DeviceSession>> {
-        Ok(Box::new(open_device_with_policy(device_id, policy)?))
-    }
-}
 
 /// Concrete session enum (avoids dyn lifetime issues in callers).
 pub enum AnySession {
@@ -41,6 +23,16 @@ pub enum AnySession {
 }
 
 impl DeviceSession for AnySession {
+    fn maintenance_capabilities(&self) -> DeviceMaintenanceCapabilities {
+        match self {
+            AnySession::Mock(session) => session.maintenance_capabilities(),
+            AnySession::File(session) => session.maintenance_capabilities(),
+            AnySession::Wia(session) => session.maintenance_capabilities(),
+            AnySession::Sane(session) => session.maintenance_capabilities(),
+            AnySession::Escl(session) => session.maintenance_capabilities(),
+        }
+    }
+
     fn scan(&self, request: &ScanRequest) -> Result<ImageBuffer> {
         match self {
             AnySession::Mock(s) => s.scan(request),
@@ -165,20 +157,43 @@ fn open_prefixed_device(id: &str, policy: DeviceOpenPolicy) -> Result<Option<Any
 }
 
 fn open_backend_prefix(id: &str, policy: DeviceOpenPolicy) -> Result<Option<AnySession>> {
-    let session = match () {
-        _ if id.starts_with("wia:") || id == "wia" => Some(AnySession::Wia(wia::open(id)?)),
-        _ if id.starts_with("sane:") || id == "sane" => Some(AnySession::Sane(sane::open(id)?)),
-        _ if id.starts_with("escl:") || id == "escl" => {
-            let session = if policy.allow_unlisted_escl && id.starts_with("escl:") {
-                escl::open_explicit_id(id)?
-            } else {
-                escl::open(id)?
-            };
-            Some(AnySession::Escl(session))
-        }
-        _ => None,
+    let session = match backend_prefix(id) {
+        Some(BackendPrefix::Wia) => Some(AnySession::Wia(wia::open(id)?)),
+        Some(BackendPrefix::Sane) => Some(AnySession::Sane(sane::open(id)?)),
+        Some(BackendPrefix::Escl) => Some(AnySession::Escl(open_escl(id, policy)?)),
+        None => None,
     };
     Ok(session)
+}
+
+enum BackendPrefix {
+    Wia,
+    Sane,
+    Escl,
+}
+
+fn backend_prefix(id: &str) -> Option<BackendPrefix> {
+    if matches_backend(id, "wia") {
+        return Some(BackendPrefix::Wia);
+    }
+    if matches_backend(id, "sane") {
+        return Some(BackendPrefix::Sane);
+    }
+    matches_backend(id, "escl").then_some(BackendPrefix::Escl)
+}
+
+fn matches_backend(id: &str, backend: &str) -> bool {
+    id == backend
+        || id
+            .strip_prefix(backend)
+            .is_some_and(|suffix| suffix.starts_with(':'))
+}
+
+fn open_escl(id: &str, policy: DeviceOpenPolicy) -> Result<escl::EsclDeviceSession> {
+    if policy.allow_unlisted_escl && id.starts_with("escl:") {
+        return escl::open_explicit_id(id);
+    }
+    escl::open(id)
 }
 
 /// Match a listed id and dispatch according to its advertised backend kind.
@@ -261,10 +276,6 @@ pub fn list_all_devices_with_cancellation(
     list_all_devices_with_escl_and_cancellation(escl, cancellation)
 }
 
-fn list_all_devices_with_escl(escl: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
-    list_all_devices_with_escl_and_cancellation(escl, None)
-}
-
 fn list_all_devices_with_escl_and_cancellation(
     escl: Vec<DeviceInfo>,
     cancellation: Option<&CancellationToken>,
@@ -292,142 +303,18 @@ fn list_all_devices_with_escl_and_cancellation(
 /// Re-list local and network scanners. A refresh performs exactly one bounded
 /// eSCL discovery; the following aggregate listing reuses that result.
 pub fn find_scanners(refresh: bool) -> Vec<DeviceInfo> {
+    find_scanners_with_cancellation(refresh, None)
+}
+
+pub fn find_scanners_with_cancellation(
+    refresh: bool,
+    cancellation: Option<&CancellationToken>,
+) -> Vec<DeviceInfo> {
     if refresh {
-        return list_all_devices_with_escl(escl::refresh_devices());
+        return list_all_devices_with_escl_and_cancellation(
+            escl::refresh_devices_with_cancellation(cancellation),
+            cancellation,
+        );
     }
-    list_all_devices()
-}
-
-/// Open session, run calibrate hook, close. Returns session calibrate result.
-pub fn calibrate_device(device_id: &str) -> serde_json::Value {
-    use serde_json::json;
-    run_session_action(device_id, DeviceSession::calibrate, |error| {
-        json!({
-            "ok": false,
-            "status": "error",
-            "device_id": device_id,
-            "error": error.to_string(),
-        })
-    })
-}
-
-/// Open session, run focus at fractional point, close.
-pub fn focus_device(device_id: &str, x: f64, y: f64) -> serde_json::Value {
-    use serde_json::json;
-    run_session_action(
-        device_id,
-        |session| session.focus(x, y),
-        |error| {
-            json!({
-                "ok": false,
-                "status": "error",
-                "device_id": device_id,
-                "x_frac": x,
-                "y_frac": y,
-                "error": error.to_string(),
-            })
-        },
-    )
-}
-
-fn run_session_action(
-    device_id: &str,
-    action: impl FnOnce(&AnySession) -> serde_json::Value,
-    on_open_error: impl FnOnce(ScanError) -> serde_json::Value,
-) -> serde_json::Value {
-    match open_device(device_id) {
-        Ok(session) => {
-            let mut result = action(&session);
-            session.close();
-            if let Some(object) = result.as_object_mut() {
-                object
-                    .entry("device_id")
-                    .or_insert_with(|| serde_json::json!(device_id));
-            }
-            result
-        }
-        Err(error) => on_open_error(error),
-    }
-}
-
-/// Compute exposure gains from a preview buffer (mean-channel inverse).
-pub fn exposure_gains_from_buffer(image: &ImageBuffer) -> serde_json::Value {
-    use serde_json::json;
-    let bpp = image.bpp();
-    let n = (image.width * image.height).max(1) as f64;
-    let mut sr = 0.0f64;
-    let mut sg = 0.0f64;
-    let mut sb = 0.0f64;
-    if bpp == 1 {
-        let sum: f64 = image.data.iter().map(|&v| v as f64).sum();
-        let mean = (sum / n).max(1.0);
-        let g = 128.0 / mean;
-        return json!({
-            "ok": true,
-            "gain_r": g,
-            "gain_g": g,
-            "gain_b": g,
-            "method": "gray-mean",
-        });
-    }
-    for i in (0..image.data.len()).step_by(bpp) {
-        sr += image.data[i] as f64;
-        sg += image.data[i + 1] as f64;
-        sb += image.data[i + 2] as f64;
-    }
-    let mr = (sr / n).max(1.0);
-    let mg = (sg / n).max(1.0);
-    let mb = (sb / n).max(1.0);
-    let target = 128.0;
-    json!({
-        "ok": true,
-        "gain_r": target / mr,
-        "gain_g": target / mg,
-        "gain_b": target / mb,
-        "method": "rgb-mean",
-    })
-}
-
-/// Open session, acquire a small preview, compute exposure gains, close.
-pub fn exposure_from_preview(device_id: &str, request: &ScanRequest) -> serde_json::Value {
-    use serde_json::json;
-    match open_device(device_id) {
-        Ok(session) => preview_exposure_result(device_id, request, &session),
-        Err(e) => json!({
-            "ok": false,
-            "status": "error",
-            "device_id": device_id,
-            "error": e.to_string(),
-        }),
-    }
-}
-
-fn preview_exposure_result(
-    device_id: &str,
-    request: &ScanRequest,
-    session: &AnySession,
-) -> serde_json::Value {
-    use serde_json::json;
-    let mut preview_request = request.clone();
-    preview_request.width = preview_request.width.clamp(16, 256);
-    preview_request.height = preview_request.height.clamp(16, 256);
-    let preview = session.preview(&preview_request);
-    session.close();
-
-    match preview {
-        Ok(image) => {
-            let mut gains = exposure_gains_from_buffer(&image);
-            if let Some(object) = gains.as_object_mut() {
-                object.insert("device_id".into(), json!(device_id));
-                object.insert("status".into(), json!("ok"));
-            }
-            gains
-        }
-        Err(error) => json!({
-            "ok": false,
-            "status": "preview_failed",
-            "device_id": device_id,
-            "error": error.to_string(),
-        }),
-    }
+    list_all_devices_with_cancellation(cancellation)
 }

@@ -4,7 +4,6 @@
 
 pub mod batch;
 pub mod cli;
-mod composition;
 pub mod config;
 pub mod core;
 pub mod device;
@@ -23,6 +22,7 @@ mod infrastructure;
 pub mod manufacturers;
 pub mod ml;
 pub mod ocr;
+mod operation;
 pub mod packaging;
 pub mod pipeline;
 pub mod platform;
