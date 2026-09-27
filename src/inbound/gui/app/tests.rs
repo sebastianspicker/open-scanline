@@ -513,10 +513,10 @@ fn drop_signals_and_joins_before_late_worker_output() {
 }
 
 fn batch_report(directory: &Path, pages: u32) -> report::JobReport {
-    let args = crate::inbound::api::batch::BatchScanArgs {
+    let args = crate::workflows::capture::batch::BatchScanArgs {
         out_dir: directory.to_path_buf(),
         pages,
-        ..crate::inbound::api::batch::BatchScanArgs::default()
+        ..crate::workflows::capture::batch::BatchScanArgs::default()
     };
     report::JobReport::batch("report-test".into(), &args)
 }

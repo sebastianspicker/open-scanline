@@ -16,14 +16,16 @@ pub mod tesseract;
 
 pub const OFFLINE_OCR_ENGINE: &str = "offline-template";
 
-enum ExportOcrJob {
+/// One export-scoped OCR executor. Implementations may lazily prepare native
+/// engine state and reuse it across all pages in the export.
+pub(crate) enum ExportOcrJob {
     Offline,
     Ocrs(ocrs_runner::OcrsJob),
     Tesseract,
 }
 
-impl crate::workflows::ports::media::OcrJob for ExportOcrJob {
-    fn recognize(
+impl ExportOcrJob {
+    pub(crate) fn recognize(
         &self,
         image: &ImageBuffer,
         language: &str,
@@ -37,9 +39,7 @@ impl crate::workflows::ports::media::OcrJob for ExportOcrJob {
     }
 }
 
-pub(crate) fn prepare_job(
-    engine: crate::domain::export::OcrEngine,
-) -> Result<Arc<dyn crate::workflows::ports::media::OcrJob>> {
+pub(crate) fn prepare_job(engine: crate::domain::export::OcrEngine) -> Result<Arc<ExportOcrJob>> {
     if engine == crate::domain::export::OcrEngine::Ocrs && !cfg!(feature = "ocrs") {
         return Err(crate::error::ScanError::Unsupported(
             "OCRS support was not compiled into this build".into(),

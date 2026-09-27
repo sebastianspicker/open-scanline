@@ -2,12 +2,10 @@ use super::common::{parse_crop, print_wrote};
 use crate::domain::acquisition::DeviceOpenPolicy;
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
-use crate::inbound::api::scan::{
-    run_scan_to_file_with_export_options_and_token_and_policy, ScanToFileArgs,
-};
 use crate::inbound::cli::args::ScanSource;
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
+use crate::workflows::capture::single::{self, CaptureOptions, ScanToFileArgs};
 use std::path::PathBuf;
 
 pub(super) struct Request {
@@ -87,12 +85,14 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
 
     let allow_unlisted_escl = request.acquisition.allow_unlisted_escl;
     let args = scan_args(request.acquisition, request.config, pipeline);
-    let result = run_scan_to_file_with_export_options_and_token_and_policy(
+    let result = single::run_scan_to_file(
         args,
-        &request.export,
-        cancellation,
-        DeviceOpenPolicy {
-            allow_unlisted_escl,
+        CaptureOptions {
+            export: request.export.clone(),
+            cancellation,
+            policy: DeviceOpenPolicy {
+                allow_unlisted_escl,
+            },
         },
     );
     super::router::clear_pdf_password(&mut request.export.pdf_password);

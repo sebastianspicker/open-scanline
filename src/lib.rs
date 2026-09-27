@@ -4,7 +4,6 @@
 
 pub mod batch;
 pub mod cli;
-mod composition;
 pub mod config;
 pub mod core;
 pub mod device;

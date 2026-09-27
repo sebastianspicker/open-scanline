@@ -1,5 +1,6 @@
 use super::super::state::GuiState;
-use crate::inbound::api::scan::{run_scan_to_file, ScanToFileArgs};
+use crate::workflows::capture::single::ScanToFileArgs;
+use crate::workflows::compat::run_scan_to_file;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

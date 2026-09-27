@@ -5,10 +5,9 @@ use crate::domain::image::ImageBuffer;
 use crate::domain::processing::{apply_pipeline_owned, white_balance, PipelinePrefs};
 use crate::error::{Result, ScanError};
 use crate::operation::CancellationToken;
-use crate::workflows::ports::media::MediaPort;
 use crate::workflows::publication::{
-    apply_export_profile_owned_with_media, prepare_export_options_with_media,
-    save_final_image_with_searchable_text_with_media, PreparedExportOptions,
+    apply_export_profile_owned, prepare_export_options, save_final_image_with_searchable_text,
+    PreparedExportOptions,
 };
 use std::path::PathBuf;
 
@@ -20,19 +19,23 @@ pub struct ProcessOptions {
     pub quality: Option<u8>,
 }
 
-/// Run a typed load, process, and save request.
-/// Process a file through explicitly supplied media infrastructure.
-pub fn process_image_file_with_export_options_and_cancellation_with_media<M: MediaPort>(
+/// Runtime controls for the canonical process entry.
+#[derive(Default)]
+pub(crate) struct ProcessRunOptions {
+    pub(crate) export: ExportOptions,
+    pub(crate) cancellation: Option<CancellationToken>,
+}
+
+/// Run a typed load, process, and save request against the native adapters.
+pub(crate) fn process_image_file(
     options: &ProcessOptions,
-    export: &ExportOptions,
-    cancellation: Option<&CancellationToken>,
-    media: &M,
+    run: ProcessRunOptions,
 ) -> Result<PathBuf> {
     // Validate destination semantics and profile before writing any output.
-    validate_process_destination(&options.dst, media)?;
-    let export = prepare_export_options_with_media(&options.dst, export, media)?;
-    let image = media.load(&options.src)?;
-    process_and_publish_page_with_media(
+    validate_process_destination(&options.dst)?;
+    let export = prepare_export_options(&options.dst, &run.export)?;
+    let image = crate::infrastructure::media::load_image(&options.src)?;
+    process_and_publish_page(
         image,
         PageWorkflowRequest {
             destination: &options.dst,
@@ -41,9 +44,8 @@ pub fn process_image_file_with_export_options_and_cancellation_with_media<M: Med
             dpi: None,
             quality: options.quality,
             export: &export,
-            cancellation,
+            cancellation: run.cancellation.as_ref(),
         },
-        media,
     )
     .map(|publication| publication.path)
 }
@@ -51,26 +53,17 @@ pub fn process_image_file_with_export_options_and_cancellation_with_media<M: Med
 /// The shared per-page workflow kernel: processing plan, profile, optional
 /// OCR, then publication. Capture and file processing provide acquisition or
 /// loading before calling it; batch keeps document assembly outside it.
-pub(crate) fn process_and_publish_page_with_media<M: MediaPort>(
+pub(crate) fn process_and_publish_page(
     image: ImageBuffer,
     request: PageWorkflowRequest<'_>,
-    media: &M,
 ) -> Result<PagePublication> {
     let mut image = apply_pipeline_owned(image, request.pipeline)?;
     if request.extra_white_balance {
         image = white_balance(&image)?;
     }
-    let image = apply_export_profile_owned_with_media(image, request.export, media)?;
-    let searchable_text = request
-        .export
-        .needs_searchable_text()
-        .then(|| {
-            request
-                .export
-                .recognize(&image, request.cancellation, media)
-        })
-        .transpose()?;
-    let path = save_final_image_with_searchable_text_with_media(
+    let image = apply_export_profile_owned(image, request.export)?;
+    let searchable_text = request.export.recognize(&image, request.cancellation)?;
+    let path = save_final_image_with_searchable_text(
         request.destination,
         &image,
         request.dpi,
@@ -78,7 +71,6 @@ pub(crate) fn process_and_publish_page_with_media<M: MediaPort>(
         request.export,
         searchable_text.as_deref(),
         request.cancellation,
-        media,
     )?;
     Ok(PagePublication {
         path,
@@ -103,17 +95,17 @@ pub(crate) struct PagePublication {
     pub(crate) searchable_text: Option<String>,
 }
 
-fn validate_process_destination<M: MediaPort>(
-    destination: &std::path::Path,
-    media: &M,
-) -> Result<()> {
-    media.validate_output_leaf(destination, "process output")?;
+fn validate_process_destination(destination: &std::path::Path) -> Result<()> {
+    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(
+        destination,
+        "process output",
+    )?;
     let extension = destination
         .extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| ScanError::Invalid("process output has no supported extension".into()))?;
-    if !media.supports_extension(&extension) {
+    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
         return Err(ScanError::Invalid(format!(
             "unsupported process output extension '.{extension}'"
         )));

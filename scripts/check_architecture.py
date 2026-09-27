@@ -11,50 +11,19 @@ FACADES = set(
     "imaging manufacturers ml ocr packaging pipeline platform plugin process "
     "sane scan twain wia".split()
 )
-LAYERS = set(
-    "composition domain error inbound infrastructure operation workflows".split()
-)
+LAYERS = set("domain error inbound infrastructure operation workflows".split())
 
 
 def forbidden_roots(path):
     if path.startswith("src/domain/"):
-        return FACADES | {"infrastructure", "inbound", "workflows", "composition"}
+        return FACADES | {"infrastructure", "inbound", "workflows"}
     if path.startswith("src/workflows/"):
-        return FACADES | {"infrastructure", "inbound", "composition"}
+        return FACADES | {"inbound"}
     if path.startswith("src/infrastructure/"):
-        return FACADES | {"workflows", "inbound", "composition"}
+        return FACADES | {"workflows", "inbound"}
     if path.startswith("src/inbound/"):
         return FACADES
-    return FACADES if path == "src/composition.rs" else set()
-
-
-# Temporary, documented carve-outs for ports still mid-migration. Each one
-# narrows a forbidden root back down to the specific path segments the
-# in-progress dependency-inversion slices still rely on.
-def is_exempt(path, segments):
-    if not segments:
-        return False
-    if path.startswith("src/infrastructure/") and tuple(segments[:3]) == (
-        "workflows",
-        "ports",
-        "media",
-    ):
-        # Infrastructure media adapters implement the workflows::ports::media
-        # port traits directly; closing this is a later migration slice.
-        return True
-    if (
-        path.startswith("src/workflows/")
-        and len(segments) >= 2
-        and segments[0] == "infrastructure"
-        and segments[1] in ("config", "acquisition", "media")
-    ):
-        # Workflows still reference the AppConfig and DeviceSession /
-        # AcquisitionPort types moved into infrastructure in this slice, and
-        # the aggregate-media integration test exercises the concrete media
-        # adapter it was moved alongside; closing this is a later migration
-        # slice.
-        return True
-    return False
+    return set()
 
 
 def expression_dependency(items, index):
@@ -94,6 +63,13 @@ def dependencies(items):
             yield from import_dependencies(normalized, index + 1, offset)
 
 
+def is_facade_path(path):
+    posix = pathlib.PurePosixPath(path)
+    if posix.stem in FACADES and path.count("/") == 1:
+        return True
+    return path == "src/pipeline/mod.rs"
+
+
 def structural_errors(path, text):
     if re.search(r"#\s*\[\s*path\s*=", text):
         yield "path-module wiring is not allowed"
@@ -101,7 +77,7 @@ def structural_errors(path, text):
         for name in re.findall(r"\bpub\s+mod\s+(\w+)\s*;", text):
             if name in LAYERS:
                 yield "implementation layers must remain private"
-    if pathlib.PurePosixPath(path).stem in FACADES and path.count("/") == 1:
+    if is_facade_path(path):
         declaration = r"\b(?:fn|struct|enum|trait|impl|const|static|type|mod)\s+\w+"
         if re.search(declaration, text):
             yield "compatibility facade contains implementation"
@@ -112,7 +88,7 @@ def violations(path, source):
     forbidden = forbidden_roots(path)
     seen = set()
     for root, offset, segments in dependencies(items):
-        if root not in forbidden or is_exempt(path, segments):
+        if root not in forbidden:
             continue
         if (root, offset) in seen:
             continue

@@ -123,7 +123,8 @@ fn unsafe_output_name_cannot_escape_selected_directory_or_mutate_sentinel() {
 fn assert_cancelled_scan(dir: &std::path::Path) {
     use crate::domain::image::{ImageBuffer, PixelFormat};
     use crate::domain::processing::PipelinePrefs;
-    use crate::inbound::api::scan::{run_scan_to_file, ScanToFileArgs};
+    use crate::workflows::capture::single::ScanToFileArgs;
+    use crate::workflows::compat::run_scan_to_file;
 
     let flag = Arc::new(AtomicBool::new(true));
     let err = run_scan_to_file(ScanToFileArgs {
@@ -153,7 +154,8 @@ fn assert_cancelled_scan(dir: &std::path::Path) {
 
 #[test]
 fn gui_open_save_plus_and_cancel_traverse_the_shared_handlers() {
-    use crate::inbound::api::scan::{run_scan_to_file, ScanToFileArgs};
+    use crate::workflows::capture::single::ScanToFileArgs;
+    use crate::workflows::compat::run_scan_to_file;
     let dir = std::env::temp_dir().join("open_scanline_gui_actions");
     let _ = std::fs::create_dir_all(&dir);
     let src = dir.join("opened.png");

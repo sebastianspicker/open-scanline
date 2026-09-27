@@ -4,10 +4,10 @@
 
 use crate::domain::export::ExportOptions;
 use crate::domain::processing::histogram;
-use crate::inbound::api::publication::{
+use crate::infrastructure::media::load_image;
+use crate::workflows::publication::{
     apply_export_profile, prepare_export_options, save_final_image,
 };
-use crate::infrastructure::media::load_image;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 

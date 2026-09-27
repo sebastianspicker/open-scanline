@@ -5,10 +5,10 @@ use super::super::open_image_file;
 use super::super::save_image_to_with_export_options;
 use super::super::state::GuiState;
 #[cfg(any(test, not(feature = "gui")))]
-use crate::inbound::api::process::process_image_file_with_export_options;
-use crate::inbound::api::process::ProcessOptions;
+use crate::workflows::compat::process_image_file_with_export_options;
+use crate::workflows::process::ProcessOptions;
 #[cfg(any(test, not(feature = "gui")))]
-use crate::inbound::api::publication::save_final_multipage_from_paths_with_cancellation;
+use crate::workflows::publication::save_final_multipage_from_paths_with_cancellation;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 

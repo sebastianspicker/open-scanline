@@ -2,7 +2,6 @@
 
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::workflows::ports::media::ImageTransform;
 use serde_json::{json, Value};
 use std::ops::Range;
 use std::path::Path;
@@ -336,8 +335,9 @@ fn parsed_inverse_gamma(profile: &Value) -> Result<[f64; 3]> {
     Ok(inverse_gamma)
 }
 
-impl ImageTransform for PreparedScannerProfile {
-    fn apply_owned(&self, mut image: ImageBuffer) -> Result<ImageBuffer> {
+impl PreparedScannerProfile {
+    /// Apply this prepared profile to an owned image, consuming its buffer.
+    pub(crate) fn apply_owned(&self, mut image: ImageBuffer) -> Result<ImageBuffer> {
         if image.pixel_format != PixelFormat::Rgb8 {
             return Err(ScanError::Unsupported(
                 "apply_scanner_profile requires Rgb8".into(),

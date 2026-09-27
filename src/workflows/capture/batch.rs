@@ -15,12 +15,8 @@ use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{DeviceSession, ScanPagesEnd, ScanPagesResult};
 use crate::operation::CancellationToken;
-use crate::workflows::ports::acquisition::AcquisitionPort;
-use crate::workflows::ports::media::MediaPort;
-use crate::workflows::process::{process_and_publish_page_with_media, PageWorkflowRequest};
-use crate::workflows::publication::{
-    prepare_export_options_for_pdf_with_media, PreparedExportOptions,
-};
+use crate::workflows::process::{process_and_publish_page, PageWorkflowRequest};
+use crate::workflows::publication::{prepare_export_options_for_pdf, PreparedExportOptions};
 use destinations::validate_batch_destinations;
 use outputs::{
     check_output_cancellation, report_batch_completion, write_requested_outputs_with_observer,
@@ -118,56 +114,45 @@ impl Default for BatchScanArgs {
     }
 }
 
-/// Run batch capture through explicitly supplied acquisition and media adapters.
-pub fn run_batch_scan_with_export_options_inner_with_ports<A: AcquisitionPort, M: MediaPort>(
+/// Runtime controls for the canonical batch-capture entry.
+#[derive(Default)]
+pub(crate) struct BatchCaptureOptions<'a> {
+    pub(crate) export: ExportOptions,
+    pub(crate) cancel_check: Option<&'a BatchCancelCheck>,
+    pub(crate) token: Option<CancellationToken>,
+    pub(crate) policy: DeviceOpenPolicy,
+    pub(crate) observer: Option<&'a BatchEventObserver>,
+}
+
+/// Run batch capture through the native acquisition and media adapters.
+pub(crate) fn run_batch_scan(
     args: BatchScanArgs,
-    export: &ExportOptions,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<CancellationToken>,
-    policy: DeviceOpenPolicy,
-    acquisition: &A,
-    media: &M,
+    options: BatchCaptureOptions<'_>,
 ) -> Result<Vec<PathBuf>> {
-    run_batch_scan_with_report_inner_with_ports(
-        args,
+    run_batch_scan_with_report(args, options).map(|report| report.page_paths)
+}
+
+/// Run a batch while reporting only successfully published files.
+pub(crate) fn run_batch_scan_with_report(
+    args: BatchScanArgs,
+    options: BatchCaptureOptions<'_>,
+) -> Result<BatchScanReport> {
+    let BatchCaptureOptions {
         export,
         cancel_check,
         token,
         policy,
-        acquisition,
-        media,
-        None,
-    )
-    .map(|report| report.page_paths)
-}
-
-/// Run a batch while reporting only successfully published files.
-pub(crate) fn run_batch_scan_with_report_inner_with_ports<A: AcquisitionPort, M: MediaPort>(
-    args: BatchScanArgs,
-    export: &ExportOptions,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<CancellationToken>,
-    policy: DeviceOpenPolicy,
-    acquisition: &A,
-    media: &M,
-    observer: Option<&BatchEventObserver>,
-) -> Result<BatchScanReport> {
+        observer,
+    } = options;
     let hooks = BatchRunHooks {
         cancel_check,
         token: token.as_ref(),
         observer,
     };
     check_output_cancellation(hooks.cancel_check, hooks.token)?;
-    let prepared = prepare_batch(&args, export, media)?;
-    let pages = scan_batch_pages_with_export(
-        &args,
-        &prepared.file_ext,
-        &prepared.export,
-        policy,
-        acquisition,
-        media,
-        hooks,
-    )?;
+    let prepared = prepare_batch(&args, &export)?;
+    let pages =
+        scan_batch_pages_with_export(&args, &prepared.file_ext, &prepared.export, policy, hooks)?;
     if let Some(observer) = hooks.observer {
         observer(BatchWorkflowEvent::PublishingOutputs);
     }
@@ -176,7 +161,6 @@ pub(crate) fn run_batch_scan_with_report_inner_with_ports<A: AcquisitionPort, M:
         &pages.paths,
         &prepared.export,
         pages.searchable_text,
-        media,
         hooks,
     )?;
     report_batch_completion(&args, pages.paths.len());
@@ -191,23 +175,18 @@ struct PreparedBatch {
     file_ext: String,
 }
 
-fn prepare_batch<M: MediaPort>(
-    args: &BatchScanArgs,
-    export: &ExportOptions,
-    media: &M,
-) -> Result<PreparedBatch> {
+fn prepare_batch(args: &BatchScanArgs, export: &ExportOptions) -> Result<PreparedBatch> {
     let pdf_destinations = pdf_destinations(args);
     if pdf_destinations.len() > 1 && export_uses_pdf_features(export) {
         return Err(ScanError::Invalid(
             "PDF export options require exactly one multipage PDF destination".into(),
         ));
     }
-    let export =
-        prepare_export_options_for_pdf_with_media(!pdf_destinations.is_empty(), export, media)?;
+    let export = prepare_export_options_for_pdf(!pdf_destinations.is_empty(), export)?;
     validate_batch_args(args)?;
     let file_ext = batch_file_extension(&args.format)?;
-    validate_batch_destinations(args, &file_ext, media)?;
-    media.prepare_output_directory(&args.out_dir)?;
+    validate_batch_destinations(args, &file_ext)?;
+    crate::infrastructure::media::prepare_output_directory(&args.out_dir)?;
     Ok(PreparedBatch { export, file_ext })
 }
 
@@ -287,18 +266,15 @@ fn scan_batch_pages_with_export(
     file_ext: &str,
     export: &PreparedExportOptions,
     policy: DeviceOpenPolicy,
-    acquisition: &impl AcquisitionPort,
-    media: &impl MediaPort,
     hooks: BatchRunHooks<'_>,
 ) -> Result<BatchPages> {
-    let device_id = acquisition.resolve_device_id(Some(&args.device));
-    let session = acquisition.open_device_with_policy(&device_id, policy)?;
+    let device_id = crate::infrastructure::acquisition::resolve_device_id(Some(&args.device));
+    let session = crate::infrastructure::acquisition::open_device_with_policy(&device_id, policy)?;
     if let Some(token) = hooks.token {
         session.bind_cancellation(token.clone());
     }
-    let result = scan_batch_pages_with_session_export(
-        args, file_ext, &device_id, &*session, export, media, hooks,
-    );
+    let result =
+        scan_batch_pages_with_session_export(args, file_ext, &device_id, &session, export, hooks);
     session.close();
     result
 }
@@ -309,14 +285,12 @@ fn scan_batch_pages_with_session_export(
     device_id: &str,
     session: &(impl DeviceSession + ?Sized),
     export: &PreparedExportOptions,
-    media: &impl MediaPort,
     hooks: BatchRunHooks<'_>,
 ) -> Result<BatchPages> {
     let (request, pipeline) = batch_scan_request(args, device_id);
     cancel_batch_if_requested(session, hooks.cancel_check, hooks.token)?;
     session.set_params(&request)?;
-    let mut collector =
-        BatchPageCollector::new(args, file_ext, session, export, media, pipeline, hooks);
+    let mut collector = BatchPageCollector::new(args, file_ext, session, export, pipeline, hooks);
     let summary = session.scan_pages(&request, args.pages, &mut |image| collector.add(image))?;
     collector.finish(summary)
 }
@@ -340,26 +314,24 @@ fn batch_scan_request(args: &BatchScanArgs, device_id: &str) -> (ScanRequest, Pi
     (request, pipeline)
 }
 
-struct BatchPageCollector<'a, S: DeviceSession + ?Sized, M: MediaPort> {
+struct BatchPageCollector<'a, S: DeviceSession + ?Sized> {
     args: &'a BatchScanArgs,
     file_ext: &'a str,
     session: &'a S,
     export: &'a PreparedExportOptions,
     hooks: BatchRunHooks<'a>,
-    media: &'a M,
     pipeline: PipelinePrefs,
     paths: Vec<PathBuf>,
     searchable_pages: Vec<String>,
     searchable_text_bytes: usize,
 }
 
-impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
+impl<'a, S: DeviceSession + ?Sized> BatchPageCollector<'a, S> {
     fn new(
         args: &'a BatchScanArgs,
         file_ext: &'a str,
         session: &'a S,
         export: &'a PreparedExportOptions,
-        media: &'a M,
         pipeline: PipelinePrefs,
         hooks: BatchRunHooks<'a>,
     ) -> Self {
@@ -369,7 +341,6 @@ impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
             session,
             export,
             hooks,
-            media,
             pipeline,
             paths: Vec::with_capacity(args.pages as usize),
             searchable_pages: Vec::with_capacity(args.pages as usize),
@@ -385,7 +356,7 @@ impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
             .args
             .out_dir
             .join(format!("page_{:03}.{}", index + 1, self.file_ext));
-        let publication = process_and_publish_page_with_media(
+        let publication = process_and_publish_page(
             image,
             PageWorkflowRequest {
                 destination: &page_path,
@@ -396,7 +367,6 @@ impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
                 export: self.export,
                 cancellation: self.hooks.token,
             },
-            self.media,
         )?;
         self.paths.push(publication.path);
         if let (Some(observer), Some(path)) = (self.hooks.observer, self.paths.last()) {
@@ -406,11 +376,12 @@ impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
             }));
         }
         if let Some(text) = publication.searchable_text {
-            self.searchable_text_bytes = self.media.checked_pdf_searchable_text_total(
-                self.searchable_text_bytes,
-                &text,
-                self.searchable_pages.len(),
-            )?;
+            self.searchable_text_bytes =
+                crate::infrastructure::media::checked_pdf_searchable_text_total(
+                    self.searchable_text_bytes,
+                    &text,
+                    self.searchable_pages.len(),
+                )?;
             self.searchable_pages.push(text);
         }
         Ok(())

@@ -5,9 +5,6 @@ use crate::domain::manufacturers::{
     format_manufacturers_text, list_manufacturers, manufacturer_support_summary,
     resolve_manufacturer,
 };
-use crate::inbound::api::batch::{
-    run_batch_scan_with_export_options_and_token_and_policy, BatchScanArgs,
-};
 use crate::inbound::cli::args::{OnnxLayout, OnnxNormalization, ScanSource};
 use crate::inbound::cli::handlers::scan;
 use crate::inbound::gui::run_gui;
@@ -22,6 +19,7 @@ use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
 use crate::operation::CancellationToken;
+use crate::workflows::capture::batch::{self, BatchCaptureOptions, BatchScanArgs};
 use std::path::{Path, PathBuf};
 
 pub(super) fn devices() -> i32 {
@@ -315,12 +313,15 @@ pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) 
         args.multipage_out.clone(),
         args.contact_sheet.clone(),
     ];
-    let result = run_batch_scan_with_export_options_and_token_and_policy(
+    let result = batch::run_batch_scan(
         args,
-        &request.export,
-        cancellation,
-        DeviceOpenPolicy {
-            allow_unlisted_escl: request.allow_unlisted_escl,
+        BatchCaptureOptions {
+            export: request.export.clone(),
+            token: Some(cancellation),
+            policy: DeviceOpenPolicy {
+                allow_unlisted_escl: request.allow_unlisted_escl,
+            },
+            ..BatchCaptureOptions::default()
         },
     );
     super::router::clear_pdf_password(&mut request.export.pdf_password);

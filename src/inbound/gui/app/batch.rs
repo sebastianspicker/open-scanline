@@ -46,8 +46,14 @@ impl OpenScanlineApp {
                 let observer = move |event| {
                     let _ = event_sender.send(GuiJobEvent::BatchWorkflow(event));
                 };
-                match run_batch_scan_with_export_options_and_token_and_report(
-                    args, &export, token, &observer,
+                match crate::workflows::capture::batch::run_batch_scan_with_report(
+                    args,
+                    BatchCaptureOptions {
+                        export,
+                        token: Some(token),
+                        observer: Some(&observer),
+                        ..BatchCaptureOptions::default()
+                    },
                 ) {
                     Ok(report) => GuiJobEvent::BatchFinished {
                         paths: report.page_paths,

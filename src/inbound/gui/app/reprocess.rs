@@ -78,10 +78,12 @@ fn execute_reprocess_action(
     let process_export = prepared_export
         .map(|_| crate::domain::export::ExportOptions::default())
         .unwrap_or_else(|| action.export.clone());
-    let raster = process_image_file_with_export_options_and_token(
+    let raster = process::process_image_file(
         &action.options,
-        &process_export,
-        token.clone(),
+        ProcessRunOptions {
+            export: process_export,
+            cancellation: Some(token.clone()),
+        },
     )?;
     let Some(prepared) = prepared_export else {
         return Ok(raster);

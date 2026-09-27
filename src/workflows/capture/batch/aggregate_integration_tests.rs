@@ -2,11 +2,8 @@ use super::outputs::write_requested_outputs;
 use super::BatchScanArgs;
 use crate::domain::export::ExportOptions;
 use crate::domain::image::{ImageBuffer, PixelFormat};
-use crate::infrastructure::media::{save_image, NativeAggregateSession, NativeMedia};
-use crate::workflows::ports::media::{AggregateMediaSession, PdfPathPublication};
-use crate::workflows::publication::{
-    prepare_export_options_for_pdf_with_media, PreparedExportOptions,
-};
+use crate::infrastructure::media::{save_image, NativeAggregateSession, PdfPathPublication};
+use crate::workflows::publication::{prepare_export_options_for_pdf, PreparedExportOptions};
 use std::path::{Path, PathBuf};
 
 struct Scratch(PathBuf);
@@ -60,8 +57,7 @@ fn batch_args(root: &Path) -> BatchScanArgs {
 }
 
 fn prepared() -> PreparedExportOptions {
-    prepare_export_options_for_pdf_with_media(true, &ExportOptions::default(), &NativeMedia)
-        .unwrap()
+    prepare_export_options_for_pdf(true, &ExportOptions::default()).unwrap()
 }
 
 fn assert_later_outputs_absent(args: &BatchScanArgs) {
@@ -89,9 +85,7 @@ fn publish_pdf(session: &mut NativeAggregateSession, pages: &[PathBuf], destinat
 fn all_aggregate_writers_share_one_decode_per_published_jpeg_page() {
     let scratch = Scratch::new();
     let pages = jpeg_pages(&scratch);
-    let mut session = NativeAggregateSession {
-        loader: crate::infrastructure::media::aggregate_cache::SharedPageLoader::new(),
-    };
+    let mut session = NativeAggregateSession::new();
     publish_pdf(&mut session, &pages, &scratch.path("alias.pdf"));
     session
         .publish_tiff(&pages, &scratch.path("named.tiff"), Some(150), None, None)
@@ -111,16 +105,9 @@ fn source_failure_in_first_aggregate_stops_later_outputs() {
     let scratch = Scratch::new();
     let args = batch_args(&scratch.0);
     let missing = vec![scratch.path("missing.png")];
-    assert!(write_requested_outputs(
-        &args,
-        &missing,
-        &prepared(),
-        Vec::new(),
-        None,
-        None,
-        &NativeMedia,
-    )
-    .is_err());
+    assert!(
+        write_requested_outputs(&args, &missing, &prepared(), Vec::new(), None, None,).is_err()
+    );
     assert_later_outputs_absent(&args);
 }
 
@@ -134,16 +121,9 @@ fn first_encoder_setup_failure_stops_later_outputs() {
     let source = scratch.path("page.png");
     let image = ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![1, 2, 3]).unwrap();
     save_image(&source, &image, None, None).unwrap();
-    assert!(write_requested_outputs(
-        &args,
-        &[source],
-        &prepared(),
-        Vec::new(),
-        None,
-        None,
-        &NativeMedia,
-    )
-    .is_err());
+    assert!(
+        write_requested_outputs(&args, &[source], &prepared(), Vec::new(), None, None,).is_err()
+    );
     assert_later_outputs_absent(&args);
 }
 
@@ -155,16 +135,7 @@ fn later_pdf_failure_retains_alias_and_tiff_publications() {
     let blocker = scratch.path("blocker");
     std::fs::write(&blocker, b"file blocks named PDF parent").unwrap();
     args.multipage_pdf = Some(blocker.join("named.pdf"));
-    assert!(write_requested_outputs(
-        &args,
-        &pages,
-        &prepared(),
-        Vec::new(),
-        None,
-        None,
-        &NativeMedia,
-    )
-    .is_err());
+    assert!(write_requested_outputs(&args, &pages, &prepared(), Vec::new(), None, None,).is_err());
     assert!(args.multipage_out.as_ref().unwrap().is_file());
     assert!(args.multipage_tiff.as_ref().unwrap().is_file());
     assert!(!args.multipage_pdf.as_ref().unwrap().exists());
@@ -178,15 +149,8 @@ fn cancellation_between_outputs_retains_completed_publications() {
     let args = batch_args(&scratch.0);
     let tiff = args.multipage_tiff.as_ref().unwrap().clone();
     let cancel = move || tiff.is_file();
-    let result = write_requested_outputs(
-        &args,
-        &pages,
-        &prepared(),
-        Vec::new(),
-        Some(&cancel),
-        None,
-        &NativeMedia,
-    );
+    let result =
+        write_requested_outputs(&args, &pages, &prepared(), Vec::new(), Some(&cancel), None);
     assert!(matches!(result, Err(crate::error::ScanError::Cancelled(_))));
     assert!(args.multipage_out.as_ref().unwrap().is_file());
     assert!(args.multipage_tiff.as_ref().unwrap().is_file());

@@ -33,26 +33,44 @@ class ArchitectureTests(unittest.TestCase):
         self.check("fn x<'a>(x: &'a crate::core::X) {}", True)
         self.check("let x = '\"'; use crate::{core::X};", True)
 
-    def test_infrastructure_cannot_import_workflows_except_media_port(self):
+    def test_domain_cannot_import_outer_layers(self):
+        self.check(
+            "use crate::infrastructure::media::load_image;",
+            True,
+            "src/domain/x.rs",
+        )
+        self.check("use crate::workflows::capture::batch::Foo;", True, "src/domain/x.rs")
+        self.check("use crate::inbound::cli::run;", True, "src/domain/x.rs")
+
+    def test_workflows_can_import_infrastructure_but_not_inbound(self):
+        self.check(
+            "use crate::infrastructure::acquisition::resolve_device_id;",
+            False,
+            "src/workflows/x.rs",
+        )
+        self.check("use crate::inbound::cli::run;", True, "src/workflows/x.rs")
+
+    def test_infrastructure_cannot_import_workflows_or_inbound(self):
         self.check(
             "use crate::workflows::capture::batch::Foo;",
             True,
             "src/infrastructure/x.rs",
         )
+        self.check("use crate::inbound::cli::run;", True, "src/infrastructure/x.rs")
+
+    def test_inbound_cannot_import_facades(self):
+        self.check("use crate::scan::run_scan_to_file;", True, "src/inbound/x.rs")
         self.check(
-            "use crate::workflows::ports::media::MediaPort;",
-            False,
-            "src/infrastructure/x.rs",
+            "use crate::infrastructure::media::load_image;", False, "src/inbound/x.rs"
         )
-        self.check(
-            "use crate::workflows::ports::acquisition::AcquisitionPort;",
-            True,
-            "src/infrastructure/x.rs",
-        )
+
+    def test_pipeline_facade_module_is_covered_by_the_facade_rule(self):
+        self.check("pub fn x() {}", True, "src/pipeline/mod.rs")
+        self.check("pub use crate::domain::processing::*;", False, "src/pipeline/mod.rs")
 
     def test_existing_rules(self):
         self.check("let x = crate::workflows::x();", True, "src/domain/x.rs")
-        self.check("use crate::infrastructure::x;", True, "src/workflows/x.rs")
+        self.check("use crate::inbound::x;", True, "src/workflows/x.rs")
         self.check('#[path = "other.rs"] mod x;', True, "src/domain/x.rs")
         self.check("pub mod infrastructure;", True, "src/lib.rs")
         self.check("pub use crate::domain::image::*;", False, "src/core.rs")

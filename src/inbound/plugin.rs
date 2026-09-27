@@ -1,13 +1,14 @@
 //! Plugin/host mode entry (OSL-PLUGIN) — headless host contract.
 
 use crate::error::{Result, ScanError};
-use crate::inbound::api::scan::{run_scan_to_file_with_token, ScanToFileArgs};
 use crate::infrastructure::acquisition::{
     list_all_devices_with_cancellation, list_backends_with_cancellation,
 };
 use crate::infrastructure::config::json::{default_config_path, load_config};
 use crate::infrastructure::runtime::platform::platform_summary;
 use crate::operation::CancellationToken;
+
+use crate::workflows::capture::single::{run_scan_to_file, CaptureOptions, ScanToFileArgs};
 use crate::{APP_NAME, VERSION};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -167,9 +168,12 @@ fn perform_plugin_scan(
     check_plugin_cancellation(cancellation)?;
     let device = selected_plugin_device(device, &devices);
     let defaults = crate::workflows::settings::resolve_defaults(&cfg);
-    let path = run_scan_to_file_with_token(
+    let path = run_scan_to_file(
         plugin_scan_args(out_path, &device, defaults),
-        cancellation.clone(),
+        CaptureOptions {
+            cancellation: cancellation.clone(),
+            ..CaptureOptions::default()
+        },
     )?;
     let bytes = std::fs::metadata(&path)?.len();
     Ok(PluginScan {

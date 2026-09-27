@@ -20,7 +20,6 @@ pub(crate) use multipage::save_raw_image_with_cancellation;
 pub use multipage::{
     save_index_contact_sheet, save_index_contact_sheet_with_cancellation, save_raw_image,
 };
-pub use ocr::*;
 pub(crate) use pdf::{checked_pdf_searchable_text_total, validate_pdf_password};
 pub use pdf::{
     save_multipage_pdf, save_multipage_pdf_with_cancellation, save_pdf_from_paths_with_options,
@@ -47,20 +46,102 @@ pub fn convert_image_with_cancellation(
     save_image_with_cancellation(output, &image, dpi, None, Some(&cancellation))
 }
 
-/// Production media adapter used by workflows.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NativeMedia;
+/// Internal request for assembling a PDF from already-published pages.
+pub(crate) struct PdfPathPublication<'a> {
+    pub(crate) paths: &'a [std::path::PathBuf],
+    pub(crate) destination: &'a std::path::Path,
+    pub(crate) dpi: u32,
+    pub(crate) title: &'a str,
+    pub(crate) password: Option<&'a str>,
+    pub(crate) searchable_pages: Option<Vec<String>>,
+    pub(crate) transform: Option<&'a icc::PreparedScannerProfile>,
+    pub(crate) cancellation: Option<&'a crate::operation::CancellationToken>,
+}
 
+/// Prepare a validated output directory before incremental publication.
+pub(crate) fn prepare_output_directory(directory: &std::path::Path) -> crate::error::Result<()> {
+    std::fs::create_dir_all(directory)?;
+    Ok(())
+}
+
+/// Assemble a PDF from already-published pages, optionally re-decoding and
+/// profile-transforming each page as it loads.
+pub(crate) fn publish_pdf_from_paths(
+    request: PdfPathPublication<'_>,
+) -> crate::error::Result<std::path::PathBuf> {
+    let PdfPathPublication {
+        paths,
+        destination,
+        dpi,
+        title,
+        password,
+        searchable_pages,
+        transform,
+        cancellation,
+    } = request;
+    let options = PdfOptions {
+        dpi,
+        title: title.into(),
+        password: password.map(str::to_owned),
+        searchable_pages,
+    };
+    match transform {
+        Some(transform) => pdf::save_pdf_from_paths_with_loader_and_transform(
+            paths,
+            destination,
+            &options,
+            |path| load_image(path),
+            |image| transform.apply_owned(image),
+            cancellation,
+        ),
+        None => save_pdf_from_paths_with_options_and_cancellation(
+            paths,
+            destination,
+            &options,
+            cancellation,
+        ),
+    }
+}
+
+/// Assemble TIFF pages, optionally applying a scanner profile as pages load.
+pub(crate) fn publish_tiff_from_paths(
+    paths: &[std::path::PathBuf],
+    destination: &std::path::Path,
+    dpi: Option<u32>,
+    transform: Option<&icc::PreparedScannerProfile>,
+    cancellation: Option<&crate::operation::CancellationToken>,
+) -> crate::error::Result<std::path::PathBuf> {
+    match transform {
+        Some(transform) => tiff::save_multipage_tiff_with_loader_and_transform(
+            paths,
+            destination,
+            dpi,
+            |path| load_image(path),
+            |image| transform.apply_owned(image),
+            cancellation,
+        ),
+        None => save_multipage_tiff_with_cancellation(paths, destination, dpi, cancellation),
+    }
+}
+
+/// Private document-publication session used when a batch requests several
+/// aggregate derivatives from the same already-published pages.
 pub(crate) struct NativeAggregateSession {
     pub(crate) loader: aggregate_cache::SharedPageLoader,
 }
 
-impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSession {
-    fn publish_pdf(
+impl NativeAggregateSession {
+    pub(crate) fn new() -> Self {
+        Self {
+            loader: aggregate_cache::SharedPageLoader::new(),
+        }
+    }
+
+    pub(crate) fn publish_pdf(
         &mut self,
-        request: crate::workflows::ports::media::PdfPathPublication<'_>,
+        request: PdfPathPublication<'_>,
     ) -> crate::error::Result<std::path::PathBuf> {
-        let crate::workflows::ports::media::PdfPathPublication {
+        let PdfPathPublication {
             paths,
             destination,
             dpi,
@@ -89,12 +170,12 @@ impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSe
         )
     }
 
-    fn publish_tiff(
+    pub(crate) fn publish_tiff(
         &mut self,
         paths: &[std::path::PathBuf],
         destination: &std::path::Path,
         dpi: Option<u32>,
-        transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
+        transform: Option<&icc::PreparedScannerProfile>,
         cancellation: Option<&crate::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
         tiff::save_multipage_tiff_with_loader_and_transform(
@@ -110,7 +191,7 @@ impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSe
         )
     }
 
-    fn publish_contact_sheet(
+    pub(crate) fn publish_contact_sheet(
         &mut self,
         paths: &[std::path::PathBuf],
         destination: &std::path::Path,
@@ -124,232 +205,6 @@ impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSe
             None,
             4,
             |path| self.loader.load(path, cancellation),
-            cancellation,
-        )
-    }
-}
-
-impl crate::workflows::ports::media::MediaPort for NativeMedia {
-    fn validate_output_leaf(
-        &self,
-        path: &std::path::Path,
-        label: &str,
-    ) -> crate::error::Result<()> {
-        crate::infrastructure::runtime::atomic_publish::validate_output_leaf(path, label)
-    }
-
-    fn output_paths_alias(
-        &self,
-        left: &std::path::Path,
-        right: &std::path::Path,
-    ) -> crate::error::Result<bool> {
-        crate::infrastructure::runtime::atomic_publish::output_paths_alias(left, right)
-    }
-
-    fn prepare_output_directory(&self, directory: &std::path::Path) -> crate::error::Result<()> {
-        std::fs::create_dir_all(directory)?;
-        Ok(())
-    }
-
-    fn supports_extension(&self, extension: &str) -> bool {
-        supported_extensions().contains(&extension)
-    }
-
-    fn load(
-        &self,
-        source: &std::path::Path,
-    ) -> crate::error::Result<crate::domain::image::ImageBuffer> {
-        load_image(source)
-    }
-
-    fn load_scanner_profile(
-        &self,
-        source: &std::path::Path,
-    ) -> crate::error::Result<serde_json::Value> {
-        load_scanner_profile(source)
-    }
-
-    fn prepare_scanner_profile(
-        &self,
-        profile: &serde_json::Value,
-    ) -> crate::error::Result<
-        Option<std::sync::Arc<dyn crate::workflows::ports::media::ImageTransform>>,
-    > {
-        Ok(Some(std::sync::Arc::new(icc::prepare_scanner_profile(
-            profile,
-        )?)))
-    }
-
-    fn prepare_ocr_job(
-        &self,
-        engine: crate::domain::export::OcrEngine,
-    ) -> crate::error::Result<Option<std::sync::Arc<dyn crate::workflows::ports::media::OcrJob>>>
-    {
-        ocr::prepare_job(engine).map(Some)
-    }
-
-    fn begin_aggregate_session(
-        &self,
-        _paths: &[std::path::PathBuf],
-    ) -> crate::error::Result<
-        Option<Box<dyn crate::workflows::ports::media::AggregateMediaSession + '_>>,
-    > {
-        Ok(Some(Box::new(NativeAggregateSession {
-            loader: aggregate_cache::SharedPageLoader::new(),
-        })))
-    }
-
-    fn validate_pdf_password(&self, password: &str) -> crate::error::Result<()> {
-        validate_pdf_password(password)
-    }
-
-    fn apply_scanner_profile(
-        &self,
-        image: &crate::domain::image::ImageBuffer,
-        profile: Option<&serde_json::Value>,
-    ) -> crate::error::Result<crate::domain::image::ImageBuffer> {
-        profile.map_or_else(
-            || Ok(image.clone()),
-            |profile| apply_scanner_profile(image, profile),
-        )
-    }
-
-    fn recognize(
-        &self,
-        image: &crate::domain::image::ImageBuffer,
-        language: &str,
-        engine: crate::domain::export::OcrEngine,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<String> {
-        Ok(ocr_image_with_engine_with_cancellation(image, language, engine, cancellation)?.text)
-    }
-
-    fn publish_page(
-        &self,
-        destination: &std::path::Path,
-        image: &crate::domain::image::ImageBuffer,
-        dpi: Option<u32>,
-        quality: Option<u8>,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        save_image_with_cancellation(destination, image, dpi, quality, cancellation)
-    }
-
-    fn publish_raw(
-        &self,
-        destination: &std::path::Path,
-        image: &crate::domain::image::ImageBuffer,
-        dpi: Option<u32>,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        save_raw_image_with_cancellation(destination, image, dpi, cancellation)
-    }
-
-    fn checked_pdf_searchable_text_total(
-        &self,
-        current: usize,
-        text: &str,
-        page_index: usize,
-    ) -> crate::error::Result<usize> {
-        checked_pdf_searchable_text_total(current, text, page_index)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn publish_pdf(
-        &self,
-        destination: &std::path::Path,
-        images: &[crate::domain::image::ImageBuffer],
-        dpi: u32,
-        title: &str,
-        password: Option<&str>,
-        searchable_pages: Option<Vec<String>>,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        save_pdf_with_options_and_cancellation(
-            destination,
-            images,
-            &PdfOptions {
-                dpi,
-                title: title.into(),
-                password: password.map(str::to_owned),
-                searchable_pages,
-            },
-            cancellation,
-        )
-    }
-
-    fn publish_pdf_from_paths(
-        &self,
-        request: crate::workflows::ports::media::PdfPathPublication<'_>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        let crate::workflows::ports::media::PdfPathPublication {
-            paths,
-            destination,
-            dpi,
-            title,
-            password,
-            searchable_pages,
-            transform,
-            cancellation,
-        } = request;
-        let options = PdfOptions {
-            dpi,
-            title: title.into(),
-            password: password.map(str::to_owned),
-            searchable_pages,
-        };
-        match transform {
-            Some(transform) => pdf::save_pdf_from_paths_with_loader_and_transform(
-                paths,
-                destination,
-                &options,
-                |path| load_image(path),
-                |image| transform.apply_owned(image),
-                cancellation,
-            ),
-            None => save_pdf_from_paths_with_options_and_cancellation(
-                paths,
-                destination,
-                &options,
-                cancellation,
-            ),
-        }
-    }
-
-    fn publish_tiff_from_paths(
-        &self,
-        paths: &[std::path::PathBuf],
-        destination: &std::path::Path,
-        dpi: Option<u32>,
-        transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        match transform {
-            Some(transform) => tiff::save_multipage_tiff_with_loader_and_transform(
-                paths,
-                destination,
-                dpi,
-                |path| load_image(path),
-                |image| transform.apply_owned(image),
-                cancellation,
-            ),
-            None => save_multipage_tiff_with_cancellation(paths, destination, dpi, cancellation),
-        }
-    }
-
-    fn publish_contact_sheet(
-        &self,
-        paths: &[std::path::PathBuf],
-        destination: &std::path::Path,
-        cancellation: Option<&crate::operation::CancellationToken>,
-    ) -> crate::error::Result<std::path::PathBuf> {
-        save_index_contact_sheet_with_cancellation(
-            paths,
-            destination,
-            4,
-            160,
-            None,
-            4,
             cancellation,
         )
     }

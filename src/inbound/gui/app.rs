@@ -10,19 +10,20 @@ use crate::infrastructure::media::load_image;
 use crate::infrastructure::runtime::TemporaryOutput;
 #[cfg(feature = "gui")]
 use crate::{
-    domain::acquisition::ScanProgress, error::ScanError,
-    inbound::api::batch::run_batch_scan_with_export_options_and_token_and_report,
-    inbound::api::scan::run_scan_to_file_with_export_options_and_token,
-    operation::CancellationToken, workflows::capture::batch::BatchWorkflowEvent,
+    domain::acquisition::ScanProgress,
+    error::ScanError,
+    operation::CancellationToken,
+    workflows::capture::batch::{BatchCaptureOptions, BatchWorkflowEvent},
+    workflows::capture::single::{self, CaptureOptions},
 };
 #[cfg(feature = "gui")]
 use crate::{
-    inbound::api::process::process_image_file_with_export_options_and_token,
-    inbound::api::publication::{
+    infrastructure::media::ocr::ocr_image_with_engine_with_cancellation,
+    workflows::process::{self, ProcessRunOptions},
+    workflows::publication::{
         apply_export_profile, prepare_export_options, save_final_image_with_cancellation,
         save_final_multipage_from_paths_with_cancellation,
     },
-    infrastructure::media::ocr::ocr_image_with_engine_with_cancellation,
 };
 #[cfg(feature = "gui")]
 use std::any::Any;
@@ -77,7 +78,7 @@ pub(in crate::inbound::gui::app) struct GuiJob {
 
 #[cfg(feature = "gui")]
 pub(in crate::inbound::gui) struct ScanJobPlan {
-    args: crate::inbound::api::scan::ScanToFileArgs,
+    args: crate::workflows::capture::single::ScanToFileArgs,
     export: crate::domain::export::ExportOptions,
     token: CancellationToken,
     pending_pdf_password: Option<String>,

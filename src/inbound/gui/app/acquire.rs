@@ -64,17 +64,23 @@ impl OpenScanlineApp {
                 args.on_progress = Some(Box::new(move |progress| {
                     forward_scan_progress(&progress_sender, raw_output.as_ref(), progress);
                 }));
-                let result =
-                    run_scan_to_file_with_export_options_and_token(args, &export, token.clone())
-                        .and_then(|raster| {
-                            Self::publish_scan_result(
-                                raster,
-                                &published_path,
-                                export_dpi,
-                                prepared_export.as_ref(),
-                                &token,
-                            )
-                        });
+                let result = single::run_scan_to_file(
+                    args,
+                    CaptureOptions {
+                        export,
+                        cancellation: token.clone(),
+                        ..CaptureOptions::default()
+                    },
+                )
+                .and_then(|raster| {
+                    Self::publish_scan_result(
+                        raster,
+                        &published_path,
+                        export_dpi,
+                        prepared_export.as_ref(),
+                        &token,
+                    )
+                });
                 match result {
                     Ok(path) => GuiJobEvent::ScanFinished {
                         path,

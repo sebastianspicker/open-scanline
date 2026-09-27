@@ -1,9 +1,7 @@
 use super::{common::print_wrote, scan};
-use crate::inbound::api::process::{
-    process_image_file_with_export_options_and_token, ProcessOptions,
-};
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
+use crate::workflows::process::{self, ProcessOptions, ProcessRunOptions};
 use std::path::PathBuf;
 
 pub(super) struct Request {
@@ -24,15 +22,17 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
     scan::apply_explicit_bool(&mut pipeline.invert, request.invert);
     scan::apply_explicit_bool(&mut pipeline.auto_crop, request.auto_crop);
     scan::apply_explicit_bool(&mut pipeline.auto_orient, request.auto_orient);
-    let result = process_image_file_with_export_options_and_token(
+    let result = process::process_image_file(
         &ProcessOptions {
             src: request.inp,
             dst: request.out,
             pipeline,
             quality: request.quality,
         },
-        &request.export,
-        cancellation,
+        ProcessRunOptions {
+            export: request.export.clone(),
+            cancellation: Some(cancellation),
+        },
     );
     super::router::clear_pdf_password(&mut request.export.pdf_password);
     match result {

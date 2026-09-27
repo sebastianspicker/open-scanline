@@ -1,7 +1,7 @@
 //! Compatibility facade for legacy acquisition imports.
 //!
-//! New code should depend on `domain::acquisition`, `workflows::ports::acquisition`,
-//! `operation`, or `infrastructure::acquisition` as appropriate.
+//! New code should depend on `domain::acquisition`, `operation`, or
+//! `infrastructure::acquisition` as appropriate.
 
 pub use crate::domain::acquisition::{
     apply_flat_dark_cal, synthetic_cal_tables, DeviceOpenPolicy, MAX_SCAN_PAGES,

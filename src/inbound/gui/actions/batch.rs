@@ -3,7 +3,8 @@ use super::super::state::GuiState;
 use crate::domain::export::OcrEngine;
 use crate::domain::settings::validate_output_name;
 use crate::error::Result;
-use crate::inbound::api::batch::{run_batch_scan, BatchScanArgs};
+use crate::workflows::capture::batch::BatchScanArgs;
+use crate::workflows::compat::run_batch_scan;
 use std::path::PathBuf;
 
 /// Immutable OCR request assembled on the UI thread before a worker starts.
