@@ -259,10 +259,7 @@ where
 }
 
 fn check_tiff_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled("TIFF publication cancelled".into()));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "TIFF publication cancelled")
 }
 
 pub(super) fn write_multipage_tiff_rgb(

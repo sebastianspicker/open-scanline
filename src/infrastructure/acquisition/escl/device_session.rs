@@ -56,34 +56,18 @@ impl DeviceSession for EsclDeviceSession {
     }
 
     fn cancel(&self) {
-        if let Ok(mut g) = self.cancelled.lock() {
-            *g = true;
-        }
-        if let Ok(token) = self.cancellation.lock() {
-            if let Some(token) = token.as_ref() {
-                token.cancel();
-            }
-        }
+        self.session.cancel();
     }
 
     fn bind_cancellation(&self, token: CancellationToken) {
-        if let Ok(mut cancellation) = self.cancellation.lock() {
-            if self
-                .cancelled
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .to_owned()
-            {
-                token.cancel();
-            }
-            *cancellation = Some(token);
+        if self.is_cancelled() {
+            token.cancel();
         }
+        self.session.bind_cancellation(token);
     }
 
     fn close(&self) {
-        if let Ok(mut g) = self.closed.lock() {
-            *g = true;
-        }
+        self.session.close();
     }
 
     fn calibrate(&self) -> serde_json::Value {

@@ -49,7 +49,7 @@ impl TemporaryOutput {
     }
 
     pub(super) fn publish(self, out: &Path) -> Result<()> {
-        publish_temporary_file(&self.path, out)
+        crate::infrastructure::runtime::atomic_publish::replace_file_atomic(&self.path, out)
             .map_err(|error| package_error("could not publish portable archive", error))
     }
 }
@@ -57,48 +57,5 @@ impl TemporaryOutput {
 impl Drop for TemporaryOutput {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(not(windows))]
-fn publish_temporary_file(temporary: &Path, out: &Path) -> std::io::Result<()> {
-    fs::rename(temporary, out)
-}
-
-#[cfg(windows)]
-fn publish_temporary_file(temporary: &Path, out: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-
-    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
-    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
-    }
-
-    let existing = temporary
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let replacement = out
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // SAFETY: both vectors are stable, NUL-terminated UTF-16 strings for the duration of the
-    // call. The temporary archive and destination are siblings, so this is a same-volume move.
-    let success = unsafe {
-        MoveFileExW(
-            existing.as_ptr(),
-            replacement.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if success == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
     }
 }

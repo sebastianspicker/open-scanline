@@ -287,11 +287,7 @@ fn changed_file_error(label: &str) -> ScanError {
 }
 
 fn check_model_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        Err(ScanError::Cancelled("OCRS OCR cancelled".into()))
-    } else {
-        Ok(())
-    }
+    crate::operation::check_cancellation(cancellation, "OCRS OCR cancelled")
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {

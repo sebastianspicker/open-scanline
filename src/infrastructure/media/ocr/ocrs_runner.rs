@@ -158,11 +158,7 @@ fn not_installed() -> ScanError {
 }
 
 fn check_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        Err(ScanError::Cancelled("OCRS OCR cancelled".into()))
-    } else {
-        Ok(())
-    }
+    crate::operation::check_cancellation(cancellation, "OCRS OCR cancelled")
 }
 
 /// Export-scoped lazy OCRS engine cache. Every page verifies fresh selected

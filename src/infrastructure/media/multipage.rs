@@ -164,12 +164,7 @@ fn checked_contact_sheet_dimension(cells: u32, thumbnail: u32, margin: u32) -> R
 }
 
 fn check_contact_sheet_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled(
-            "contact sheet publication cancelled".into(),
-        ));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "contact sheet publication cancelled")
 }
 
 /// Save the unprocessed buffer, defaulting to TIFF when no extension is provided.

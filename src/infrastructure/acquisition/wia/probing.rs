@@ -1,75 +1,15 @@
-use crate::error::Result;
-use crate::infrastructure::acquisition::{BackendInfo, DeviceInfo};
-use crate::infrastructure::runtime::{
-    parse_pipe_devices, run_command, run_command_with_cancellation,
-    run_contained_command_with_artifact_quota, simulate_backends, ArtifactQuota, ArtifactWatch,
-    CommandOutput, CommandRunner, CommandSpec,
+pub use crate::infrastructure::acquisition::command_backend::SystemCommandRunner;
+use crate::infrastructure::acquisition::{
+    parse_pipe_devices, simulate_backends, BackendInfo, DeviceInfo,
 };
+use crate::infrastructure::runtime::{CommandRunner, CommandSpec};
 use crate::operation::CancellationToken;
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// Small process seam for deterministic command construction, cancellation, and
-/// platform-independent tests. Production uses [`SystemCommandRunner`].
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn run(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-    ) -> Result<CommandOutput> {
-        run_command(
-            spec,
-            timeout,
-            cancelled,
-            "WIA command",
-            "WIA scan cancelled",
-        )
-    }
-
-    fn run_with_cancellation(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-    ) -> Result<CommandOutput> {
-        run_command_with_cancellation(
-            spec,
-            timeout,
-            cancelled,
-            cancellation,
-            "WIA command",
-            "WIA scan cancelled",
-        )
-    }
-
-    fn run_with_cancellation_and_artifact_quota(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-        artifact_directory: &Path,
-        artifact_quota: ArtifactQuota,
-    ) -> Result<CommandOutput> {
-        run_contained_command_with_artifact_quota(
-            spec,
-            timeout,
-            cancelled,
-            cancellation,
-            "WIA command",
-            "WIA scan cancelled",
-            ArtifactWatch {
-                directory: artifact_directory,
-                quota: artifact_quota,
-            },
-        )
-    }
-}
+/// Production command runner for WIA's PowerShell-driven commands.
+pub(super) const RUNNER: SystemCommandRunner =
+    SystemCommandRunner::new("WIA command", "WIA scan cancelled");
 
 pub(super) fn powershell_spec(script: String) -> CommandSpec {
     CommandSpec {
@@ -97,7 +37,7 @@ fn powershell_available_with_cancellation(_cancellation: Option<&CancellationTok
     #[cfg(target_os = "windows")]
     {
         let cancelled = Mutex::new(false);
-        SystemCommandRunner
+        RUNNER
             .run_with_cancellation(
                 &CommandSpec {
                     program: POWERSHELL.into(),
@@ -177,7 +117,7 @@ fn try_list_via_powershell(cancellation: Option<&CancellationToken>) -> Vec<Devi
         return Vec::new();
     }
     let cancelled = Mutex::new(false);
-    let Ok(output) = SystemCommandRunner.run_with_cancellation(
+    let Ok(output) = RUNNER.run_with_cancellation(
         &powershell_spec(wia_enumeration_script().into()),
         Duration::from_secs(8),
         &cancelled,

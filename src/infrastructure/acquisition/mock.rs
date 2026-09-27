@@ -6,6 +6,7 @@ use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{
     DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession,
 };
+use crate::infrastructure::runtime::CommandSession;
 use std::sync::Mutex;
 
 /// Complete synthetic device backend — always available for CI/offline.
@@ -21,8 +22,7 @@ impl MockDevice {
 }
 
 pub struct MockDeviceSession {
-    closed: Mutex<bool>,
-    cancelled: Mutex<bool>,
+    session: CommandSession,
     cal: Mutex<Option<(Vec<i32>, Vec<f64>)>>,
     focus_pt: Mutex<Option<(f64, f64)>>,
 }
@@ -30,8 +30,7 @@ pub struct MockDeviceSession {
 impl MockDeviceSession {
     pub fn new() -> Self {
         Self {
-            closed: Mutex::new(false),
-            cancelled: Mutex::new(false),
+            session: CommandSession::default(),
             cal: Mutex::new(None),
             focus_pt: Mutex::new(None),
         }
@@ -62,7 +61,10 @@ impl DeviceSession for MockDeviceSession {
 
     fn scan(&self, request: &ScanRequest) -> Result<ImageBuffer> {
         reject_single_page_duplex(request)?;
-        super::batch::ensure_session_ready(&self.closed, &self.cancelled)?;
+        super::batch::validate_session_state(
+            self.session.is_closed(),
+            self.session.is_cancelled(),
+        )?;
         let mut image = Self::gradient(request)?;
         if let Some((ref dark, ref flat)) =
             *self.cal.lock().unwrap_or_else(|error| error.into_inner())
@@ -73,25 +75,17 @@ impl DeviceSession for MockDeviceSession {
     }
 
     fn cancel(&self) {
-        if let Ok(mut cancelled) = self.cancelled.lock() {
-            *cancelled = true;
-        }
+        self.session.cancel();
     }
 
     fn close(&self) {
-        if let Ok(mut closed) = self.closed.lock() {
-            *closed = true;
-        }
+        self.session.close();
     }
 
     fn calibrate(&self) -> serde_json::Value {
         use serde_json::json;
-        if *self
-            .closed
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-        {
-            return json!({"ok": false, "status": "closed", "backend": "mock"});
+        if self.session.is_closed() {
+            return crate::infrastructure::acquisition::contract::closed_session_envelope("mock");
         }
         let (dark, flat) = synthetic_cal_tables();
         if let Ok(mut calibration) = self.cal.lock() {
@@ -108,20 +102,14 @@ impl DeviceSession for MockDeviceSession {
 
     fn focus(&self, x: f64, y: f64) -> serde_json::Value {
         use serde_json::json;
-        if *self
-            .closed
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-        {
-            return json!({"ok": false, "status": "closed", "backend": "mock"});
+        if self.session.is_closed() {
+            return crate::infrastructure::acquisition::contract::closed_session_envelope("mock");
         }
-        let x_fraction = x.clamp(0.0, 1.0);
-        let y_fraction = y.clamp(0.0, 1.0);
+        let (x_fraction, y_fraction, value) =
+            crate::infrastructure::acquisition::contract::simulated_focus_score(x, y);
         if let Ok(mut focus_point) = self.focus_pt.lock() {
             *focus_point = Some((x_fraction, y_fraction));
         }
-        let distance = ((x_fraction - 0.5).powi(2) + (y_fraction - 0.5).powi(2)).sqrt();
-        let value = ((1.0 - (distance * 1.4).min(1.0)) * 10000.0).round() / 10000.0;
         json!({
             "ok": true,
             "status": "focused",

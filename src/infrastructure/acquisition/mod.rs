@@ -1,7 +1,9 @@
 //! Concrete acquisition registry and scanner adapters.
 
 mod batch;
+mod command_backend;
 pub mod contract;
+mod device_listing;
 #[cfg(feature = "gui")]
 mod discovery;
 #[cfg(feature = "gui")]
@@ -18,4 +20,5 @@ pub use contract::{
     BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession, FocusCapability,
     MaintenanceAvailability, ScanPagesEnd, ScanPagesResult,
 };
+pub(crate) use device_listing::{parse_pipe_devices, simulate_backends};
 pub use registry::*;

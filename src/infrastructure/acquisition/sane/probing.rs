@@ -1,67 +1,15 @@
-use crate::error::Result;
-use crate::infrastructure::acquisition::{BackendInfo, DeviceInfo};
-use crate::infrastructure::runtime::{
-    parse_pipe_devices, run_command, run_command_with_cancellation,
-    run_contained_command_with_artifact_quota, simulate_backends, ArtifactQuota, ArtifactWatch,
-    CommandOutput, CommandRunner, CommandSpec,
+pub use crate::infrastructure::acquisition::command_backend::SystemCommandRunner;
+use crate::infrastructure::acquisition::{
+    parse_pipe_devices, simulate_backends, BackendInfo, DeviceInfo,
 };
+use crate::infrastructure::runtime::{CommandRunner, CommandSpec};
 use crate::operation::CancellationToken;
-use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn run(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-    ) -> Result<CommandOutput> {
-        run_command(spec, timeout, cancelled, "scanimage", "SANE scan cancelled")
-    }
-
-    fn run_with_cancellation(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-    ) -> Result<CommandOutput> {
-        run_command_with_cancellation(
-            spec,
-            timeout,
-            cancelled,
-            cancellation,
-            "scanimage",
-            "SANE scan cancelled",
-        )
-    }
-
-    fn run_with_cancellation_and_artifact_quota(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-        artifact_directory: &Path,
-        artifact_quota: ArtifactQuota,
-    ) -> Result<CommandOutput> {
-        run_contained_command_with_artifact_quota(
-            spec,
-            timeout,
-            cancelled,
-            cancellation,
-            "scanimage",
-            "SANE scan cancelled",
-            ArtifactWatch {
-                directory: artifact_directory,
-                quota: artifact_quota,
-            },
-        )
-    }
-}
+/// Production command runner for the SANE `scanimage` tool.
+pub(super) const RUNNER: SystemCommandRunner =
+    SystemCommandRunner::new("scanimage", "SANE scan cancelled");
 
 /// True when the `scanimage` acquisition tool appears on PATH.
 ///
@@ -78,7 +26,7 @@ pub fn available_with_cancellation(cancellation: Option<&CancellationToken>) -> 
     }
     which("scanimage").is_some_and(|binary| {
         let cancelled = Mutex::new(false);
-        SystemCommandRunner
+        RUNNER
             .run_with_cancellation(
                 &CommandSpec {
                     program: binary.display().to_string(),
@@ -134,7 +82,7 @@ fn try_list_scanimage(cancellation: Option<&CancellationToken>) -> Vec<DeviceInf
         return Vec::new();
     };
     let cancelled = Mutex::new(false);
-    let Ok(output) = SystemCommandRunner.run_with_cancellation(
+    let Ok(output) = RUNNER.run_with_cancellation(
         &CommandSpec {
             program: bin.display().to_string(),
             args: vec!["-f".into(), "%d|%v %m%n".into()],

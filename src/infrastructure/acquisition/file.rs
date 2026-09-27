@@ -4,6 +4,7 @@ use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{DeviceInfo, DeviceSession};
 use crate::infrastructure::media::load_image;
+use crate::infrastructure::runtime::CommandSession;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -34,8 +35,7 @@ impl FileBackend {
 
 pub struct FileDeviceSession {
     path: PathBuf,
-    closed: Mutex<bool>,
-    cancelled: Mutex<bool>,
+    session: CommandSession,
     source: Mutex<Option<ImageBuffer>>,
 }
 
@@ -43,8 +43,7 @@ impl FileDeviceSession {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            closed: Mutex::new(false),
-            cancelled: Mutex::new(false),
+            session: CommandSession::default(),
             source: Mutex::new(None),
         }
     }
@@ -79,20 +78,19 @@ impl FileDeviceSession {
 impl DeviceSession for FileDeviceSession {
     fn scan(&self, request: &ScanRequest) -> Result<ImageBuffer> {
         reject_single_page_duplex(request)?;
-        super::batch::ensure_session_ready(&self.closed, &self.cancelled)?;
+        super::batch::validate_session_state(
+            self.session.is_closed(),
+            self.session.is_cancelled(),
+        )?;
         self.apply_request(self.load()?, request)
     }
 
     fn cancel(&self) {
-        if let Ok(mut cancelled) = self.cancelled.lock() {
-            *cancelled = true;
-        }
+        self.session.cancel();
     }
 
     fn close(&self) {
-        if let Ok(mut closed) = self.closed.lock() {
-            *closed = true;
-        }
+        self.session.close();
         if let Ok(mut source) = self.source.lock() {
             *source = None;
         }

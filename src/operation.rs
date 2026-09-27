@@ -44,3 +44,21 @@ impl CancellationToken {
         Ok(())
     }
 }
+
+/// Returns `true` when `cancellation` is `Some` and has been cancelled.
+///
+/// Shared shape for call sites that hold an optional, borrowed token rather
+/// than an owned [`CancellationToken`].
+pub fn is_cancelled(cancellation: Option<&CancellationToken>) -> bool {
+    cancellation.is_some_and(CancellationToken::is_cancelled)
+}
+
+/// [`CancellationToken::check`] for an optional, borrowed token: `Ok(())`
+/// when `cancellation` is `None` or not cancelled, otherwise
+/// `Err(ScanError::Cancelled(context))`.
+pub fn check_cancellation(cancellation: Option<&CancellationToken>, context: &str) -> Result<()> {
+    match cancellation {
+        Some(token) => token.check(context),
+        None => Ok(()),
+    }
+}

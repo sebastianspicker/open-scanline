@@ -345,12 +345,7 @@ fn parse_format(tag: u8) -> Result<PixelFormat> {
 }
 
 fn check_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled(
-            "aggregate page loading cancelled".into(),
-        ));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "aggregate page loading cancelled")
 }
 
 #[cfg(test)]

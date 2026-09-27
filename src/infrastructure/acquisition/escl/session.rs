@@ -4,43 +4,34 @@ pub struct EsclDeviceSession {
     pub device_id: String,
     pub(crate) endpoint: Endpoint,
     pub(crate) simulate: bool,
-    pub(crate) closed: Mutex<bool>,
-    pub(crate) cancelled: Mutex<bool>,
-    pub(crate) cancellation: Mutex<Option<CancellationToken>>,
+    pub(super) session: crate::infrastructure::runtime::CommandSession,
 }
 
 impl EsclDeviceSession {
     pub(crate) fn new(device_id: String, endpoint: Endpoint, simulate: bool) -> Self {
+        let session = crate::infrastructure::runtime::CommandSession::default();
+        // Every HTTP exchange needs a token to check, before a caller ever
+        // binds one, so this session (unlike the command-backed backends)
+        // always starts with one.
+        session.bind_cancellation(CancellationToken::new());
         Self {
             device_id,
             endpoint,
             simulate,
-            closed: Mutex::new(false),
-            cancelled: Mutex::new(false),
-            cancellation: Mutex::new(Some(CancellationToken::new())),
+            session,
         }
     }
 
     pub(crate) fn is_closed(&self) -> bool {
-        *self.closed.lock().unwrap_or_else(|e| e.into_inner())
+        self.session.is_closed()
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {
-        *self.cancelled.lock().unwrap_or_else(|e| e.into_inner())
-            || self
-                .cancellation
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled)
+        self.session.is_cancelled()
     }
 
     pub(crate) fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .unwrap_or_default()
+        self.session.cancellation_token().unwrap_or_default()
     }
 
     pub(crate) fn create_job(&self, root: &str, settings: &[u8]) -> Result<ScanJob> {
@@ -84,12 +75,7 @@ impl EsclDeviceSession {
     ) -> std::result::Result<TemporaryOutput, FetchDocumentError> {
         let next = next_document_path(job);
         let deadline = Instant::now() + NEXT_DOCUMENT_DEADLINE;
-        let cancellation = self
-            .cancellation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .unwrap_or_default();
+        let cancellation = self.cancellation_token();
         loop {
             if self.is_cancelled() {
                 return Err(FetchDocumentError::Cancelled);

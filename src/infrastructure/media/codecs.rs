@@ -444,10 +444,7 @@ fn publish_jxl_output(
 }
 
 fn check_native_publication_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled("image publication cancelled".into()));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "image publication cancelled")
 }
 
 fn create_output_parent(path: &Path) -> Result<()> {

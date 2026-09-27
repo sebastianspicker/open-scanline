@@ -58,6 +58,45 @@ pub(crate) struct PdfPathPublication<'a> {
     pub(crate) cancellation: Option<&'a crate::operation::CancellationToken>,
 }
 
+/// Already-split view of a [`PdfPathPublication`]: the path/transform/
+/// cancellation pieces each caller threads through differently, plus the one
+/// [`PdfOptions`] both callers build from the same fields.
+struct PdfPathPublicationParts<'a> {
+    paths: &'a [std::path::PathBuf],
+    destination: &'a std::path::Path,
+    transform: Option<&'a icc::PreparedScannerProfile>,
+    cancellation: Option<&'a crate::operation::CancellationToken>,
+    options: PdfOptions,
+}
+
+impl<'a> From<PdfPathPublication<'a>> for PdfPathPublicationParts<'a> {
+    fn from(request: PdfPathPublication<'a>) -> Self {
+        let PdfPathPublication {
+            paths,
+            destination,
+            dpi,
+            title,
+            password,
+            searchable_pages,
+            transform,
+            cancellation,
+        } = request;
+        let options = PdfOptions {
+            dpi,
+            title: title.into(),
+            password: password.map(str::to_owned),
+            searchable_pages,
+        };
+        Self {
+            paths,
+            destination,
+            transform,
+            cancellation,
+            options,
+        }
+    }
+}
+
 /// Prepare a validated output directory before incremental publication.
 pub(crate) fn prepare_output_directory(directory: &std::path::Path) -> crate::error::Result<()> {
     std::fs::create_dir_all(directory)?;
@@ -69,22 +108,13 @@ pub(crate) fn prepare_output_directory(directory: &std::path::Path) -> crate::er
 pub(crate) fn publish_pdf_from_paths(
     request: PdfPathPublication<'_>,
 ) -> crate::error::Result<std::path::PathBuf> {
-    let PdfPathPublication {
+    let PdfPathPublicationParts {
         paths,
         destination,
-        dpi,
-        title,
-        password,
-        searchable_pages,
         transform,
         cancellation,
-    } = request;
-    let options = PdfOptions {
-        dpi,
-        title: title.into(),
-        password: password.map(str::to_owned),
-        searchable_pages,
-    };
+        options,
+    } = request.into();
     match transform {
         Some(transform) => pdf::save_pdf_from_paths_with_loader_and_transform(
             paths,
@@ -141,22 +171,13 @@ impl NativeAggregateSession {
         &mut self,
         request: PdfPathPublication<'_>,
     ) -> crate::error::Result<std::path::PathBuf> {
-        let PdfPathPublication {
+        let PdfPathPublicationParts {
             paths,
             destination,
-            dpi,
-            title,
-            password,
-            searchable_pages,
             transform,
             cancellation,
-        } = request;
-        let options = PdfOptions {
-            dpi,
-            title: title.into(),
-            password: password.map(str::to_owned),
-            searchable_pages,
-        };
+            options,
+        } = request.into();
         pdf::save_pdf_from_paths_with_loader_and_transform(
             paths,
             destination,

@@ -217,3 +217,22 @@ pub trait DeviceSession: Send {
         })
     }
 }
+
+/// The `{"ok": false, "status": "closed", "backend": ...}` envelope every
+/// adapter's `calibrate`/`focus`/maintenance path returns for a closed session.
+pub(crate) fn closed_session_envelope(backend: &str) -> serde_json::Value {
+    serde_json::json!({"ok": false, "status": "closed", "backend": backend})
+}
+
+/// Deterministic simulated point-focus score shared by the mock backend and
+/// WIA's simulated devices: clamp `x`/`y` to `[0, 1]` and score their distance
+/// from the frame center.
+///
+/// Returns `(x_fraction, y_fraction, focus)`.
+pub(crate) fn simulated_focus_score(x: f64, y: f64) -> (f64, f64, f64) {
+    let x_fraction = x.clamp(0.0, 1.0);
+    let y_fraction = y.clamp(0.0, 1.0);
+    let distance = ((x_fraction - 0.5).powi(2) + (y_fraction - 0.5).powi(2)).sqrt();
+    let focus = ((1.0 - (distance * 1.4).min(1.0)) * 10000.0).round() / 10000.0;
+    (x_fraction, y_fraction, focus)
+}

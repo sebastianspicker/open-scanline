@@ -6,15 +6,7 @@ use crate::infrastructure::runtime::{
     validate_artifact_quota, ArtifactQuota, CommandRunner, CommandSession, CommandSpec,
     ImageDecoder, TemporaryOutput,
 };
-use std::sync::Mutex;
 use std::time::Duration;
-
-pub(crate) fn ensure_session_ready(closed: &Mutex<bool>, cancelled: &Mutex<bool>) -> Result<()> {
-    validate_session_state(
-        *closed.lock().unwrap_or_else(|error| error.into_inner()),
-        *cancelled.lock().unwrap_or_else(|error| error.into_inner()),
-    )
-}
 
 pub(crate) fn validate_session_state(closed: bool, cancelled: bool) -> Result<()> {
     if closed {

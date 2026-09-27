@@ -15,12 +15,9 @@ pub use paths::{
 };
 pub(crate) use searchable::{checked_pdf_searchable_text_total, validate_pdf_password};
 
-use crate::error::{Result, ScanError};
+use crate::error::Result;
 use crate::operation::CancellationToken;
 
 fn check_pdf_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled("PDF publication cancelled".into()));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "PDF publication cancelled")
 }

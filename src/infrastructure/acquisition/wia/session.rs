@@ -1,7 +1,7 @@
 use super::command::{
     feeder_exhausted, numbered_page_outputs, wia_transfer_command, wia_transfer_pages_command,
 };
-use super::probing::SystemCommandRunner;
+use super::probing::RUNNER;
 use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{
     apply_flat_dark_cal, synthetic_cal_tables, validate_scan_dpi, ScanMode, ScanRequest,
@@ -9,12 +9,12 @@ use crate::domain::acquisition::{
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{
-    DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
+    simulate_backends, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
 };
 use crate::infrastructure::media::NativeImageDecoder;
 use crate::infrastructure::runtime::{
-    artifact_quota_for_request, document_batch_timeout, simulate_backends, validate_artifact_quota,
-    CommandOutput, CommandRunner, CommandSession, ImageDecoder, TemporaryOutput,
+    artifact_quota_for_request, document_batch_timeout, validate_artifact_quota, CommandOutput,
+    CommandRunner, CommandSession, ImageDecoder, TemporaryOutput,
 };
 use crate::operation::CancellationToken;
 use std::sync::{Arc, Mutex};
@@ -47,7 +47,7 @@ impl WiaDeviceSession {
             session: CommandSession::default(),
             cal: Mutex::new(None),
             focus: Mutex::new(None),
-            runner: Arc::new(SystemCommandRunner),
+            runner: Arc::new(RUNNER),
             decoder: Arc::new(NativeImageDecoder),
         }
     }
@@ -99,9 +99,11 @@ impl WiaDeviceSession {
         validate_artifact_quota(output.directory(), artifact_quota)?;
         validate_batch_output(&self.session, &command_output)?;
         let paths = numbered_page_outputs(output.directory())?;
-        validate_page_count(paths.len(), max_pages)?;
+        super::super::command_backend::validate_batch_page_count(paths.len(), max_pages, "WIA")?;
         let emitted = self.emit_materialized_pages(paths, request, emit)?;
-        Ok(batch_result(emitted, max_pages))
+        Ok(super::super::command_backend::command_backed_pages_result(
+            emitted, max_pages,
+        ))
     }
 
     fn run_com_page_job(
@@ -210,23 +212,6 @@ fn validate_batch_output(session: &CommandSession, output: &CommandOutput) -> Re
     )))
 }
 
-fn validate_page_count(actual: usize, maximum: u32) -> Result<()> {
-    if actual <= maximum as usize {
-        return Ok(());
-    }
-    Err(ScanError::Other(format!(
-        "WIA emitted {actual} pages beyond the requested limit {maximum}"
-    )))
-}
-
-fn batch_result(emitted: u32, maximum: u32) -> ScanPagesResult {
-    if emitted == maximum {
-        ScanPagesResult::limit_reached(emitted)
-    } else {
-        ScanPagesResult::feeder_exhausted(emitted)
-    }
-}
-
 impl DeviceSession for WiaDeviceSession {
     fn maintenance_capabilities(&self) -> DeviceMaintenanceCapabilities {
         if self.simulate {
@@ -285,7 +270,7 @@ impl DeviceSession for WiaDeviceSession {
     fn calibrate(&self) -> serde_json::Value {
         use serde_json::json;
         if self.session.is_closed() {
-            return json!({"ok": false, "status": "closed", "backend": "wia"});
+            return crate::infrastructure::acquisition::contract::closed_session_envelope("wia");
         }
         // Hardware WIA has no portable calibrate; sim stores tables like mock.
         if self.simulate {
@@ -310,15 +295,12 @@ impl DeviceSession for WiaDeviceSession {
 
     fn focus(&self, x: f64, y: f64) -> serde_json::Value {
         use serde_json::json;
-        let xf = x.clamp(0.0, 1.0);
-        let yf = y.clamp(0.0, 1.0);
+        let (xf, yf, value) =
+            crate::infrastructure::acquisition::contract::simulated_focus_score(x, y);
         if self.simulate {
             if let Ok(mut g) = self.focus.lock() {
                 *g = Some((xf, yf));
             }
-            // Match mock behavior: ((1.0 - min(1.0, dist*1.4)) * 10000).round() / 10000
-            let dist = ((xf - 0.5).powi(2) + (yf - 0.5).powi(2)).sqrt();
-            let value = ((1.0 - (dist * 1.4).min(1.0)) * 10000.0).round() / 10000.0;
             return json!({
                 "ok": true,
                 "status": "focused",

@@ -4,7 +4,7 @@ use super::capabilities::{
     SaneMaintenanceOptions,
 };
 use super::command::build_scanimage_command;
-use super::probing::{which, SystemCommandRunner};
+use super::probing::{which, RUNNER};
 use super::{emit_simulated_pages, emit_single_pages};
 use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{ScanMode, ScanRequest};
@@ -43,7 +43,7 @@ impl SaneDeviceSession {
             sane_name,
             simulate,
             session: CommandSession::default(),
-            runner: Arc::new(SystemCommandRunner),
+            runner: Arc::new(RUNNER),
             decoder: Arc::new(NativeImageDecoder),
             inspect_capabilities: !simulate,
             capabilities: OnceLock::new(),
@@ -147,7 +147,7 @@ impl SaneDeviceSession {
     fn run_maintenance(&self, action: SaneMaintenanceAction) -> serde_json::Value {
         use serde_json::json;
         if self.session.is_closed() {
-            return json!({"ok": false, "status": "closed", "backend": "sane"});
+            return crate::infrastructure::acquisition::contract::closed_session_envelope("sane");
         }
         if self.session.is_cancelled() {
             return json!({"ok": false, "status": "cancelled", "backend": "sane"});
@@ -214,9 +214,15 @@ impl SaneDeviceSession {
         validate_artifact_quota(output.directory(), artifact_quota)?;
         let paths = numbered_batch_outputs(output.directory())?;
         validate_batch_command(&command)?;
-        validate_batch_page_count(paths.len(), max_pages)?;
+        super::super::command_backend::validate_batch_page_count(
+            paths.len(),
+            max_pages,
+            "scanimage",
+        )?;
         let emitted = self.emit_batch_pages(paths, request, emit)?;
-        Ok(scan_pages_result(emitted, max_pages))
+        Ok(super::super::command_backend::command_backed_pages_result(
+            emitted, max_pages,
+        ))
     }
 
     fn run_scanimage_page_job(
@@ -364,23 +370,6 @@ fn validate_batch_command(command: &CommandOutput) -> Result<()> {
         "scanimage batch failed: {}",
         String::from_utf8_lossy(&command.stderr).trim()
     )))
-}
-
-fn validate_batch_page_count(actual: usize, maximum: u32) -> Result<()> {
-    if actual <= maximum as usize {
-        return Ok(());
-    }
-    Err(ScanError::Other(format!(
-        "scanimage emitted {actual} pages beyond the requested limit {maximum}"
-    )))
-}
-
-fn scan_pages_result(emitted: u32, maximum: u32) -> ScanPagesResult {
-    if emitted == maximum {
-        ScanPagesResult::limit_reached(emitted)
-    } else {
-        ScanPagesResult::feeder_exhausted(emitted)
-    }
 }
 
 fn numbered_batch_outputs(directory: &Path) -> Result<Vec<std::path::PathBuf>> {

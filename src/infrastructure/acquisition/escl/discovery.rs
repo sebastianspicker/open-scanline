@@ -10,11 +10,7 @@ fn probe_worker(
     cancellation: Option<CancellationToken>,
 ) {
     loop {
-        if Instant::now() >= deadline
-            || cancellation
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled)
-        {
+        if Instant::now() >= deadline || crate::operation::is_cancelled(cancellation.as_ref()) {
             break;
         }
         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -82,7 +78,7 @@ pub(crate) fn probe_endpoints_with_cancellation(
     for handle in handles {
         let _ = handle.join();
     }
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
     let mut found = found.lock().unwrap_or_else(|error| error.into_inner());
@@ -129,17 +125,17 @@ pub(crate) fn resolved_mdns_endpoints_with_cancellation(
     let deadline = std::time::Instant::now() + wait;
     let mut endpoints = Vec::new();
     while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if crate::operation::is_cancelled(cancellation) {
             break;
         }
         let poll = remaining.min(Duration::from_millis(25));
         let Ok(event) = receiver.recv_timeout(poll) else {
-            if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            if crate::operation::is_cancelled(cancellation) {
                 break;
             }
             continue;
         };
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if crate::operation::is_cancelled(cancellation) {
             break;
         }
         if let ServiceEvent::ServiceResolved(info) = event {
@@ -263,7 +259,7 @@ pub(crate) fn discover_devices_locked_with_cancellation(
     if !available() && !simulate_backends() {
         return Vec::new();
     }
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
     let cap = max_hosts.clamp(1, 64);
@@ -272,14 +268,14 @@ pub(crate) fn discover_devices_locked_with_cancellation(
         Duration::from_millis(350),
         cancellation,
     ));
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
     endpoints.extend(subnet_endpoints(cap.saturating_sub(endpoints.len())));
     endpoints.truncate(cap);
     let mut devices =
         probe_endpoints_with_cancellation(&endpoints, DISCOVERY_PROBE_BUDGET, cancellation);
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
     if simulate_backends() && !devices.iter().any(|d| d.id == "escl:sim") {
@@ -332,7 +328,7 @@ pub fn refresh_devices_with_cancellation(
     let devices =
         std::panic::catch_unwind(|| discover_devices_locked_with_cancellation(32, cancellation))
             .unwrap_or_default();
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+    if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
     let mut cached = ESCL_DEVICE_CACHE

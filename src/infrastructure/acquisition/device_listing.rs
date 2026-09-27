@@ -1,6 +1,10 @@
 //! Environment-backed simulated discovery and pipe-list parsing.
+//!
+//! Used only by the command-backed and network acquisition adapters (SANE,
+//! WIA, eSCL); it lives here rather than in `runtime` so that module stays
+//! free of acquisition vocabulary.
 
-use crate::infrastructure::acquisition::DeviceInfo;
+use super::DeviceInfo;
 
 pub(crate) fn simulate_backends() -> bool {
     matches!(

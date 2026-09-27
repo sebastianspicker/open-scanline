@@ -5,9 +5,9 @@ use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{
-    BackendInfo, DeviceInfo, DeviceSession, ScanPagesEnd, ScanPagesResult,
+    simulate_backends, BackendInfo, DeviceInfo, DeviceSession, ScanPagesEnd, ScanPagesResult,
 };
-use crate::infrastructure::runtime::{simulate_backends, TemporaryOutput};
+use crate::infrastructure::runtime::TemporaryOutput;
 use crate::operation::CancellationToken;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use quick_xml::events::Event;

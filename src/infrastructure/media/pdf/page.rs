@@ -1,3 +1,4 @@
+use super::check_pdf_cancellation;
 use super::searchable::{encode_searchable_text, SearchableFont};
 use crate::domain::image::{ImageBuffer, MAX_IMAGE_BYTES};
 use crate::error::{Result, ScanError};
@@ -151,13 +152,6 @@ fn checked_pdf_image_stream_aggregate(current: usize, stream_bytes: usize) -> Re
         )));
     }
     Ok(aggregate)
-}
-
-fn check_pdf_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled("PDF publication cancelled".into()));
-    }
-    Ok(())
 }
 
 #[derive(Clone, Copy)]
