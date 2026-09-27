@@ -1,12 +1,11 @@
 use super::super::state::GuiState;
 use crate::domain::acquisition::ScanRequest;
-use crate::domain::image::{ImageBuffer, PixelFormat};
-use crate::error::Result;
-use crate::infrastructure::media::load_image;
-use crate::infrastructure::media::{make_it8_target_image, profile_scanner_it8, save_profile_json};
-use crate::workflows::maintenance::{calibrate_device, exposure_from_preview, focus_device};
+use crate::domain::image::PixelFormat;
+use crate::workflows::maintenance::{
+    calibrate_device, create_scanner_profile, exposure_from_preview, focus_device,
+};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
@@ -54,7 +53,7 @@ impl GuiState {
     }
 
     pub(in super::super) fn do_profile_scanner(&mut self) {
-        match self.create_scanner_profile() {
+        match create_scanner_profile(self.last_image.as_deref(), Path::new(&self.output_dir)) {
             Ok((dest, profile)) => {
                 self.scanner_profile_path = dest.display().to_string();
                 self.status = format!(
@@ -73,21 +72,6 @@ impl GuiState {
     pub(in super::super) fn refresh_devices(&mut self) {
         self.discovery_refresh = true;
         self.refresh_maintenance_capabilities();
-    }
-
-    fn create_scanner_profile(&self) -> Result<(PathBuf, Value)> {
-        let image = self.scanner_profile_image()?;
-        let profile = profile_scanner_it8(&image)?;
-        let dest = PathBuf::from(&self.output_dir).join("scanner_it8_profile.json");
-        save_profile_json(&dest, &profile)?;
-        Ok((dest, profile))
-    }
-
-    fn scanner_profile_image(&self) -> Result<ImageBuffer> {
-        match &self.last_image {
-            Some(path) => load_image(path),
-            None => make_it8_target_image(120, 80),
-        }
     }
 
     fn set_device_result(&mut self, action: &str, value: Value) {

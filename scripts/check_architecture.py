@@ -49,18 +49,14 @@ INBOUND_INFRASTRUCTURE_ALLOWLIST = {
     # Distribution packaging for `open-scanline package`.
     ("distribution", "build_portable"),
     ("distribution", "PackagingOptions"),
-    # Single-adapter media convert/codec/profile helpers for CLI `convert`,
-    # GUI open/preview, and scanner-profile capture. Multi-adapter output
-    # (multipage/PDF assembly, ICC-profile-aware publication) stays in
-    # workflows::publication.
+    # Single-adapter media convert/codec helpers for CLI `convert` and GUI
+    # open/preview. Multi-step output (multipage/PDF assembly, ICC-aware
+    # publication, scanner profiling) stays in workflows.
     ("media", "convert_image_with_cancellation"),
     ("media", "load_image"),
     ("media", "image_buffer_to_rgba"),
     ("media", "save_image"),
     ("media", "supported_extensions"),
-    ("media", "make_it8_target_image"),
-    ("media", "profile_scanner_it8"),
-    ("media", "save_profile_json"),
     ("media", "ocr"),
     # ONNX inference CLI entry points, including the hidden `__onnx-worker`
     # subprocess re-entry point.

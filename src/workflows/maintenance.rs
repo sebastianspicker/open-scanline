@@ -5,10 +5,15 @@
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::domain::processing::{gray_mean, rgb_channel_means};
-use crate::error::ScanError;
+use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::{
     open_device, AnySession, DeviceMaintenanceCapabilities, DeviceSession,
 };
+use crate::infrastructure::media::{
+    load_image, make_it8_target_image, profile_scanner_it8, save_profile_json,
+};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 /// Open a device briefly and return its current maintenance capability
 /// snapshot. Failure to inspect is represented as unsupported so callers do
@@ -145,4 +150,21 @@ fn preview_exposure_result(
             "error": error.to_string(),
         }),
     }
+}
+
+/// Profile a scanner from an IT8 capture, or from the synthetic IT8 target
+/// when no capture is given, and publish the profile JSON in `output_dir`.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn create_scanner_profile(
+    capture: Option<&Path>,
+    output_dir: &Path,
+) -> Result<(PathBuf, Value)> {
+    let image = match capture {
+        Some(path) => load_image(path)?,
+        None => make_it8_target_image(120, 80)?,
+    };
+    let profile = profile_scanner_it8(&image)?;
+    let destination = output_dir.join("scanner_it8_profile.json");
+    save_profile_json(&destination, &profile)?;
+    Ok((destination, profile))
 }
