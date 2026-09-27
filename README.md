@@ -126,34 +126,30 @@ Open Scanline is one Cargo package with an executable and a library target.
 | Path | Purpose |
 | --- | --- |
 | `src/main.rs` | `open-scanline` executable entry point |
-| `src/lib.rs` | Public library surface and compatibility modules |
-| `src/domain/` | Scan and image values plus pure processing operations |
-| `src/workflows/` | Capture, processing, publication, and settings use cases |
+| `src/lib.rs` and top-level `src/*.rs` | Public library surface (re-exports only) |
+| `src/domain/` | Scan, image, export, and settings values and rules; pure processing |
 | `src/infrastructure/` | Scanner, media, configuration, runtime, ONNX, and distribution adapters |
+| `src/workflows/` | Capture, batch, processing, publication, and maintenance use cases |
 | `src/inbound/` | CLI, GUI, diagnostics, plugin, and host entry adapters |
-| `src/composition.rs` | Production adapter and workflow wiring |
-| `tests/` | Cross-layer, CLI, public API, packaging, and media contracts |
+| `assets/` | Fonts, UI translations, and license texts embedded in the binary |
+| `tests/` | CLI, public API, workflow, backend, packaging, and media contracts |
 
-The public library paths are compatibility facades over private implementation
-layers. Read [the architecture guide](docs/architecture.md) before moving code or
+Dependencies point from `inbound` to `workflows` to `infrastructure` to `domain`.
+Read [the architecture guide](docs/architecture.md) before moving code or
 changing an exported path.
 
 ## Build and verify
 
 The repository pins Rust 1.91.0, including `cargo`, Clippy, and rustfmt, through
 `rust-toolchain.toml`. Install [Rust with rustup](https://rustup.rs/) first, then
-run the complete local gate from the repository root:
+build from the repository root:
 
 ```bash
-sh scripts/check_architecture.sh
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo clippy --all-targets --no-default-features --locked -- -D warnings
-cargo test --all-features --locked
-cargo test --no-default-features --locked
-cargo build --release --all-features --locked
-cargo build --release --no-default-features --locked
+cargo build --release --locked
 ```
+
+The full verification gate that CI runs is listed in
+[CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
 The release executable is `target/release/open-scanline` on Linux and macOS, or
 `target/release/open-scanline.exe` on Windows. Use `--no-default-features` for a

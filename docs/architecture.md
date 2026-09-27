@@ -1,9 +1,8 @@
 # Architecture
 
 Open Scanline is a native Rust application. A single library powers the CLI, the
-optional desktop GUI, and the headless plugin and host entry points. Older
-top-level modules remain as compatibility facades; the real implementation lives
-in the layers below.
+optional desktop GUI, and the headless plugin and host entry points. The public
+library paths are thin re-export modules over private layers.
 
 ## System context
 
@@ -17,64 +16,71 @@ flowchart LR
     user[User or operator] --> cli[CLI]
     user --> gui[Desktop GUI]
     host[Host or bridge] --> plugin[Plugin entry]
-    cli --> inbound[Inbound adapters]
-    gui --> inbound
-    plugin --> inbound
-    inbound --> composition[Composition root]
-    inbound --> direct[Direct diagnostics, device, and settings adapters]
-    composition --> workflows[Workflows and ports]
-    composition --> infrastructure[Infrastructure adapters]
-    workflows --> domain[Domain values and processing]
-    infrastructure -. implements ports .-> workflows
+    lib[Library caller] --> facades[Public facades]
+    cli --> workflows[Workflows]
+    gui --> workflows
+    plugin --> workflows
+    facades --> workflows
+    workflows --> infrastructure[Infrastructure adapters]
+    workflows --> domain[Domain values and rules]
+    infrastructure --> domain
     infrastructure --> external[Files, scanners, optional tools, ONNX worker]
-    direct --> infrastructure
 ```
 
 ## Layers
 
-`src/domain/` holds the typed scan request, image buffer and geometry, processing
-preferences, calibration, and the pure processing operations. It may depend on its
-own modules and shared error values, never on adapters, entry points, or
-compatibility modules.
-
-`src/workflows/` implements the capture, batch, processing, publication, and
-settings use cases. Its narrow `AcquisitionPort` and `MediaPort` describe only the
-capabilities capture and publication need. A workflow states the operation and
-its cancellation, validation, ordering, and publication rules; it does not choose
-a scanner, codec, configuration format, or UI.
-
-`src/infrastructure/` supplies those concrete capabilities: mock/file/SANE/WIA
-and eSCL acquisition, JSON settings, media codecs/PDF/OCR/ICC, immutable OCRS
-model packs, explicit ONNX worker isolation, process supervision, atomic
-publication, and portable archives.
-
-`src/inbound/` adapts external requests into workflows. It owns CLI parsing and
-output, the optional GUI, diagnostics, plugin mode, and host integration.
-`src/composition.rs` is the native composition root, wiring `NativeAcquisition`
-and `NativeMedia` for the workflow entry points. The device catalog and
-maintenance operations, and JSON settings persistence, are direct inbound adapter
-concerns rather than workflow ports.
-
-The dependency direction is:
+Dependencies point one way. A layer may use any layer below it, never one above:
 
 ```text
-inbound -> composition -> workflows <- infrastructure
-                         |
-                         v
-                       domain
+inbound  ->  workflows  ->  infrastructure  ->  domain
 ```
 
-Infrastructure implements workflow ports. Domain has no outward dependency, and
-workflows never import infrastructure or inbound modules.
+`src/domain/` holds values and rules with no I/O: the scan request and page-limit
+rules, image buffers and geometry, processing preferences and the pure processing
+operations, export options and OCR engine names, settings validation, and the
+manufacturer catalog.
+
+`src/infrastructure/` holds every concrete adapter. `acquisition` owns the
+`DeviceSession` contract and its mock, file, SANE, WIA, and eSCL
+implementations; `command_backend` is the shared machinery for the two
+command-driven backends. `media` owns codecs, PDF, TIFF, OCR, ICC profiles, and
+the aggregate page cache. `config` owns `AppConfig` and its JSON persistence.
+`runtime` owns process supervision, command capture, atomic publication, and
+temporary files; it depends on no other adapter. `onnx` owns the isolated
+inference worker, and `distribution` the portable archive.
+
+`src/workflows/` holds each multi-step use case and calls infrastructure
+directly: `capture::single` and `capture::batch` (including batch output
+naming), `process`, `publication` (validation, OCR, profile correction and
+atomic output), `maintenance` (calibration, focus, exposure, and IT8 scanner
+profiling), and `settings` (resolving configured defaults). Each use case has one
+canonical entry that takes its arguments plus an options struct.
+`workflows::compat` holds the documented public permutations of the scan, batch,
+and process entry points and nothing else.
+
+`src/inbound/` translates external requests: CLI parsing and output, the optional
+GUI, diagnostics, plugin mode, host integration, and UI translations (loaded from
+`assets/i18n/`). Inbound calls workflows for anything that opens a device
+session or publishes output through more than one adapter. It may call
+infrastructure directly only for single-step capabilities listed in
+`scripts/check_architecture.py` (device inventory, config persistence, platform
+information, packaging, single-file convert, OCR and ONNX command entries).
+
+`src/error.rs` (`ScanError`) and `src/operation.rs` (`CancellationToken`) are
+shared by every layer.
+
+There are no traits whose only purpose is to separate layers. `DeviceSession` is a
+trait because five backends implement it and library callers may implement it
+too; everything else is a concrete type or function.
 
 ## State and data flow
 
-An inbound adapter builds typed input and invokes a workflow with the port it
-needs. Capture opens one device session, produces one image or a bounded stream of
-logical sides, applies domain processing, and publishes through the media port.
-Batch keeps page paths in order and assembles optional documents after the pages
-are published, instead of holding every decoded page in memory. The inbound edge
-loads and saves JSON settings through the settings adapter; configuration and
+An inbound adapter builds typed input and calls the canonical workflow entry.
+Capture opens one device session, produces one image or a bounded stream of
+logical sides, applies domain processing, and publishes through media. Batch
+keeps page paths in order and assembles optional documents after the pages are
+published, instead of holding every decoded page in memory. The inbound edge
+loads and saves JSON settings through `infrastructure::config`; configuration and
 language are application-instance state, while translation catalogs are immutable
 data.
 
@@ -122,6 +128,12 @@ Open Scanline worker with resource limits — not in a filesystem or syscall
 sandbox. Deprecated library helpers without an explicit worker fail closed and
 never search for a sibling executable.
 
+The CLI (subcommands, output, exit codes 0/1/2/130), the plugin status JSON, the
+configuration file, scanner-profile JSON, the OCRS model-pack manifest, and the
+portable archive layout are external contracts; `tests/cli_workflows.rs`,
+`tests/cli_contract.rs`, `tests/config_contract.rs`, and the CI portable smoke
+step protect them.
+
 A passing build or test suite cannot prove a physical scanner, driver, feeder,
 firmware, desktop session, optional model pack, or optional tool on a target
 machine.
@@ -132,20 +144,24 @@ an explicitly invoked portable-ZIP step around an already built binary, and
 host, because the packager records — but does not infer — the executable's target
 operating system and architecture.
 
-## Compatibility and placement
+## Public library surface and placement
 
-The top-level `core`, `device`, `scan`, `batch`, `process`, `export`, `imaging`,
-`config`, `cli`, `gui`, and backend-named modules preserve established library
-paths. Keep those facades thin; `tests/public_api_contract.rs` protects the names
-and signatures consumed outside the new layer tree. The domain, workflow,
-infrastructure, inbound, and composition modules are private, so adapter
-implementations do not leak into the public API.
+The top-level modules in `src/lib.rs` (`core`, `device`, `scan`, `batch`,
+`process`, `export`, `imaging`, `pipeline`, `config`, `cli`, `gui`, the
+backend-named modules, and the rest) are the documented public library. Each is a
+`pub use` list only; `tests/public_api_contract.rs` protects their names and
+signatures, and `docs/release-notes.md` records changes. The layer modules are
+private, so implementation types never leak.
 
-Put new pure value and processing logic in domain, use-case coordination and port
-traits in workflows, concrete I/O and platform behavior in infrastructure, and
-CLI/GUI/plugin translation in inbound. Add production wiring only in composition.
-`scripts/check_architecture.sh` enforces these boundaries and rejects path-module
-wiring.
+Put new pure values and rules in domain, concrete I/O and platform behavior in
+infrastructure, multi-step use cases in workflows, and CLI/GUI/plugin translation
+in inbound. Expose something publicly only by adding it to a facade.
+
+`scripts/check_architecture.sh` enforces the dependency direction, the inbound
+infrastructure allowlist, re-export-only facades, private layer modules, and the
+ban on `#[path]` module wiring. It tokenizes Rust before checking imports, so
+grouped and multiline imports, nested groups, and aliases are expanded and
+comments and string literals are ignored.
 
 ## Image and export resource ownership
 
@@ -183,9 +199,4 @@ ONNX fills its final target-sized tensor from packed input pixels, without a
 source-sized float expansion. Worker identity verification, the private execution
 image, process isolation, and resource limits form the inference boundary. The
 `gui`, `ocrs`, and `onnx` Cargo features select implementations, while
-compatibility facades and CLI parsing stay present in every profile.
-
-The architecture guard tokenizes Rust before checking imports. It expands grouped
-and multiline imports, including nested groups and aliases, and ignores comments
-and string literals. Its tests cover the same layer and facade rules enforced on
-ordinary paths.
+public facades and CLI parsing stay present in every profile.

@@ -32,7 +32,7 @@ cargo check --all-targets --no-default-features --features onnx --locked
 
 The handwritten-code gate pins Ruff 0.15.20, Lizard 1.23.0, and JSCPD 5.1.2. It
 limits functions to CCN 8, 50 NLOC, and eight parameters, limits files to 500
-Lizard NLOC, keeps Rust sources below 600 physical lines, and allows at most 0.5%
+Lizard NLOC, keeps Rust sources at or below 600 physical lines, and allows at most 0.5%
 duplication.
 
 The mock source is available on every platform and is the preferred deterministic
@@ -52,15 +52,25 @@ documents, or other sensitive test data.
 
 ## Code placement
 
-Put pure scan, image, and processing behavior in `src/domain/`. Put use-case
-coordination and port traits in `src/workflows/`, concrete scanner/media/config
-implementations in `src/infrastructure/`, and CLI/GUI/plugin behavior in
-`src/inbound/`. Wire native implementations in `src/composition.rs`.
+Dependencies point one way: `src/inbound/` -> `src/workflows/` ->
+`src/infrastructure/` -> `src/domain/`, with `src/error.rs` and
+`src/operation.rs` shared by all.
 
-Top-level modules retained for compatibility are public facades, not new
-implementation homes. Do not make domain depend on outer layers or let workflows
-select infrastructure directly; extend an existing port when a workflow needs a
-new capability.
+- Pure scan, image, export, settings, and processing values and rules go in
+  `src/domain/`.
+- Concrete scanner, media, configuration, process, and packaging code goes in
+  `src/infrastructure/`.
+- A use case that opens a device session or publishes through more than one
+  adapter goes in `src/workflows/`, with one canonical entry taking its
+  arguments and an options struct.
+- CLI, GUI, plugin, and host translation goes in `src/inbound/`. Inbound may
+  call infrastructure only through the allowlist in
+  `scripts/check_architecture.py`; extend it only for single-step capabilities.
+
+Top-level `src/*.rs` modules are the public library and contain only `pub use`
+lists. Add an item to one only when it is meant to be public, and record public
+changes in `docs/release-notes.md`. Do not add traits whose only purpose is to
+separate layers.
 
 ## Documentation
 

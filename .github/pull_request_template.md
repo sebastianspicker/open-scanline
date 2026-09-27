@@ -16,6 +16,8 @@
 - [ ] `cargo clippy --all-targets --no-default-features --locked -- -D warnings`
 - [ ] `cargo test --all-features --locked`
 - [ ] `cargo test --no-default-features --locked`
+- [ ] Remaining feature-profile and release-build checks from
+      [CONTRIBUTING.md](../CONTRIBUTING.md#development-setup)
 
 ## Not run
 
