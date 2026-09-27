@@ -311,3 +311,220 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
     assert_public_adapter_contracts(&request);
     assert_public_pdf_contract(image, &pdf);
 }
+
+fn assert_film_facade() {
+    use open_scanline::film::{convert_film, get_film_profile, list_film_profiles, FilmProfile};
+    let _ = convert_film;
+    let _ = get_film_profile;
+    let profiles: Vec<FilmProfile> = list_film_profiles();
+    assert!(!profiles.is_empty());
+    assert!(!profiles[0].id.is_empty());
+}
+
+fn assert_icc_facade() {
+    use open_scanline::icc::{
+        apply_scanner_profile, build_icc_bytes, it8_reference_patches, load_scanner_profile,
+        make_it8_target_image, profile_scanner_it8, save_profile_json, validate_scanner_profile,
+    };
+    let _ = apply_scanner_profile;
+    let _ = build_icc_bytes;
+    let _ = it8_reference_patches;
+    let _ = make_it8_target_image;
+    let _ = profile_scanner_it8;
+    let _ = validate_scanner_profile;
+    if false {
+        // `impl AsRef<Path>` parameters cannot be named as bare fn items; type-check
+        // the call shape instead without touching the filesystem.
+        let _ = load_scanner_profile(Path::new("scanner-profile.json"));
+        let _ = save_profile_json(Path::new("scanner-profile.json"), &serde_json::Value::Null);
+    }
+}
+
+fn assert_manufacturers_facade() {
+    use open_scanline::manufacturers::{
+        format_manufacturers_text, list_manufacturers, manufacturer_support_summary,
+        resolve_manufacturer, ManufacturerEntry,
+    };
+    let _ = format_manufacturers_text;
+    let entries: Vec<ManufacturerEntry> = list_manufacturers();
+    assert!(!entries.is_empty());
+    assert!(manufacturer_support_summary().is_object());
+    let _ = resolve_manufacturer("definitely-not-a-manufacturer");
+}
+
+fn assert_i18n_facade() {
+    use open_scanline::i18n::{
+        available_languages, language_name, translate, translate_args, validate_catalogs,
+        Translator,
+    };
+    let languages = available_languages();
+    assert!(languages.iter().any(|code| code == "en"));
+    assert_eq!(language_name("en"), "English");
+    let mut translator = Translator::new("en");
+    assert_eq!(translator.language(), "en");
+    assert_eq!(translator.t("app.name"), "Open Scanline");
+    let _ = translator.t_args("app.name", &[]);
+    assert_eq!(translate("en", "app.name"), "Open Scanline");
+    let _ = translate_args("en", "app.name", &[]);
+    let _ = translator.set_language("de");
+    let _ = validate_catalogs();
+}
+
+fn assert_features_facade() {
+    use open_scanline::features::feature_matrix;
+    assert!(feature_matrix().is_object());
+}
+
+fn assert_platform_facade() {
+    use open_scanline::platform::{app_name, cache_dir, config_dir, data_dir, platform_summary};
+    assert_eq!(app_name(), open_scanline::APP_NAME);
+    let _ = config_dir();
+    let _ = data_dir();
+    let _ = cache_dir();
+    assert!(platform_summary().is_object());
+}
+
+fn assert_ocr_facade() {
+    use open_scanline::ocr::{
+        ocr_file, ocr_file_with_cancellation, ocr_file_with_engine_with_cancellation, ocr_image,
+        ocr_image_offline, ocr_image_tesseract, ocr_image_tesseract_with_cancellation,
+        ocr_image_with_cancellation, ocr_image_with_engine_with_cancellation, ocr_module_info,
+        tesseract_available, OcrResult, OFFLINE_OCR_ENGINE,
+    };
+    assert_eq!(OFFLINE_OCR_ENGINE, "offline-template");
+    let _ = tesseract_available();
+    assert!(ocr_module_info().is_object());
+    let _ = ocr_image_offline;
+    let _ = ocr_image_tesseract;
+    let _ = ocr_image_tesseract_with_cancellation;
+    let _ = ocr_image;
+    let _ = ocr_image_with_cancellation;
+    let _ = ocr_image_with_engine_with_cancellation;
+    if false {
+        // `ocr_file*` take `impl AsRef<Path>`; type-check without external OCR I/O.
+        let _: Result<OcrResult> = ocr_file(Path::new("scan.png"), "eng", true);
+        let _: Result<OcrResult> = ocr_file_with_cancellation(
+            Path::new("scan.png"),
+            "eng",
+            true,
+            CancellationToken::new(),
+        );
+        let _: Result<OcrResult> = ocr_file_with_engine_with_cancellation(
+            Path::new("scan.png"),
+            "eng",
+            OcrEngine::Offline,
+            CancellationToken::new(),
+        );
+    }
+}
+
+fn assert_escl_facade() {
+    use open_scanline::escl::{
+        available, backend_info, discover_devices, list_devices, list_escl_devices_safe,
+        list_escl_devices_safe_with_cancellation, open, open_explicit_id, open_unlisted_endpoint,
+        open_with_cancellation, parse_job_id, refresh_devices, refresh_devices_with_cancellation,
+        EsclDeviceSession,
+    };
+    assert_device_session::<EsclDeviceSession>();
+    let _ = available();
+    assert!(!backend_info().id.is_empty());
+    assert_eq!(parse_job_id("", b""), None);
+    // Discovery/opening entry points would touch the network; keep them as
+    // signature-only references so this contract stays network-free.
+    let _ = discover_devices;
+    let _ = list_devices;
+    let _ = list_escl_devices_safe;
+    let _ = list_escl_devices_safe_with_cancellation;
+    let _ = refresh_devices;
+    let _ = refresh_devices_with_cancellation;
+    let _ = open;
+    let _ = open_explicit_id;
+    let _ = open_unlisted_endpoint;
+    let _ = open_with_cancellation;
+}
+
+fn assert_plugin_facade() {
+    use open_scanline::plugin::{
+        plugin_status, plugin_status_with_cancellation, run_plugin_mode, run_plugin_mode_with_token,
+    };
+    let _ = run_plugin_mode;
+    let _ = run_plugin_mode_with_token;
+    if false {
+        // Calling these performs live device discovery; type-check them only.
+        let _: serde_json::Value = plugin_status(None);
+        let _: serde_json::Value = plugin_status_with_cancellation(None, None);
+    }
+}
+
+fn assert_twain_facade() {
+    use open_scanline::twain::{launch_plugin_host, resolve_host_command, twain_shim_info};
+    let info = twain_shim_info();
+    assert_eq!(info["module"], "open_scanline::twain");
+    assert_eq!(info["ships_native_ds"], false);
+    assert_eq!(
+        resolve_host_command("plugin", None, None),
+        vec!["plugin".to_string()]
+    );
+    // Launching spawns or runs a full plugin session; keep this a signature check.
+    let _ = launch_plugin_host;
+}
+
+fn assert_config_facade() {
+    use open_scanline::config::{
+        config_from_value, default_config_path, format_curve_points, is_banned_key, load_config,
+        parse_curve_points, save_config, strip_banned, validate_hue, validate_output_name,
+        validate_saturation, AppConfig, MAX_OUTPUT_NAME_BYTES,
+    };
+    assert_eq!(MAX_OUTPUT_NAME_BYTES, 128);
+    let _ = default_config_path();
+    assert!(is_banned_key("license_key"));
+    assert!(!is_banned_key("default_dpi"));
+    assert_eq!(validate_output_name("scan").unwrap(), "scan");
+    assert_eq!(validate_hue(10.0).unwrap(), 10.0);
+    assert_eq!(validate_saturation(10.0).unwrap(), 10.0);
+    assert_eq!(format_curve_points(None), "");
+    assert!(parse_curve_points("").unwrap().is_none());
+    let config: AppConfig =
+        config_from_value(serde_json::to_value(AppConfig::default()).unwrap()).unwrap();
+    assert_eq!(config, AppConfig::default());
+    assert!(strip_banned(&serde_json::Value::Null).is_null());
+    let _ = load_config;
+    if false {
+        // `save_config` takes `impl AsRef<Path>`; type-check without file I/O.
+        let _ = save_config(&AppConfig::default(), Path::new("config.json"));
+    }
+}
+
+fn assert_cli_facade() {
+    let _: fn(&[String]) -> i32 = open_scanline::cli::run;
+}
+
+#[cfg(feature = "gui")]
+fn assert_gui_facade() {
+    use open_scanline::gui::{
+        normalize_image_ext, parse_crop_string, preview_texture_needs_reload, run_gui,
+    };
+    assert_eq!(normalize_image_ext("JPEG", "png"), "jpg");
+    assert_eq!(parse_crop_string("").unwrap(), None);
+    assert!(!preview_texture_needs_reload(None, None, None));
+    // Launching opens a native window; keep this a signature-only reference.
+    let _ = run_gui;
+}
+
+#[test]
+fn additional_compatibility_facades_expose_their_documented_entry_points() {
+    assert_film_facade();
+    assert_icc_facade();
+    assert_manufacturers_facade();
+    assert_i18n_facade();
+    assert_features_facade();
+    assert_platform_facade();
+    assert_ocr_facade();
+    assert_escl_facade();
+    assert_plugin_facade();
+    assert_twain_facade();
+    assert_config_facade();
+    assert_cli_facade();
+    #[cfg(feature = "gui")]
+    assert_gui_facade();
+}
