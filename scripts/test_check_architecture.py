@@ -78,9 +78,9 @@ class ArchitectureTests(unittest.TestCase):
             "src/inbound/x.rs",
         )
 
-    def test_pipeline_facade_module_is_covered_by_the_facade_rule(self):
-        self.check("pub fn x() {}", True, "src/pipeline/mod.rs")
-        self.check("pub use crate::domain::processing::*;", False, "src/pipeline/mod.rs")
+    def test_facade_modules_may_only_re_export(self):
+        self.check("pub fn x() {}", True, "src/pipeline.rs")
+        self.check("pub use crate::domain::processing::*;", False, "src/pipeline.rs")
 
     def test_existing_rules(self):
         self.check("let x = crate::workflows::x();", True, "src/domain/x.rs")

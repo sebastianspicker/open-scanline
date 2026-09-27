@@ -132,9 +132,7 @@ def dependencies(items):
 
 def is_facade_path(path):
     posix = pathlib.PurePosixPath(path)
-    if posix.stem in FACADES and path.count("/") == 1:
-        return True
-    return path == "src/pipeline/mod.rs"
+    return posix.stem in FACADES and path.count("/") == 1
 
 
 def structural_errors(path, text):
