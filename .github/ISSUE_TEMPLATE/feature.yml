@@ -2,21 +2,34 @@ name: Feature request
 description: Propose a focused improvement to the Rust application.
 title: "Feature: "
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Open Scanline. Keep the request focused on one
+        improvement, and search the existing issues before filing.
   - type: textarea
     id: problem
     attributes:
       label: Problem to solve
-      description: Describe the user need or workflow.
+      description: What are you trying to do, and what gets in the way? Describe the workflow or user need.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed behavior
-      description: Describe the outcome, including any backend, platform, or external-tool requirement.
+      description: What should happen instead? Mention any backend, platform, or external tool it would depend on.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
+      description: Other approaches or workarounds you have tried.
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true

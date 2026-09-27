@@ -6,7 +6,8 @@ use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::workflows::operation::CancellationToken;
 use crate::workflows::ports::acquisition::{
-    AcquisitionPort, BackendInfo, DeviceInfo, DeviceSession, ScanPagesResult,
+    AcquisitionPort, BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession,
+    ScanPagesResult,
 };
 
 use file::parse_file_device_id;
@@ -41,6 +42,16 @@ pub enum AnySession {
 }
 
 impl DeviceSession for AnySession {
+    fn maintenance_capabilities(&self) -> DeviceMaintenanceCapabilities {
+        match self {
+            AnySession::Mock(session) => session.maintenance_capabilities(),
+            AnySession::File(session) => session.maintenance_capabilities(),
+            AnySession::Wia(session) => session.maintenance_capabilities(),
+            AnySession::Sane(session) => session.maintenance_capabilities(),
+            AnySession::Escl(session) => session.maintenance_capabilities(),
+        }
+    }
+
     fn scan(&self, request: &ScanRequest) -> Result<ImageBuffer> {
         match self {
             AnySession::Mock(s) => s.scan(request),
@@ -165,20 +176,43 @@ fn open_prefixed_device(id: &str, policy: DeviceOpenPolicy) -> Result<Option<Any
 }
 
 fn open_backend_prefix(id: &str, policy: DeviceOpenPolicy) -> Result<Option<AnySession>> {
-    let session = match () {
-        _ if id.starts_with("wia:") || id == "wia" => Some(AnySession::Wia(wia::open(id)?)),
-        _ if id.starts_with("sane:") || id == "sane" => Some(AnySession::Sane(sane::open(id)?)),
-        _ if id.starts_with("escl:") || id == "escl" => {
-            let session = if policy.allow_unlisted_escl && id.starts_with("escl:") {
-                escl::open_explicit_id(id)?
-            } else {
-                escl::open(id)?
-            };
-            Some(AnySession::Escl(session))
-        }
-        _ => None,
+    let session = match backend_prefix(id) {
+        Some(BackendPrefix::Wia) => Some(AnySession::Wia(wia::open(id)?)),
+        Some(BackendPrefix::Sane) => Some(AnySession::Sane(sane::open(id)?)),
+        Some(BackendPrefix::Escl) => Some(AnySession::Escl(open_escl(id, policy)?)),
+        None => None,
     };
     Ok(session)
+}
+
+enum BackendPrefix {
+    Wia,
+    Sane,
+    Escl,
+}
+
+fn backend_prefix(id: &str) -> Option<BackendPrefix> {
+    if matches_backend(id, "wia") {
+        return Some(BackendPrefix::Wia);
+    }
+    if matches_backend(id, "sane") {
+        return Some(BackendPrefix::Sane);
+    }
+    matches_backend(id, "escl").then_some(BackendPrefix::Escl)
+}
+
+fn matches_backend(id: &str, backend: &str) -> bool {
+    id == backend
+        || id
+            .strip_prefix(backend)
+            .is_some_and(|suffix| suffix.starts_with(':'))
+}
+
+fn open_escl(id: &str, policy: DeviceOpenPolicy) -> Result<escl::EsclDeviceSession> {
+    if policy.allow_unlisted_escl && id.starts_with("escl:") {
+        return escl::open_explicit_id(id);
+    }
+    escl::open(id)
 }
 
 /// Match a listed id and dispatch according to its advertised backend kind.
@@ -261,10 +295,6 @@ pub fn list_all_devices_with_cancellation(
     list_all_devices_with_escl_and_cancellation(escl, cancellation)
 }
 
-fn list_all_devices_with_escl(escl: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
-    list_all_devices_with_escl_and_cancellation(escl, None)
-}
-
 fn list_all_devices_with_escl_and_cancellation(
     escl: Vec<DeviceInfo>,
     cancellation: Option<&CancellationToken>,
@@ -292,10 +322,36 @@ fn list_all_devices_with_escl_and_cancellation(
 /// Re-list local and network scanners. A refresh performs exactly one bounded
 /// eSCL discovery; the following aggregate listing reuses that result.
 pub fn find_scanners(refresh: bool) -> Vec<DeviceInfo> {
+    find_scanners_with_cancellation(refresh, None)
+}
+
+pub fn find_scanners_with_cancellation(
+    refresh: bool,
+    cancellation: Option<&CancellationToken>,
+) -> Vec<DeviceInfo> {
     if refresh {
-        return list_all_devices_with_escl(escl::refresh_devices());
+        return list_all_devices_with_escl_and_cancellation(
+            escl::refresh_devices_with_cancellation(cancellation),
+            cancellation,
+        );
     }
-    list_all_devices()
+    list_all_devices_with_cancellation(cancellation)
+}
+
+/// Open a device briefly and return its current maintenance capability
+/// snapshot. Failure to inspect is represented as unsupported so callers do
+/// not dispatch an operation merely because discovery was unavailable.
+pub fn maintenance_capabilities(device_id: &str) -> DeviceMaintenanceCapabilities {
+    match open_device(device_id) {
+        Ok(session) => {
+            let capabilities = session.maintenance_capabilities();
+            session.close();
+            capabilities
+        }
+        Err(error) => DeviceMaintenanceCapabilities::unsupported(format!(
+            "could not inspect maintenance capabilities: {error}"
+        )),
+    }
 }
 
 /// Open session, run calibrate hook, close. Returns session calibrate result.

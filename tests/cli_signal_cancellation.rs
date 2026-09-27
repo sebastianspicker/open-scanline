@@ -6,7 +6,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -28,15 +28,6 @@ fn sigint_cancels_cli_jxl_conversion_and_reaps_its_descendant() {
     .unwrap();
     write_hanging_cjxl(&tools.join("cjxl"));
 
-    let path = std::env::join_paths(
-        std::iter::once(tools.clone()).chain(
-            std::env::var_os("PATH")
-                .as_deref()
-                .into_iter()
-                .flat_map(std::env::split_paths),
-        ),
-    )
-    .unwrap();
     let mut cli = Command::new(env!("CARGO_BIN_EXE_open-scanline"))
         .args([
             "convert",
@@ -45,7 +36,7 @@ fn sigint_cancels_cli_jxl_conversion_and_reaps_its_descendant() {
             "--out",
             destination.to_str().unwrap(),
         ])
-        .env("PATH", path)
+        .env("PATH", path_with_tools(&tools))
         .env("CLI_SIGNAL_PARENT_PID", &parent_pid_path)
         .env("CLI_SIGNAL_DESCENDANT_PID", &descendant_pid_path)
         .env("CLI_SIGNAL_LATE_ARTIFACT", &late_artifact)
@@ -53,13 +44,7 @@ fn sigint_cancels_cli_jxl_conversion_and_reaps_its_descendant() {
         .unwrap();
 
     let descendant = wait_for_pid(&descendant_pid_path);
-    // The fixture can publish its PID while `Command::spawn` is still
-    // returning from the fork/exec handshake. Let the CLI enter its
-    // supervisor loop before delivering the signal this test is about.
-    std::thread::sleep(Duration::from_millis(100));
-    let signal_result = unsafe { libc::kill(cli.id() as libc::pid_t, libc::SIGINT) };
-    assert_eq!(signal_result, 0, "could not send SIGINT to the CLI process");
-    let status = cli.wait().unwrap();
+    let status = interrupt_cli(&mut cli);
 
     assert_eq!(
         status.code(),
@@ -68,15 +53,11 @@ fn sigint_cancels_cli_jxl_conversion_and_reaps_its_descendant() {
     );
     assert_pid_gone(wait_for_pid(&parent_pid_path));
     assert_pid_gone(descendant);
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(
-        !late_artifact.exists(),
-        "a killed cjxl descendant wrote a late artifact"
+    assert_no_late_artifact(
+        &late_artifact,
+        "a killed cjxl descendant wrote a late artifact",
     );
-    assert!(
-        !destination.exists(),
-        "interrupted conversion published its destination"
-    );
+    assert_no_destination(&destination);
     let _ = fs::remove_dir_all(directory);
 }
 
@@ -104,12 +85,7 @@ fn sigint_cancels_plugin_sane_discovery_and_reaps_its_descendant() {
         .unwrap();
 
     let descendant = wait_for_pid(&descendant_pid_path);
-    // The script can publish its PID just before the parent's spawn call has
-    // fully returned. Wait until the CLI is polling its cancellation token.
-    std::thread::sleep(Duration::from_millis(100));
-    let signal_result = unsafe { libc::kill(cli.id() as libc::pid_t, libc::SIGINT) };
-    assert_eq!(signal_result, 0, "could not send SIGINT to the CLI process");
-    let status = cli.wait().unwrap();
+    let status = interrupt_cli(&mut cli);
 
     assert_eq!(
         status.code(),
@@ -119,10 +95,9 @@ fn sigint_cancels_plugin_sane_discovery_and_reaps_its_descendant() {
     );
     assert_pid_gone(wait_for_pid(&parent_pid_path));
     assert_pid_gone(descendant);
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(
-        !late_artifact.exists(),
-        "a killed scanimage discovery descendant wrote a late artifact"
+    assert_no_late_artifact(
+        &late_artifact,
+        "a killed scanimage discovery descendant wrote a late artifact",
     );
     let _ = fs::remove_dir_all(directory);
 }
@@ -141,25 +116,14 @@ fn scratch_directory(label: &str) -> PathBuf {
 }
 
 fn write_hanging_cjxl(path: &Path) {
-    fs::write(
-        path,
-        r#"#!/bin/sh
-printf '%s\n' "$$" > "$CLI_SIGNAL_PARENT_PID"
-sh -c '
-  trap "" INT TERM
-  printf "%s\n" "$$" > "$CLI_SIGNAL_DESCENDANT_PID"
-  sleep 1
-  : > "$CLI_SIGNAL_LATE_ARTIFACT"
-  while :; do sleep 1; done
-' &
-while :; do sleep 1; done
-"#,
-    )
-    .unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    write_hanging_tool(path);
 }
 
 fn write_hanging_scanimage(path: &Path) {
+    write_hanging_tool(path);
+}
+
+fn write_hanging_tool(path: &Path) {
     fs::write(
         path,
         r#"#!/bin/sh
@@ -188,6 +152,26 @@ fn path_with_tools(tools: &Path) -> std::ffi::OsString {
         ),
     )
     .unwrap()
+}
+
+fn interrupt_cli(cli: &mut Child) -> ExitStatus {
+    // Let the CLI enter its supervisor loop before delivering the signal.
+    std::thread::sleep(Duration::from_millis(100));
+    let signal_result = unsafe { libc::kill(cli.id() as libc::pid_t, libc::SIGINT) };
+    assert_eq!(signal_result, 0, "could not send SIGINT to the CLI process");
+    cli.wait().unwrap()
+}
+
+fn assert_no_late_artifact(path: &Path, message: &str) {
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!path.exists(), "{message}");
+}
+
+fn assert_no_destination(path: &Path) {
+    assert!(
+        !path.exists(),
+        "interrupted conversion published its destination"
+    );
 }
 
 fn wait_for_pid(path: &Path) -> libc::pid_t {

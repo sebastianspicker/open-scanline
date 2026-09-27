@@ -171,6 +171,13 @@ fn apply_crop(pipeline: &mut PipelinePrefs, value: Option<&str>) {
 }
 
 fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
+    apply_basic_color_overrides(pipeline, overrides);
+    apply_level_overrides(pipeline, overrides);
+    apply_explicit_bool(&mut pipeline.white_balance, overrides.white_balance);
+    apply_explicit_bool(&mut pipeline.auto_levels, overrides.auto_levels);
+}
+
+fn apply_basic_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
     if let Some(brightness) = overrides.brightness {
         pipeline.brightness = brightness;
     }
@@ -187,6 +194,9 @@ fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverride
         pipeline.curves = Some(curves.clone());
     }
     apply_explicit_bool(&mut pipeline.desaturate, overrides.desaturate);
+}
+
+fn apply_level_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverrides) {
     if let Some(levels_black) = overrides.levels_black {
         pipeline.levels_black = levels_black;
     }
@@ -196,8 +206,6 @@ fn apply_color_overrides(pipeline: &mut PipelinePrefs, overrides: &ColorOverride
     if let Some(levels_gamma) = overrides.levels_gamma {
         pipeline.levels_gamma = levels_gamma;
     }
-    apply_explicit_bool(&mut pipeline.white_balance, overrides.white_balance);
-    apply_explicit_bool(&mut pipeline.auto_levels, overrides.auto_levels);
 }
 
 fn apply_filter_overrides(pipeline: &mut PipelinePrefs, overrides: &FilterOverrides) {

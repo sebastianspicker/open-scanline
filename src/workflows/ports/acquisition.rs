@@ -44,6 +44,102 @@ pub struct BackendInfo {
     pub available: bool,
 }
 
+/// Whether a device can perform a maintenance operation without guessing at
+/// undocumented driver behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MaintenanceAvailability {
+    Supported,
+    Simulated,
+    Unsupported { reason: String },
+}
+
+impl MaintenanceAvailability {
+    pub fn is_available(&self) -> bool {
+        !matches!(self, Self::Unsupported { .. })
+    }
+
+    pub fn explanation(&self) -> &str {
+        match self {
+            Self::Supported => "supported by this scanner",
+            Self::Simulated => "simulated by this test backend",
+            Self::Unsupported { reason } => reason,
+        }
+    }
+}
+
+/// Focus controls advertised by a scanner. Point focus is only exposed when
+/// both device-coordinate ranges were explicitly reported by the backend.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FocusCapability {
+    Unsupported {
+        reason: String,
+    },
+    Center {
+        availability: MaintenanceAvailability,
+    },
+    Point {
+        availability: MaintenanceAvailability,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+    },
+}
+
+impl FocusCapability {
+    pub fn is_available(&self) -> bool {
+        match self {
+            Self::Unsupported { .. } => false,
+            Self::Center { availability } | Self::Point { availability, .. } => {
+                availability.is_available()
+            }
+        }
+    }
+
+    pub fn supports_point(&self) -> bool {
+        matches!(self, Self::Point { availability, .. } if availability.is_available())
+    }
+
+    pub fn explanation(&self) -> &str {
+        match self {
+            Self::Unsupported { reason } => reason,
+            Self::Center { availability } | Self::Point { availability, .. } => {
+                availability.explanation()
+            }
+        }
+    }
+}
+
+/// Device-specific maintenance capability snapshot. Discovery is deliberately
+/// separate from execution so inbound adapters can disable unavailable
+/// controls instead of attempting a best-effort operation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeviceMaintenanceCapabilities {
+    pub calibration: MaintenanceAvailability,
+    pub focus: FocusCapability,
+}
+
+impl DeviceMaintenanceCapabilities {
+    pub fn unsupported(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        Self {
+            calibration: MaintenanceAvailability::Unsupported {
+                reason: reason.clone(),
+            },
+            focus: FocusCapability::Unsupported { reason },
+        }
+    }
+
+    pub fn simulated_point_focus() -> Self {
+        Self {
+            calibration: MaintenanceAvailability::Simulated,
+            focus: FocusCapability::Point {
+                availability: MaintenanceAvailability::Simulated,
+                x_range: (0.0, 1.0),
+                y_range: (0.0, 1.0),
+            },
+        }
+    }
+}
+
 /// Why a bounded multi-page acquisition stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScanPagesEnd {
@@ -131,6 +227,9 @@ pub trait DeviceSession: Send {
     fn bind_cancellation(&self, _token: CancellationToken) {}
     fn cancel(&self) {}
     fn close(&self) {}
+    fn maintenance_capabilities(&self) -> DeviceMaintenanceCapabilities {
+        DeviceMaintenanceCapabilities::unsupported("maintenance is not supported by this backend")
+    }
     fn calibrate(&self) -> serde_json::Value {
         serde_json::json!({"ok": false, "status": "unsupported"})
     }

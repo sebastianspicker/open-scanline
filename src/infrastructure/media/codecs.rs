@@ -6,18 +6,20 @@ use crate::infrastructure::runtime::{
     TemporaryOutput,
 };
 use crate::workflows::operation::CancellationToken;
-use image::{DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgb, Rgba};
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgb, Rgba};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-/// PNG file signature (8 bytes).
+mod bmp;
+mod jpeg;
+mod temp_output;
+use jpeg::write_jpeg;
+#[cfg(test)]
+mod tests;
+pub(super) use temp_output::{create_output_temp, OutputTemp};
+
 pub const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 pub(super) const JPEG_MAGIC: &[u8] = b"\xff\xd8";
 pub(super) const TIFF_MAGIC_LE: &[u8] = b"II";
@@ -37,8 +39,6 @@ const PREFIX_FORMATS: &[(&[u8], &str)] = &[
 const WEBP_RIFF_MAGIC: &[u8] = b"RIFF";
 const WEBP_FORMAT_MAGIC: &[u8] = b"WEBP";
 const JXL_CONTAINER_MAGIC: &[u8] = b"\0\0\0\x0cJXL \r\n\x87\n";
-const TEMP_CREATE_ATTEMPTS: u64 = 128;
-static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Read enough leading bytes to recognize every supported container.
 pub fn read_magic(path: impl AsRef<Path>) -> Result<Vec<u8>> {
@@ -156,10 +156,6 @@ pub fn save_image(
     save_image_with_cancellation(path, image, dpi, quality, None)
 }
 
-/// Save an image while allowing command-backed encoders to observe cancellation.
-///
-/// The existing [`save_image`] API remains a source-compatible wrapper for
-/// callers that do not own a cancellation token.
 pub fn save_image_with_cancellation(
     path: impl AsRef<Path>,
     image: &ImageBuffer,
@@ -179,71 +175,119 @@ pub fn save_image_with_cancellation(
             ))
         })?
         .to_ascii_lowercase();
-    // Route PDF through the structured writer.
+    save_by_extension(path, image, dpi, quality, cancellation, &ext)
+}
+
+fn save_by_extension(
+    path: &Path,
+    image: &ImageBuffer,
+    dpi: Option<u32>,
+    quality: Option<u8>,
+    cancellation: Option<&CancellationToken>,
+    ext: &str,
+) -> Result<PathBuf> {
     if ext == "pdf" {
-        return save_pdf_with_options_and_cancellation(
-            path,
-            std::slice::from_ref(image),
-            &PdfOptions {
-                dpi: dpi.unwrap_or(150),
-                ..PdfOptions::default()
-            },
-            cancellation,
-        );
+        return save_pdf_image(path, image, dpi, cancellation);
     }
     if ext == "jxl" {
         return save_jpeg_xl_with_cancellation(path, image, quality.unwrap_or(90), cancellation);
     }
-    let dyn_img = buffer_to_dynamic(image)?;
+    save_standard_image_output(path, image, quality, cancellation, ext)
+}
+
+fn save_pdf_image(
+    path: &Path,
+    image: &ImageBuffer,
+    dpi: Option<u32>,
+    cancellation: Option<&CancellationToken>,
+) -> Result<PathBuf> {
+    save_pdf_with_options_and_cancellation(
+        path,
+        std::slice::from_ref(image),
+        &PdfOptions {
+            dpi: dpi.unwrap_or(150),
+            ..PdfOptions::default()
+        },
+        cancellation,
+    )
+}
+
+fn save_standard_image_output(
+    path: &Path,
+    image: &ImageBuffer,
+    quality: Option<u8>,
+    cancellation: Option<&CancellationToken>,
+    ext: &str,
+) -> Result<PathBuf> {
+    validate_packed_buffer(image)?;
     let temp = create_output_temp(path)?;
-    match ext.as_str() {
-        "jpg" | "jpeg" => {
-            let q = quality.unwrap_or(90);
-            let mut f = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(temp.path())?;
-            let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut f, q);
-            enc.encode_image(&dyn_img)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-            f.flush()?;
-        }
-        "tif" | "tiff" => {
-            dyn_img
-                .save_with_format(temp.path(), ImageFormat::Tiff)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-        }
-        "bmp" => {
-            dyn_img
-                .save_with_format(temp.path(), ImageFormat::Bmp)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-        }
-        "gif" => {
-            dyn_img
-                .save_with_format(temp.path(), ImageFormat::Gif)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-        }
-        "webp" => {
-            dyn_img
-                .save_with_format(temp.path(), ImageFormat::WebP)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-        }
-        "png" => {
-            dyn_img
-                .save_with_format(temp.path(), ImageFormat::Png)
-                .map_err(|e| ScanError::Image(e.to_string()))?;
-        }
-        _ => {
-            return Err(ScanError::Invalid(format!(
-                "unsupported extension '.{ext}'; use one of {}",
-                supported_extensions().join(", ")
-            )));
-        }
-    }
-    validate_output_container(temp.path(), expected_container(&ext))?;
+    write_standard_image(image, ext, temp.path(), quality)?;
+    validate_output_container(temp.path(), expected_container(ext))?;
     check_native_publication_cancellation(cancellation)?;
     temp.publish()?;
     Ok(path.to_path_buf())
+}
+
+fn write_standard_image(
+    image: &ImageBuffer,
+    extension: &str,
+    output: &Path,
+    quality: Option<u8>,
+) -> Result<()> {
+    validate_packed_buffer(image)?;
+    if matches!(extension, "jpg" | "jpeg") {
+        return write_jpeg(image, output, quality);
+    }
+    if extension == "bmp" {
+        return bmp::write_bmp(image, output);
+    }
+    let format = standard_image_format(extension)?;
+    image::save_buffer_with_format(
+        output,
+        &image.data,
+        image.width,
+        image.height,
+        image_color_type(image.pixel_format),
+        format,
+    )
+    .map_err(|error| ScanError::Image(error.to_string()))
+}
+
+pub(super) fn validate_packed_buffer(image: &ImageBuffer) -> Result<()> {
+    let required = (image.width as usize)
+        .checked_mul(image.height as usize)
+        .and_then(|pixels| pixels.checked_mul(image.bpp()));
+    if required.is_some_and(|required| required <= image.data.len()) {
+        return Ok(());
+    }
+    let name = match image.pixel_format {
+        PixelFormat::Gray8 => "gray",
+        PixelFormat::Rgb8 => "rgb",
+        PixelFormat::Rgba8 => "rgba",
+    };
+    Err(ScanError::Image(format!("{name} buffer")))
+}
+
+fn image_color_type(format: PixelFormat) -> ColorType {
+    match format {
+        PixelFormat::Gray8 => ColorType::L8,
+        PixelFormat::Rgb8 => ColorType::Rgb8,
+        PixelFormat::Rgba8 => ColorType::Rgba8,
+    }
+}
+
+fn standard_image_format(extension: &str) -> Result<ImageFormat> {
+    match extension {
+        "tif" | "tiff" => Ok(ImageFormat::Tiff),
+        "bmp" => Ok(ImageFormat::Bmp),
+        "gif" => Ok(ImageFormat::Gif),
+        "webp" => Ok(ImageFormat::WebP),
+        "png" => Ok(ImageFormat::Png),
+        _ => Err(ScanError::Invalid(format!(
+            "unsupported extension '.{extension}'; use one of {}",
+            supported_extensions().join(", ")
+        ))),
+    }
 }
 
 fn expected_container(extension: &str) -> &str {
@@ -281,15 +325,38 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
     let input_path = artifacts.directory().join("input.png");
     let encoded_path = artifacts.path();
     let output = create_output_temp(path)?;
-    buffer_to_dynamic(image)?
-        .save_with_format(&input_path, ImageFormat::Png)
-        .map_err(|e| ScanError::Image(e.to_string()))?;
-    let input_bytes = std::fs::metadata(&input_path)?.len();
-    let artifact_limit = input_bytes
+    let artifact_limit = write_jxl_input(image, &input_path)?;
+    run_jxl_encoder(
+        program,
+        &input_path,
+        encoded_path,
+        quality,
+        artifacts.directory(),
+        artifact_limit,
+        cancellation,
+    )?;
+    publish_jxl_output(encoded_path, output, cancellation)?;
+    Ok(path.to_path_buf())
+}
+
+fn write_jxl_input(image: &ImageBuffer, input_path: &Path) -> Result<u64> {
+    write_standard_image(image, "png", input_path, None)?;
+    std::fs::metadata(input_path)?
+        .len()
         .checked_add(MAX_IMAGE_BYTES as u64)
-        .ok_or_else(|| ScanError::Image("JPEG XL artifact quota overflow".into()))?;
-    let distance =
-        ((100_u16.saturating_sub(u16::from(quality.min(100)))) as f64 / 15.0).clamp(0.0, 15.0);
+        .ok_or_else(|| ScanError::Image("JPEG XL artifact quota overflow".into()))
+}
+
+fn run_jxl_encoder(
+    program: &Path,
+    input_path: &Path,
+    encoded_path: &Path,
+    quality: u8,
+    artifact_directory: &Path,
+    artifact_limit: u64,
+    cancellation: Option<&CancellationToken>,
+) -> Result<()> {
+    let distance = jxl_distance(quality);
     let command_output = run_contained_command_with_artifact_quota(
         &CommandSpec {
             program: program.display().to_string(),
@@ -306,7 +373,7 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
         "cjxl",
         "JPEG XL export cancelled",
         ArtifactWatch {
-            directory: artifacts.directory(),
+            directory: artifact_directory,
             quota: ArtifactQuota {
                 max_files: 2,
                 max_bytes: artifact_limit,
@@ -321,6 +388,16 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
         }
         other => other,
     })?;
+    ensure_jxl_success(&command_output)
+}
+
+fn jxl_distance(quality: u8) -> f64 {
+    ((100_u16.saturating_sub(u16::from(quality.min(100)))) as f64 / 15.0).clamp(0.0, 15.0)
+}
+
+fn ensure_jxl_success(
+    command_output: &crate::infrastructure::runtime::CommandOutput,
+) -> Result<()> {
     if !command_output.success {
         let detail = String::from_utf8_lossy(&command_output.stderr)
             .trim()
@@ -334,6 +411,14 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
             }
         )));
     }
+    Ok(())
+}
+
+fn publish_jxl_output(
+    encoded_path: &Path,
+    output: OutputTemp,
+    cancellation: Option<&CancellationToken>,
+) -> Result<()> {
     let output_len = std::fs::metadata(encoded_path)?.len();
     if output_len > MAX_IMAGE_BYTES as u64 {
         return Err(ScanError::Image(format!(
@@ -344,8 +429,7 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
     std::fs::copy(encoded_path, output.path())?;
     validate_output_container(output.path(), "jxl")?;
     check_native_publication_cancellation(cancellation)?;
-    output.publish()?;
-    Ok(path.to_path_buf())
+    output.publish()
 }
 
 fn check_native_publication_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
@@ -362,119 +446,6 @@ fn create_output_parent(path: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// A create-new sibling temporary that is removed unless it is published.
-pub(super) struct OutputTemp {
-    path: PathBuf,
-    destination: PathBuf,
-    published: bool,
-}
-
-impl OutputTemp {
-    pub(super) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(super) fn publish(mut self) -> Result<()> {
-        crate::infrastructure::runtime::atomic_publish::replace_file_atomic(
-            &self.path,
-            &self.destination,
-        )?;
-        self.published = true;
-        Ok(())
-    }
-}
-
-impl Drop for OutputTemp {
-    fn drop(&mut self) {
-        if !self.published {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
-/// Reserve a unique sibling temporary with the destination's effective extension.
-pub(super) fn create_output_temp(destination: &Path) -> Result<OutputTemp> {
-    create_output_parent(destination)?;
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = destination.file_name().ok_or_else(|| {
-        ScanError::Invalid(format!(
-            "output path has no file name: {}",
-            destination.display()
-        ))
-    })?;
-    let extension = destination
-        .extension()
-        .map(|extension| extension.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let stem = destination
-        .file_stem()
-        .unwrap_or(file_name)
-        .to_string_lossy();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    #[cfg(unix)]
-    let output_mode = existing_output_mode_or_private(destination)?;
-
-    for _ in 0..TEMP_CREATE_ATTEMPTS {
-        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let suffix = if extension.is_empty() {
-            String::new()
-        } else {
-            format!(".{extension}")
-        };
-        let path = parent.join(format!(
-            ".{stem}.open-scanline-{}-{timestamp}-{sequence}{suffix}",
-            std::process::id()
-        ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        match options.open(&path) {
-            Ok(file) => {
-                #[cfg(unix)]
-                if let Err(error) =
-                    file.set_permissions(std::fs::Permissions::from_mode(output_mode))
-                {
-                    drop(file);
-                    let _ = std::fs::remove_file(&path);
-                    return Err(error.into());
-                }
-                #[cfg(not(unix))]
-                drop(file);
-                return Ok(OutputTemp {
-                    path,
-                    destination: destination.to_path_buf(),
-                    published: false,
-                });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error.into()),
-        }
-    }
-
-    Err(ScanError::Other(format!(
-        "could not reserve a unique temporary output beside {}",
-        destination.display()
-    )))
-}
-
-#[cfg(unix)]
-fn existing_output_mode_or_private(destination: &Path) -> Result<u32> {
-    use std::os::unix::fs::PermissionsExt;
-
-    match std::fs::metadata(destination) {
-        Ok(metadata) => Ok(metadata.permissions().mode() & 0o7777),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0o600),
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// Confirm an encoder wrote a nonempty file with the requested container header.
@@ -526,7 +497,22 @@ pub fn convert_image(
     save_image(out, &img, dpi, None)
 }
 
-/// Convert buffer to tightly packed RGB bytes.
+/// Convert buffer to tightly packed RGB bytes without copying the input pixels.
 pub fn to_rgb_bytes(image: &ImageBuffer) -> Result<Vec<u8>> {
-    Ok(buffer_to_dynamic(image)?.to_rgb8().into_raw())
+    use image::buffer::ConvertBuffer;
+    validate_packed_buffer(image)?;
+    let converted: image::RgbImage = match image.pixel_format {
+        PixelFormat::Rgb8 => return Ok(image.data.clone()),
+        PixelFormat::Gray8 => {
+            ImgBuf::<image::Luma<u8>, _>::from_raw(image.width, image.height, image.data.as_slice())
+                .expect("validated gray buffer")
+                .convert()
+        }
+        PixelFormat::Rgba8 => {
+            ImgBuf::<Rgba<u8>, _>::from_raw(image.width, image.height, image.data.as_slice())
+                .expect("validated RGBA buffer")
+                .convert()
+        }
+    };
+    Ok(converted.into_raw())
 }

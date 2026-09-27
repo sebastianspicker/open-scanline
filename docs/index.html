@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Scanline — local-first scanning, processing, and OCR in Rust</title>
+  <meta name="description" content="Open Scanline is a local-first Rust app for acquiring, processing, and exporting scanned images. Command-line tool, optional desktop GUI, and a public Rust library. No cloud, no accounts, no telemetry.">
+  <meta name="color-scheme" content="light">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="#top">Open&nbsp;Scanline</a>
+      <nav aria-label="Primary">
+        <a href="#screenshots">Screenshots</a>
+        <a href="#features">Features</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md">Usage</a>
+        <a href="https://github.com/sebastianspicker/open-scanline">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap" id="main">
+    <section id="top" class="hero">
+      <h1>Open Scanline</h1>
+      <p class="lead">
+        Local-first scanning, image processing, and OCR in Rust. Acquire from
+        flatbed and document scanners, clean up the pages, and export images,
+        searchable PDFs, and multipage TIFF or PDF — all on your own machine.
+      </p>
+      <p class="lead">
+        One command-line tool, an optional desktop GUI, and a public Rust
+        library. No cloud service, no accounts, no telemetry.
+      </p>
+      <p class="buttons">
+        <a class="button primary" href="https://github.com/sebastianspicker/open-scanline">View on GitHub</a>
+        <a class="button" href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md">Read the usage guide</a>
+      </p>
+    </section>
+
+    <section id="screenshots">
+      <h2>Screenshots</h2>
+
+      <figure>
+        <img src="assets/screenshots/prepare.jpg" alt="The Open Scanline prepare screen: a mock source, six image sides, and a PDF destination">
+        <figcaption>Prepare — choose the source, sides, resolution, and destination before you start.</figcaption>
+      </figure>
+
+      <div class="gallery">
+        <figure>
+          <img src="assets/screenshots/scanning.jpg" alt="Scan in progress with four of six image sides saved">
+          <figcaption>Scanning — progress lists each page as it is published.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/saved.jpg" alt="Completed scan listing the multipage PDF and six page files">
+          <figcaption>Saved — the result lists what was written to disk and why capture stopped.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/prepare-actions.jpg" alt="Output settings, destination, and the start action">
+          <figcaption>The destination and start action stay visible as you set the job up.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/invalid-name.jpg" alt="Inline validation error for an output name that contains a path separator">
+          <figcaption>Bad output names are rejected inline, before a scan starts.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/narrow-prepare.jpg" alt="Narrow window showing the acquisition settings">
+          <figcaption>Narrow windows stack acquisition first…</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/narrow-actions.jpg" alt="Narrow window showing output settings and the start action">
+          <figcaption>…followed by output and the primary action.</figcaption>
+        </figure>
+      </div>
+
+      <p class="note">
+        Screenshots are from the macOS build using the built-in mock source. No
+        scanner hardware or personal documents are shown, and local paths are
+        removed.
+      </p>
+    </section>
+
+    <section id="features">
+      <h2>What you can do</h2>
+      <ul class="features">
+        <li><strong>Acquire</strong> single pages through mock, file, WIA, SANE, and eSCL sources, plus one-session ADF batches when the device advertises the requested feeder controls.</li>
+        <li><strong>Maintain</strong> scanners with capability-aware, device-advertised controls where available, and clearly simulated controls for the mock source.</li>
+        <li><strong>Process</strong> crops, rotation, flips, color and level adjustments, deskew, white balance, sharpening, document cleanup, and film-oriented controls.</li>
+        <li><strong>Export</strong> PNG, JPEG, TIFF, WebP, BMP, GIF, PDF, multipage TIFF, and multipage PDF, including searchable and password-protected PDFs.</li>
+        <li><strong>Read text</strong> with built-in offline template OCR, optional local OCRS model packs, or optional Tesseract integration.</li>
+        <li><strong>Run models</strong> locally with user-supplied ONNX image models through an explicitly selected, version-matched worker.</li>
+      </ul>
+    </section>
+
+    <section id="quick-start">
+      <h2>Quick start</h2>
+      <pre><code># Build a core-only binary (no GUI, OCRS, or ONNX)
+cargo run --no-default-features -- scan --device mock --out scan.png \
+  --width 320 --height 240
+
+cargo run --no-default-features -- process --in scan.png \
+  --out processed.png --invert
+
+# Or launch the desktop interface with the default feature profile
+cargo run -- gui</code></pre>
+      <p>
+        The repository pins Rust 1.91.0. Scanner hardware is optional: the
+        built-in mock and file sources need none.
+      </p>
+    </section>
+
+    <section id="docs">
+      <h2>Documentation</h2>
+      <ul class="features">
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md">Usage</a> — commands, configuration, OCR, PDF export, and the desktop and plugin modes.</li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/backends.md">Backends</a> — platform and scanner requirements, discovery, and optional tools.</li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/architecture.md">Architecture</a> — layers, data flow, and compatibility boundaries.</li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/performance.md">Performance</a> — the reproducible benchmark runner and its limits.</li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/release-notes.md">Release notes</a> — public API changes planned for the next release.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>MIT licensed. Local-first: no cloud, no accounts, no telemetry.</p>
+      <p>
+        <a href="https://github.com/sebastianspicker/open-scanline">Repository</a>
+        &middot;
+        <a href="https://github.com/sebastianspicker/open-scanline/issues">Issues</a>
+        &middot;
+        <a href="https://github.com/sebastianspicker/open-scanline/blob/main/SECURITY.md">Security</a>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

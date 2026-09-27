@@ -70,9 +70,9 @@ pub struct AppConfig {
     pub language: String,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
+macro_rules! default_app_config {
+    () => {
+        AppConfig {
             last_device_id: "mock".into(),
             default_dpi: 150,
             default_width: 320,
@@ -122,6 +122,12 @@ impl Default for AppConfig {
             ocr_language: "eng".into(),
             language: "en".into(),
         }
+    };
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        default_app_config!()
     }
 }
 
@@ -167,15 +173,27 @@ pub struct ResolvedSettings {
 
 /// Resolve durable JSON fields without I/O or validation side effects.
 pub fn resolve_defaults(config: &AppConfig) -> ResolvedSettings {
-    let crop = config.crop.map(|value| {
-        Rect::new(
-            value[0],
-            value[1],
-            value[2].max(0) as u32,
-            value[3].max(0) as u32,
-        )
-    });
-    let processing = PipelinePrefs {
+    ResolvedSettings {
+        acquisition: resolve_acquisition_defaults(config),
+        processing: resolve_processing_defaults(config),
+    }
+}
+
+fn resolve_acquisition_defaults(config: &AppConfig) -> AcquisitionDefaults {
+    AcquisitionDefaults {
+        device_id: config.last_device_id.clone(),
+        mode: config.scan_mode,
+        duplex: config.duplex,
+        dpi_x: config.default_dpi,
+        dpi_y: config.default_dpi,
+        width: config.default_width,
+        height: config.default_height,
+    }
+}
+
+fn resolve_processing_defaults(config: &AppConfig) -> PipelinePrefs {
+    let crop = resolve_crop(config.crop);
+    PipelinePrefs {
         rotate: Rotate::from_degrees(config.rotate),
         flip_h: config.flip_h,
         flip_v: config.flip_v,
@@ -207,17 +225,16 @@ pub fn resolve_defaults(config: &AppConfig) -> ResolvedSettings {
         colorize_mode: config.colorize_mode.clone(),
         film_type: config.film_type.clone(),
         ..PipelinePrefs::default()
-    };
-    ResolvedSettings {
-        acquisition: AcquisitionDefaults {
-            device_id: config.last_device_id.clone(),
-            mode: config.scan_mode,
-            duplex: config.duplex,
-            dpi_x: config.default_dpi,
-            dpi_y: config.default_dpi,
-            width: config.default_width,
-            height: config.default_height,
-        },
-        processing,
     }
+}
+
+fn resolve_crop(crop: Option<[i32; 4]>) -> Option<Rect> {
+    crop.map(|value| {
+        Rect::new(
+            value[0],
+            value[1],
+            value[2].max(0) as u32,
+            value[3].max(0) as u32,
+        )
+    })
 }

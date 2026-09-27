@@ -4,6 +4,10 @@ use crate::composition::Runtime;
 use crate::domain::acquisition::DeviceOpenPolicy;
 use crate::error::Result;
 use crate::workflows::capture::batch::run_batch_scan_with_export_options_inner_with_ports;
+#[cfg(feature = "gui")]
+use crate::workflows::capture::batch::{
+    run_batch_scan_with_report_inner_with_ports, BatchEventObserver, BatchScanReport,
+};
 pub use crate::workflows::capture::batch::{BatchCancelCheck, BatchScanArgs, MAX_BATCH_PAGES};
 use crate::workflows::operation::CancellationToken;
 use crate::workflows::publication::ExportOptions;
@@ -64,6 +68,26 @@ pub fn run_batch_scan_with_export_options_and_cancel(
         cancel_check,
         None,
         DeviceOpenPolicy::default(),
+    )
+}
+
+#[cfg(feature = "gui")]
+pub(crate) fn run_batch_scan_with_export_options_and_token_and_report(
+    args: BatchScanArgs,
+    export: &ExportOptions,
+    token: CancellationToken,
+    observer: &BatchEventObserver,
+) -> Result<BatchScanReport> {
+    let runtime = Runtime::default();
+    run_batch_scan_with_report_inner_with_ports(
+        args,
+        export,
+        None,
+        Some(token),
+        DeviceOpenPolicy::default(),
+        runtime.acquisition(),
+        runtime.media(),
+        Some(observer),
     )
 }
 

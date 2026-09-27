@@ -6,13 +6,12 @@ use open_scanline::process::{process_image_file, ProcessOptions};
 use open_scanline::scan::{run_scan_to_file, run_scan_to_file_with_token, ScanToFileArgs};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn mock_scan_publishes_final_and_unprocessed_raw_images() {
     let directory = ScratchDirectory::new("scan-contract");
-    let final_path = directory.path().join("final.png");
-    let raw_path = directory.path().join("raw.tif");
+    let final_path = directory.root().join("final.png");
+    let raw_path = directory.root().join("raw.tif");
     let result = run_scan_to_file(ScanToFileArgs {
         out: final_path.clone(),
         raw_out: Some(raw_path.clone()),
@@ -43,8 +42,8 @@ fn mock_scan_publishes_final_and_unprocessed_raw_images() {
 #[test]
 fn cancelled_scan_does_not_publish_any_destination() {
     let directory = ScratchDirectory::new("cancel-contract");
-    let final_path = directory.path().join("final.png");
-    let raw_path = directory.path().join("raw.tif");
+    let final_path = directory.root().join("final.png");
+    let raw_path = directory.root().join("raw.tif");
     let token = CancellationToken::new();
     token.cancel();
 
@@ -68,7 +67,7 @@ fn cancelled_scan_does_not_publish_any_destination() {
 #[test]
 fn mock_batch_publishes_pages_in_seed_order() {
     let directory = ScratchDirectory::new("batch-contract");
-    let out_dir = directory.path().join("pages");
+    let out_dir = directory.root().join("pages");
     let paths = run_batch_scan(BatchScanArgs {
         out_dir: out_dir.clone(),
         pages: 3,
@@ -97,7 +96,7 @@ fn mock_batch_publishes_pages_in_seed_order() {
 #[test]
 fn batch_rejects_aliased_and_non_file_destinations_before_publication() {
     let directory = ScratchDirectory::new("batch-destination-contract");
-    let aliased_out_dir = directory.path().join("aliased-pages");
+    let aliased_out_dir = directory.root().join("aliased-pages");
     let alias_result = run_batch_scan(BatchScanArgs {
         out_dir: aliased_out_dir.clone(),
         pages: 1,
@@ -110,8 +109,8 @@ fn batch_rejects_aliased_and_non_file_destinations_before_publication() {
         "destination validation created page outputs"
     );
 
-    let unsafe_out_dir = directory.path().join("unsafe-pages");
-    let directory_destination = directory.path().join("not-a-file.pdf");
+    let unsafe_out_dir = directory.root().join("unsafe-pages");
+    let directory_destination = directory.root().join("not-a-file.pdf");
     fs::create_dir(&directory_destination).expect("fixture directory should be created");
     let unsafe_result = run_batch_scan(BatchScanArgs {
         out_dir: unsafe_out_dir.clone(),
@@ -129,8 +128,8 @@ fn batch_rejects_aliased_and_non_file_destinations_before_publication() {
 #[test]
 fn process_validation_failure_preserves_an_existing_destination() {
     let directory = ScratchDirectory::new("process-contract");
-    let source = directory.path().join("source.png");
-    let destination = directory.path().join("preserved.unsupported");
+    let source = directory.root().join("source.png");
+    let destination = directory.root().join("preserved.unsupported");
     save_image(
         &source,
         &ImageBuffer::new(1, 1, open_scanline::core::PixelFormat::Rgb8, vec![1, 2, 3]).unwrap(),
@@ -154,29 +153,30 @@ fn process_validation_failure_preserves_an_existing_destination() {
     );
 }
 
-struct ScratchDirectory(PathBuf);
+struct ScratchDirectory {
+    root: PathBuf,
+}
 
 impl ScratchDirectory {
     fn new(label: &str) -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after Unix epoch")
-            .as_nanos();
+        let mut entropy = [0_u8; 16];
+        getrandom::fill(&mut entropy).expect("scratch directory entropy");
         let path = std::env::temp_dir().join(format!(
-            "open-scanline-{label}-{}-{nonce}",
-            std::process::id()
+            "open-scanline-workflow-{label}-{}-{}",
+            std::process::id(),
+            u128::from_le_bytes(entropy)
         ));
-        fs::create_dir(&path).expect("scratch directory should be unique");
-        Self(path)
+        fs::create_dir_all(&path).expect("scratch directory should be created");
+        Self { root: path }
     }
 
-    fn path(&self) -> &Path {
-        &self.0
+    fn root(&self) -> &Path {
+        &self.root
     }
 }
 
 impl Drop for ScratchDirectory {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.root);
     }
 }

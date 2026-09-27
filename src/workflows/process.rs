@@ -1,13 +1,13 @@
 //! Shared image process path used by CLI `process` and GUI extended actions.
 
 use crate::domain::image::ImageBuffer;
-use crate::domain::processing::{apply_pipeline, white_balance, PipelinePrefs};
+use crate::domain::processing::{apply_pipeline_owned, white_balance, PipelinePrefs};
 use crate::error::{Result, ScanError};
 use crate::workflows::operation::CancellationToken;
 use crate::workflows::ports::media::MediaPort;
 use crate::workflows::publication::{
-    prepare_export_options_with_media, save_final_image_with_searchable_text_with_media,
-    ExportOptions, PreparedExportOptions,
+    apply_export_profile_owned_with_media, prepare_export_options_with_media,
+    save_final_image_with_searchable_text_with_media, ExportOptions, PreparedExportOptions,
 };
 use std::path::PathBuf;
 
@@ -55,21 +55,18 @@ pub(crate) fn process_and_publish_page_with_media<M: MediaPort>(
     request: PageWorkflowRequest<'_>,
     media: &M,
 ) -> Result<PagePublication> {
-    let mut image = apply_pipeline(&image, request.pipeline)?;
+    let mut image = apply_pipeline_owned(image, request.pipeline)?;
     if request.extra_white_balance {
         image = white_balance(&image)?;
     }
-    let image = media.apply_scanner_profile(&image, request.export.profile())?;
+    let image = apply_export_profile_owned_with_media(image, request.export, media)?;
     let searchable_text = request
         .export
         .needs_searchable_text()
         .then(|| {
-            media.recognize(
-                &image,
-                request.export.ocr_language(),
-                request.export.uses_offline_ocr(),
-                request.cancellation,
-            )
+            request
+                .export
+                .recognize(&image, request.cancellation, media)
         })
         .transpose()?;
     let path = save_final_image_with_searchable_text_with_media(

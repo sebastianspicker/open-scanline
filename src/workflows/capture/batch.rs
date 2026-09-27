@@ -1,22 +1,66 @@
 //! Batch multi-page scan orchestration.
 
+mod destinations;
+pub(crate) mod outputs;
+
 use crate::domain::acquisition::{
     validate_scan_dpi, DeviceOpenPolicy, ScanMode, ScanProgress, ScanRequest,
 };
-use crate::domain::image::{checked_image_len, PixelFormat};
+use crate::domain::image::{checked_image_len, ImageBuffer, PixelFormat};
 use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
 use crate::workflows::operation::CancellationToken;
 use crate::workflows::ports::acquisition::{
-    AcquisitionPort, DeviceSession, ScanPagesEnd, MAX_SCAN_PAGES,
+    AcquisitionPort, DeviceSession, ScanPagesEnd, ScanPagesResult, MAX_SCAN_PAGES,
 };
 use crate::workflows::ports::media::MediaPort;
 use crate::workflows::process::{process_and_publish_page_with_media, PageWorkflowRequest};
 use crate::workflows::publication::{
-    prepare_export_options_for_pdf_with_media,
-    save_final_pdf_from_paths_with_cancellation_with_media, ExportOptions, PreparedExportOptions,
+    prepare_export_options_for_pdf_with_media, ExportOptions, PreparedExportOptions,
 };
-use std::path::{Path, PathBuf};
+use destinations::validate_batch_destinations;
+use outputs::{
+    check_output_cancellation, report_batch_completion, write_requested_outputs_with_observer,
+};
+use std::path::PathBuf;
+
+/// A file whose publication completed during a batch workflow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BatchPublishedOutput {
+    pub(crate) kind: BatchPublishedOutputKind,
+    pub(crate) path: PathBuf,
+}
+
+/// The role of a successfully published batch file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchPublishedOutputKind {
+    Page,
+    Document,
+    ContactSheet,
+}
+
+/// Trustworthy batch events emitted after the represented operation completes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BatchWorkflowEvent {
+    Published(BatchPublishedOutput),
+    PublishingOutputs,
+}
+
+pub(crate) type BatchEventObserver = dyn Fn(BatchWorkflowEvent);
+
+#[derive(Clone, Copy)]
+pub(super) struct BatchRunHooks<'a> {
+    pub(super) cancel_check: Option<&'a BatchCancelCheck>,
+    pub(super) token: Option<&'a CancellationToken>,
+    pub(super) observer: Option<&'a BatchEventObserver>,
+}
+
+/// Detailed successful result for GUI reporting without changing the public facade.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BatchScanReport {
+    pub(crate) page_paths: Vec<PathBuf>,
+    pub(crate) end: ScanPagesEnd,
+}
 
 /// Extended batch arguments.
 ///
@@ -81,10 +125,75 @@ pub fn run_batch_scan_with_export_options_inner_with_ports<A: AcquisitionPort, M
     acquisition: &A,
     media: &M,
 ) -> Result<Vec<PathBuf>> {
-    if is_batch_cancelled(cancel_check, token.as_ref()) {
-        return Err(ScanError::Cancelled("batch scan cancelled".into()));
+    run_batch_scan_with_report_inner_with_ports(
+        args,
+        export,
+        cancel_check,
+        token,
+        policy,
+        acquisition,
+        media,
+        None,
+    )
+    .map(|report| report.page_paths)
+}
+
+/// Run a batch while reporting only successfully published files.
+pub(crate) fn run_batch_scan_with_report_inner_with_ports<A: AcquisitionPort, M: MediaPort>(
+    args: BatchScanArgs,
+    export: &ExportOptions,
+    cancel_check: Option<&BatchCancelCheck>,
+    token: Option<CancellationToken>,
+    policy: DeviceOpenPolicy,
+    acquisition: &A,
+    media: &M,
+    observer: Option<&BatchEventObserver>,
+) -> Result<BatchScanReport> {
+    let hooks = BatchRunHooks {
+        cancel_check,
+        token: token.as_ref(),
+        observer,
+    };
+    check_output_cancellation(hooks.cancel_check, hooks.token)?;
+    let prepared = prepare_batch(&args, export, media)?;
+    let pages = scan_batch_pages_with_export(
+        &args,
+        &prepared.file_ext,
+        &prepared.export,
+        policy,
+        acquisition,
+        media,
+        hooks,
+    )?;
+    if let Some(observer) = hooks.observer {
+        observer(BatchWorkflowEvent::PublishingOutputs);
     }
-    let pdf_destinations = pdf_destinations(&args);
+    write_requested_outputs_with_observer(
+        &args,
+        &pages.paths,
+        &prepared.export,
+        pages.searchable_text,
+        media,
+        hooks,
+    )?;
+    report_batch_completion(&args, pages.paths.len());
+    Ok(BatchScanReport {
+        page_paths: pages.paths,
+        end: pages.end,
+    })
+}
+
+struct PreparedBatch {
+    export: PreparedExportOptions,
+    file_ext: String,
+}
+
+fn prepare_batch<M: MediaPort>(
+    args: &BatchScanArgs,
+    export: &ExportOptions,
+    media: &M,
+) -> Result<PreparedBatch> {
+    let pdf_destinations = pdf_destinations(args);
     if pdf_destinations.len() > 1 && export_uses_pdf_features(export) {
         return Err(ScanError::Invalid(
             "PDF export options require exactly one multipage PDF destination".into(),
@@ -92,31 +201,11 @@ pub fn run_batch_scan_with_export_options_inner_with_ports<A: AcquisitionPort, M
     }
     let export =
         prepare_export_options_for_pdf_with_media(!pdf_destinations.is_empty(), export, media)?;
-    validate_batch_args(&args)?;
+    validate_batch_args(args)?;
     let file_ext = batch_file_extension(&args.format)?;
-    validate_batch_destinations(&args, &file_ext, media)?;
+    validate_batch_destinations(args, &file_ext, media)?;
     media.prepare_output_directory(&args.out_dir)?;
-    let pages = scan_batch_pages_with_export(
-        &args,
-        &file_ext,
-        &export,
-        cancel_check,
-        token.clone(),
-        policy,
-        acquisition,
-        media,
-    )?;
-    write_requested_outputs(
-        &args,
-        &pages.paths,
-        &export,
-        pages.searchable_text,
-        cancel_check,
-        token.as_ref(),
-        media,
-    )?;
-    report_batch_completion(&args, pages.paths.len());
-    Ok(pages.paths)
+    Ok(PreparedBatch { export, file_ext })
 }
 
 fn export_uses_pdf_features(export: &ExportOptions) -> bool {
@@ -136,16 +225,25 @@ fn pdf_destinations(args: &BatchScanArgs) -> Vec<&PathBuf> {
 }
 
 fn validate_batch_args(args: &BatchScanArgs) -> Result<()> {
-    if args.pages < 1 {
+    validate_batch_page_count(args.pages)?;
+    checked_image_len(args.width, args.height, PixelFormat::Rgb8.bpp())?;
+    validate_scan_dpi(args.dpi, args.dpi)?;
+    validate_batch_duplex(args)
+}
+
+fn validate_batch_page_count(pages: u32) -> Result<()> {
+    if pages < 1 {
         return Err(ScanError::Invalid("pages must be >= 1".into()));
     }
-    if args.pages > MAX_BATCH_PAGES {
+    if pages > MAX_BATCH_PAGES {
         return Err(ScanError::Invalid(format!(
             "pages must be <= {MAX_BATCH_PAGES}"
         )));
     }
-    checked_image_len(args.width, args.height, PixelFormat::Rgb8.bpp())?;
-    validate_scan_dpi(args.dpi, args.dpi)?;
+    Ok(())
+}
+
+fn validate_batch_duplex(args: &BatchScanArgs) -> Result<()> {
     if args.duplex && args.mode != ScanMode::Document {
         return Err(ScanError::Invalid(
             "duplex batch acquisition requires the document/ADF source".into(),
@@ -175,158 +273,52 @@ fn batch_file_extension(format: &str) -> Result<String> {
     Ok(if ext == "jpeg" { "jpg".into() } else { ext })
 }
 
-fn validate_batch_destinations<M: MediaPort>(
-    args: &BatchScanArgs,
-    file_ext: &str,
-    media: &M,
-) -> Result<()> {
-    let page_paths = (1..=args.pages)
-        .map(|page| {
-            let path = args.out_dir.join(format!("page_{page:03}.{file_ext}"));
-            media.validate_output_leaf(&path, &format!("generated page {page}"))?;
-            Ok(path)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let mut destinations: Vec<(&str, PathBuf)> = Vec::new();
-    if let Some(path) = &args.multipage_out {
-        validate_multipage_output_path(path, media)?;
-        let effective = if path.extension().is_none() {
-            path.with_extension("tif")
-        } else {
-            path.clone()
-        };
-        media.validate_output_leaf(&effective, "multipage output")?;
-        destinations.push(("multipage output", effective));
-    }
-    if let Some(path) = &args.multipage_tiff {
-        validate_named_container_path(path, "multipage TIFF", &["tif", "tiff"], media)?;
-        destinations.push(("multipage TIFF", path.clone()));
-    }
-    if let Some(path) = &args.multipage_pdf {
-        validate_named_container_path(path, "multipage PDF", &["pdf"], media)?;
-        destinations.push(("multipage PDF", path.clone()));
-    }
-    if let Some(path) = &args.contact_sheet {
-        let effective = if path.extension().is_none() {
-            path.with_extension("bmp")
-        } else {
-            path.clone()
-        };
-        validate_image_output_path(&effective, "contact sheet", media)?;
-        destinations.push(("contact sheet", effective));
-    }
-
-    for index in 0..destinations.len() {
-        let (label, path) = &destinations[index];
-        for (other_label, other_path) in &destinations[..index] {
-            if media.output_paths_alias(path, other_path)? {
-                return Err(ScanError::Invalid(format!(
-                    "{label} destination aliases {other_label}: {}",
-                    path.display()
-                )));
-            }
-        }
-        for (page_index, page_path) in page_paths.iter().enumerate() {
-            if media.output_paths_alias(path, page_path)? {
-                let page = page_index + 1;
-                return Err(ScanError::Invalid(format!(
-                    "{label} destination aliases generated page {page}: {}",
-                    path.display()
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_multipage_output_path<M: MediaPort>(path: &Path, media: &M) -> Result<()> {
-    if path.extension().is_none() {
-        return Ok(());
-    }
-    validate_named_container_path(path, "multipage output", &["pdf", "tif", "tiff"], media)
-}
-
-fn validate_named_container_path<M: MediaPort>(
-    path: &Path,
-    label: &str,
-    allowed: &[&str],
-    media: &M,
-) -> Result<()> {
-    media.validate_output_leaf(path, label)?;
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))?;
-    if !allowed.contains(&extension.as_str()) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported {label} extension '.{extension}'"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_image_output_path<M: MediaPort>(path: &Path, label: &str, media: &M) -> Result<()> {
-    media.validate_output_leaf(path, label)?;
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))?;
-    if !media.supports_extension(&extension) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported {label} extension '.{extension}'"
-        )));
-    }
-    Ok(())
-}
-
 struct BatchPages {
     paths: Vec<PathBuf>,
     searchable_text: Vec<String>,
+    end: ScanPagesEnd,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn scan_batch_pages_with_export(
     args: &BatchScanArgs,
     file_ext: &str,
     export: &PreparedExportOptions,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<CancellationToken>,
     policy: DeviceOpenPolicy,
     acquisition: &impl AcquisitionPort,
     media: &impl MediaPort,
+    hooks: BatchRunHooks<'_>,
 ) -> Result<BatchPages> {
     let device_id = acquisition.resolve_device_id(Some(&args.device));
     let session = acquisition.open_device_with_policy(&device_id, policy)?;
-    if let Some(token) = token.as_ref() {
+    if let Some(token) = hooks.token {
         session.bind_cancellation(token.clone());
     }
     let result = scan_batch_pages_with_session_export(
-        args,
-        file_ext,
-        &device_id,
-        &*session,
-        export,
-        cancel_check,
-        token.as_ref(),
-        media,
+        args, file_ext, &device_id, &*session, export, media, hooks,
     );
     session.close();
     result
 }
 
-#[allow(clippy::too_many_arguments)]
 fn scan_batch_pages_with_session_export(
     args: &BatchScanArgs,
     file_ext: &str,
     device_id: &str,
     session: &(impl DeviceSession + ?Sized),
     export: &PreparedExportOptions,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<&CancellationToken>,
     media: &impl MediaPort,
+    hooks: BatchRunHooks<'_>,
 ) -> Result<BatchPages> {
+    let (request, pipeline) = batch_scan_request(args, device_id);
+    cancel_batch_if_requested(session, hooks.cancel_check, hooks.token)?;
+    session.set_params(&request)?;
+    let mut collector =
+        BatchPageCollector::new(args, file_ext, session, export, media, pipeline, hooks);
+    let summary = session.scan_pages(&request, args.pages, &mut |image| collector.add(image))?;
+    collector.finish(summary)
+}
+
+fn batch_scan_request(args: &BatchScanArgs, device_id: &str) -> (ScanRequest, PipelinePrefs) {
     let mut pipeline = args.pipeline.clone();
     let region = pipeline.crop.take();
     let request = ScanRequest {
@@ -342,54 +334,115 @@ fn scan_batch_pages_with_session_export(
         seed: args.seed,
         pipeline: pipeline.clone(),
     };
-    cancel_batch_if_requested(session, cancel_check, token)?;
-    session.set_params(&request)?;
-    let mut paths: Vec<PathBuf> = Vec::with_capacity(args.pages as usize);
-    let mut searchable_pages = Vec::with_capacity(args.pages as usize);
-    let mut searchable_text_bytes = 0_usize;
-    let summary = session.scan_pages(&request, args.pages, &mut |image| {
-        cancel_batch_if_requested(session, cancel_check, token)?;
-        let index = paths.len() as u32;
-        if let Some(ref cb) = args.on_progress {
-            cb(ScanProgress::new(
-                "batch",
-                index as f64 / args.pages as f64,
-                format!("page {}/{}", index + 1, args.pages),
-            ));
+    (request, pipeline)
+}
+
+struct BatchPageCollector<'a, S: DeviceSession + ?Sized, M: MediaPort> {
+    args: &'a BatchScanArgs,
+    file_ext: &'a str,
+    session: &'a S,
+    export: &'a PreparedExportOptions,
+    hooks: BatchRunHooks<'a>,
+    media: &'a M,
+    pipeline: PipelinePrefs,
+    paths: Vec<PathBuf>,
+    searchable_pages: Vec<String>,
+    searchable_text_bytes: usize,
+}
+
+impl<'a, S: DeviceSession + ?Sized, M: MediaPort> BatchPageCollector<'a, S, M> {
+    fn new(
+        args: &'a BatchScanArgs,
+        file_ext: &'a str,
+        session: &'a S,
+        export: &'a PreparedExportOptions,
+        media: &'a M,
+        pipeline: PipelinePrefs,
+        hooks: BatchRunHooks<'a>,
+    ) -> Self {
+        Self {
+            args,
+            file_ext,
+            session,
+            export,
+            hooks,
+            media,
+            pipeline,
+            paths: Vec::with_capacity(args.pages as usize),
+            searchable_pages: Vec::with_capacity(args.pages as usize),
+            searchable_text_bytes: 0,
         }
-        let page_path = args
+    }
+
+    fn add(&mut self, image: ImageBuffer) -> Result<()> {
+        cancel_batch_if_requested(self.session, self.hooks.cancel_check, self.hooks.token)?;
+        let index = self.paths.len() as u32;
+        self.report_progress(index);
+        let page_path = self
+            .args
             .out_dir
-            .join(format!("page_{:03}.{}", index + 1, file_ext));
+            .join(format!("page_{:03}.{}", index + 1, self.file_ext));
         let publication = process_and_publish_page_with_media(
             image,
             PageWorkflowRequest {
                 destination: &page_path,
-                pipeline: &pipeline,
+                pipeline: &self.pipeline,
                 extra_white_balance: false,
-                dpi: Some(args.dpi),
+                dpi: Some(self.args.dpi),
                 quality: None,
-                export,
-                cancellation: token,
+                export: self.export,
+                cancellation: self.hooks.token,
             },
-            media,
+            self.media,
         )?;
-        if let Some(text) = publication.searchable_text {
-            searchable_text_bytes = media.checked_pdf_searchable_text_total(
-                searchable_text_bytes,
-                &text,
-                searchable_pages.len(),
-            )?;
-            searchable_pages.push(text);
+        self.paths.push(publication.path);
+        if let (Some(observer), Some(path)) = (self.hooks.observer, self.paths.last()) {
+            observer(BatchWorkflowEvent::Published(BatchPublishedOutput {
+                kind: BatchPublishedOutputKind::Page,
+                path: path.clone(),
+            }));
         }
-        paths.push(publication.path);
+        if let Some(text) = publication.searchable_text {
+            self.searchable_text_bytes = self.media.checked_pdf_searchable_text_total(
+                self.searchable_text_bytes,
+                &text,
+                self.searchable_pages.len(),
+            )?;
+            self.searchable_pages.push(text);
+        }
         Ok(())
-    })?;
-    cancel_batch_if_requested(session, cancel_check, token)?;
-    if summary.emitted != paths.len() as u32 {
+    }
+
+    fn report_progress(&self, index: u32) {
+        if let Some(ref callback) = self.args.on_progress {
+            callback(ScanProgress::new(
+                "batch",
+                index as f64 / self.args.pages as f64,
+                format!("page {}/{}", index + 1, self.args.pages),
+            ));
+        }
+    }
+
+    fn finish(self, summary: ScanPagesResult) -> Result<BatchPages> {
+        cancel_batch_if_requested(self.session, self.hooks.cancel_check, self.hooks.token)?;
+        validate_scan_summary(self.args, &summary, self.paths.len())?;
+        Ok(BatchPages {
+            paths: self.paths,
+            searchable_text: self.searchable_pages,
+            end: summary.end,
+        })
+    }
+}
+
+fn validate_scan_summary(
+    args: &BatchScanArgs,
+    summary: &ScanPagesResult,
+    emitted_paths: usize,
+) -> Result<()> {
+    if summary.emitted != emitted_paths as u32 {
         return Err(ScanError::Other(format!(
             "scanner reported {} pages but emitted {}",
-            summary.emitted,
-            paths.len()
+            summary.emitted, emitted_paths
         )));
     }
     match summary.end {
@@ -402,7 +455,7 @@ fn scan_batch_pages_with_session_export(
         ScanPagesEnd::FeederExhausted if summary.emitted == 0 => {
             return Err(ScanError::Unsupported("document feeder is empty".into()));
         }
-        ScanPagesEnd::FeederExhausted if args.duplex && summary.emitted % 2 != 0 => {
+        ScanPagesEnd::FeederExhausted if args.duplex && !summary.emitted.is_multiple_of(2) => {
             return Err(ScanError::Other(format!(
                 "document feeder ended after an incomplete duplex pair ({} sides)",
                 summary.emitted
@@ -410,10 +463,7 @@ fn scan_batch_pages_with_session_export(
         }
         _ => {}
     }
-    Ok(BatchPages {
-        paths,
-        searchable_text: searchable_pages,
-    })
+    Ok(())
 }
 
 fn cancel_batch_if_requested(
@@ -433,113 +483,4 @@ fn is_batch_cancelled(
     token: Option<&CancellationToken>,
 ) -> bool {
     token.is_some_and(CancellationToken::is_cancelled) || cancel_check.is_some_and(|check| check())
-}
-
-fn write_requested_outputs<M: MediaPort>(
-    args: &BatchScanArgs,
-    paths: &[PathBuf],
-    export: &PreparedExportOptions,
-    searchable_pages: Vec<String>,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<&CancellationToken>,
-    media: &M,
-) -> Result<()> {
-    check_output_cancellation(cancel_check, token)?;
-    if let Some(ref mp) = args.multipage_out {
-        if mp
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
-        {
-            save_final_pdf_from_paths_with_cancellation_with_media(
-                mp,
-                paths,
-                args.dpi,
-                export,
-                searchable_pages.clone(),
-                token,
-                media,
-            )?;
-        } else {
-            write_multipage(paths, mp, args.dpi, token, media)?;
-        }
-    }
-    check_output_cancellation(cancel_check, token)?;
-    if let Some(ref tiff) = args.multipage_tiff {
-        media.publish_tiff_from_paths(paths, tiff, Some(args.dpi), None, token)?;
-    }
-    check_output_cancellation(cancel_check, token)?;
-    if let Some(ref pdf) = args.multipage_pdf {
-        save_final_pdf_from_paths_with_cancellation_with_media(
-            pdf,
-            paths,
-            args.dpi,
-            export,
-            searchable_pages,
-            token,
-            media,
-        )?;
-    }
-    check_output_cancellation(cancel_check, token)?;
-    if let Some(ref sheet) = args.contact_sheet {
-        media.publish_contact_sheet(paths, sheet, token)?;
-    }
-    Ok(())
-}
-
-fn check_output_cancellation(
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<&CancellationToken>,
-) -> Result<()> {
-    if is_batch_cancelled(cancel_check, token) {
-        return Err(ScanError::Cancelled("batch scan cancelled".into()));
-    }
-    Ok(())
-}
-
-fn report_batch_completion(args: &BatchScanArgs, page_count: usize) {
-    if let Some(ref cb) = args.on_progress {
-        cb(ScanProgress::new(
-            "done",
-            1.0,
-            format!("{page_count} pages"),
-        ));
-    }
-}
-
-fn write_multipage<M: MediaPort>(
-    paths: &[PathBuf],
-    out: &Path,
-    dpi: u32,
-    token: Option<&CancellationToken>,
-    media: &M,
-) -> Result<PathBuf> {
-    let ext = out
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("tif")
-        .to_ascii_lowercase();
-    if ext == "pdf" {
-        return media.publish_pdf_from_paths(
-            paths,
-            out,
-            dpi,
-            "open-scanline multipage",
-            None,
-            None,
-            None,
-            token,
-        );
-    }
-    if matches!(ext.as_str(), "tif" | "tiff") || out.extension().is_none() {
-        let dest = if out.extension().is_none() {
-            out.with_extension("tif")
-        } else {
-            out.to_path_buf()
-        };
-        return media.publish_tiff_from_paths(paths, &dest, Some(dpi), None, token);
-    }
-    Err(ScanError::Invalid(format!(
-        "multipage output must use .pdf, .tif, or .tiff, not '.{ext}'"
-    )))
 }

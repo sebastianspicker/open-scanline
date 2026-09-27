@@ -3,15 +3,18 @@
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::media::MediaPort;
+use crate::workflows::ports::media::{ImageTransform, MediaPort, PdfPathPublication};
 use crate::workflows::settings::validate_ocr_language;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// OCR implementation used when creating a searchable PDF.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OcrEngine {
     /// Built-in OCR with no external executable dependency.
     Offline,
+    /// Locally installed OCRS RTen model pack (printed Latin `eng`).
+    Ocrs,
     /// The system `tesseract` executable.
     Tesseract,
 }
@@ -45,6 +48,8 @@ impl Default for ExportOptions {
 pub(crate) struct PreparedExportOptions {
     options: ExportOptions,
     profile: Option<serde_json::Value>,
+    transform: Option<Arc<dyn ImageTransform>>,
+    ocr_job: Option<Arc<dyn crate::workflows::ports::media::OcrJob>>,
 }
 
 impl PreparedExportOptions {
@@ -56,12 +61,32 @@ impl PreparedExportOptions {
         &self.options.ocr_language
     }
 
-    pub(crate) fn uses_offline_ocr(&self) -> bool {
-        matches!(self.options.ocr_engine, OcrEngine::Offline)
+    pub(crate) fn ocr_engine(&self) -> OcrEngine {
+        self.options.ocr_engine
     }
 
     pub(crate) fn profile(&self) -> Option<&serde_json::Value> {
         self.profile.as_ref()
+    }
+
+    pub(crate) fn transform(&self) -> Option<&dyn ImageTransform> {
+        self.transform.as_deref()
+    }
+
+    pub(crate) fn pdf_password(&self) -> Option<&str> {
+        self.options.pdf_password.as_deref()
+    }
+
+    pub(crate) fn recognize<M: MediaPort>(
+        &self,
+        image: &ImageBuffer,
+        cancellation: Option<&CancellationToken>,
+        media: &M,
+    ) -> Result<String> {
+        match self.ocr_job.as_deref() {
+            Some(job) => job.recognize(image, self.ocr_language(), cancellation),
+            None => media.recognize(image, self.ocr_language(), self.ocr_engine(), cancellation),
+        }
     }
 }
 
@@ -82,14 +107,46 @@ pub(crate) fn prepare_export_options_for_pdf_with_media<M: MediaPort>(
     options: &ExportOptions,
     media: &M,
 ) -> Result<PreparedExportOptions> {
+    validate_searchable_options(options)?;
+    validate_pdf_destination(has_pdf_destination, options)?;
+    validate_export_password(options, media)?;
+    let profile = load_export_profile(options, media)?;
+    let transform = profile
+        .as_ref()
+        .map(|profile| media.prepare_scanner_profile(profile))
+        .transpose()?
+        .flatten();
+    let ocr_job = options
+        .searchable_pdf
+        .then(|| media.prepare_ocr_job(options.ocr_engine))
+        .transpose()?
+        .flatten();
+    Ok(PreparedExportOptions {
+        options: options.clone(),
+        profile,
+        transform,
+        ocr_job,
+    })
+}
+
+fn validate_searchable_options(options: &ExportOptions) -> Result<()> {
     if options.searchable_pdf {
         validate_ocr_language(&options.ocr_language)?;
     }
-    if !has_pdf_destination && (options.searchable_pdf || options.pdf_password.is_some()) {
+    Ok(())
+}
+
+fn validate_pdf_destination(has_pdf_destination: bool, options: &ExportOptions) -> Result<()> {
+    let has_pdf_only_option = options.searchable_pdf || options.pdf_password.is_some();
+    if !has_pdf_destination && has_pdf_only_option {
         return Err(ScanError::Invalid(
             "searchable PDF and PDF password options require a .pdf destination".into(),
         ));
     }
+    Ok(())
+}
+
+fn validate_export_password<M: MediaPort>(options: &ExportOptions, media: &M) -> Result<()> {
     if let Some(password) = options.pdf_password.as_deref() {
         if password.is_empty() {
             return Err(ScanError::Invalid(
@@ -98,15 +155,18 @@ pub(crate) fn prepare_export_options_for_pdf_with_media<M: MediaPort>(
         }
         media.validate_pdf_password(password)?;
     }
-    let profile = options
+    Ok(())
+}
+
+fn load_export_profile<M: MediaPort>(
+    options: &ExportOptions,
+    media: &M,
+) -> Result<Option<serde_json::Value>> {
+    options
         .scanner_profile
         .as_deref()
         .map(|path| media.load_scanner_profile(path))
-        .transpose()?;
-    Ok(PreparedExportOptions {
-        options: options.clone(),
-        profile,
-    })
+        .transpose()
 }
 
 pub(crate) fn apply_export_profile_with_media<M: MediaPort>(
@@ -114,7 +174,21 @@ pub(crate) fn apply_export_profile_with_media<M: MediaPort>(
     prepared: &PreparedExportOptions,
     media: &M,
 ) -> Result<ImageBuffer> {
-    media.apply_scanner_profile(image, prepared.profile())
+    apply_export_profile_owned_with_media(image.clone(), prepared, media)
+}
+
+pub(crate) fn apply_export_profile_owned_with_media<M: MediaPort>(
+    image: ImageBuffer,
+    prepared: &PreparedExportOptions,
+    media: &M,
+) -> Result<ImageBuffer> {
+    if let Some(transform) = prepared.transform() {
+        return transform.apply_owned(image);
+    }
+    match prepared.profile() {
+        Some(profile) => media.apply_scanner_profile(&image, Some(profile)),
+        None => Ok(image),
+    }
 }
 
 /// Token-aware searchable-text generation for scan and batch workflows.
@@ -127,12 +201,7 @@ pub(crate) fn searchable_text_with_cancellation_with_media<M: MediaPort>(
     if !prepared.options.searchable_pdf {
         return Ok(None);
     }
-    Ok(Some(media.recognize(
-        image,
-        prepared.ocr_language(),
-        prepared.uses_offline_ocr(),
-        cancellation,
-    )?))
+    Ok(Some(prepared.recognize(image, cancellation, media)?))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -181,16 +250,16 @@ pub(crate) fn save_final_pdf_from_paths_with_cancellation_with_media<M: MediaPor
     media: &M,
 ) -> Result<PathBuf> {
     let searchable_pages = prepared.options.searchable_pdf.then_some(searchable_pages);
-    media.publish_pdf_from_paths(
+    media.publish_pdf_from_paths(PdfPathPublication {
         paths,
         destination,
         dpi,
-        "open-scanline multipage",
-        prepared.options.pdf_password.as_deref(),
+        title: "open-scanline multipage",
+        password: prepared.options.pdf_password.as_deref(),
         searchable_pages,
-        None,
+        transform: None,
         cancellation,
-    )
+    })
 }
 
 /// Rebuild a multipage GUI destination from its ordered source images.
@@ -228,7 +297,7 @@ pub(crate) fn save_final_multipage_from_paths_with_cancellation_with_media<M: Me
             paths,
             destination,
             Some(dpi),
-            prepared.profile(),
+            prepared.transform(),
             cancellation,
         ),
         _ => Err(ScanError::Invalid(format!(
@@ -249,7 +318,8 @@ fn save_profiled_pdf_from_paths_with_cancellation_with_media<M: MediaPort>(
         collect_searchable_pages(
             paths,
             |path| {
-                let image = apply_export_profile_with_media(&media.load(path)?, prepared, media)?;
+                let image =
+                    apply_export_profile_owned_with_media(media.load(path)?, prepared, media)?;
                 searchable_text_with_cancellation_with_media(&image, prepared, cancellation, media)?
                     .ok_or_else(|| {
                         ScanError::Other("searchable PDF did not produce OCR text".into())
@@ -260,16 +330,16 @@ fn save_profiled_pdf_from_paths_with_cancellation_with_media<M: MediaPort>(
     } else {
         Vec::new()
     };
-    media.publish_pdf_from_paths(
+    media.publish_pdf_from_paths(PdfPathPublication {
         paths,
         destination,
         dpi,
-        "open-scanline multipage",
-        prepared.options.pdf_password.as_deref(),
-        prepared.options.searchable_pdf.then_some(searchable_pages),
-        prepared.profile(),
+        title: "open-scanline multipage",
+        password: prepared.options.pdf_password.as_deref(),
+        searchable_pages: prepared.options.searchable_pdf.then_some(searchable_pages),
+        transform: prepared.transform(),
         cancellation,
-    )
+    })
 }
 
 fn collect_searchable_pages<M: MediaPort>(

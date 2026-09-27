@@ -5,11 +5,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not report vulnerabilities here. Follow SECURITY.md for private reporting.
+        This template is for reproducible bugs only. Do not report vulnerabilities
+        here — follow [SECURITY.md](https://github.com/sebastianspicker/open-scanline/blob/main/SECURITY.md)
+        for private reporting.
   - type: input
     id: version
     attributes:
       label: Open Scanline version
+      description: The output of `open-scanline --version`.
       placeholder: 1.0.0
     validations:
       required: true
@@ -55,5 +58,13 @@ body:
     id: actual
     attributes:
       label: Actual result and redacted logs
+      description: Paste any error output, with paths, addresses, and device names redacted.
     validations:
       required: true
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed passwords, scanner addresses, and document contents from this report.
+          required: true

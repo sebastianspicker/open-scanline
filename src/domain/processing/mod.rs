@@ -9,6 +9,7 @@ mod geometry;
 mod plan;
 
 pub use apply::apply_pipeline;
+pub(crate) use apply::apply_pipeline_owned;
 pub use auto::{
     apply_auto_crop, apply_auto_crop_with_params, apply_orientation,
     apply_orientation_with_degrees, auto_crop_bounds, detect_orientation, AutoCropResult,

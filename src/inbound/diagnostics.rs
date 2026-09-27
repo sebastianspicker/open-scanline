@@ -13,6 +13,9 @@ struct Capability {
     implementation: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     requirement: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence_available: Option<bool>,
+    compiled: bool,
 }
 
 fn capability(
@@ -26,6 +29,8 @@ fn capability(
         available,
         implementation,
         requirement,
+        confidence_available: None,
+        compiled: cfg!(feature = "gui") || !matches!(id, "gui" | "gui.native-dialogs"),
     }
 }
 
@@ -43,7 +48,24 @@ fn command_available(program: &str, arg: &str) -> bool {
 pub fn feature_matrix() -> Value {
     let tesseract = command_available("tesseract", "--version");
     let cjxl = command_available("cjxl", "--version");
-    let features = vec![
+    let mut features = device_capabilities();
+    features.extend(codec_capabilities(cjxl));
+    features.extend(document_capabilities());
+    features.extend(processing_capabilities(tesseract));
+    features.extend(interface_capabilities());
+    json!({
+        "app": APP_NAME,
+        "version": VERSION,
+        "features": features,
+        "notes": [
+            "hardware availability is reported separately from compiled support",
+            "TWAIN support is host integration, not a native acquisition data source"
+        ]
+    })
+}
+
+fn device_capabilities() -> Vec<Capability> {
+    vec![
         capability("device.mock", true, "built in", None),
         capability("device.file", true, "built in", None),
         capability(
@@ -64,6 +86,11 @@ pub fn feature_matrix() -> Value {
             "HTTP/HTTPS eSCL client with explicit, mDNS and bounded subnet discovery",
             Some("network access to an eSCL scanner"),
         ),
+    ]
+}
+
+fn codec_capabilities(cjxl: bool) -> Vec<Capability> {
+    vec![
         capability("codec.png", true, "image crate", None),
         capability("codec.jpeg", true, "image crate", None),
         capability("codec.tiff", true, "image and tiff crates", None),
@@ -76,6 +103,11 @@ pub fn feature_matrix() -> Value {
             "libjxl command integration",
             Some("cjxl on PATH"),
         ),
+    ]
+}
+
+fn document_capabilities() -> Vec<Capability> {
+    vec![
         capability("format.pdf", true, "lopdf", None),
         capability(
             "format.pdf-searchable",
@@ -91,6 +123,11 @@ pub fn feature_matrix() -> Value {
         ),
         capability("format.multipage-pdf", true, "lopdf", None),
         capability("format.multipage-tiff", true, "tiff crate", None),
+    ]
+}
+
+fn processing_capabilities(tesseract: bool) -> Vec<Capability> {
+    vec![
         capability("pipeline", true, "built in", None),
         capability(
             "pipeline.scanner-profile",
@@ -99,19 +136,43 @@ pub fn feature_matrix() -> Value {
             None,
         ),
         capability("ocr.offline-5x7", true, "built in", None),
+        Capability {
+            id: "ocr.ocrs",
+            available: cfg!(feature = "ocrs")
+                && crate::infrastructure::media::ocr::model_pack::status()
+                    .map(|status| status["installed"].as_bool().unwrap_or(false))
+                    .unwrap_or(false),
+            implementation: "locally installed OCRS RTen model pack",
+            requirement: Some("ocr-model install with valid detection and recognition models"),
+            confidence_available: Some(false),
+            compiled: cfg!(feature = "ocrs"),
+        },
         capability(
             "ocr.tesseract",
             tesseract,
             "Tesseract command integration",
             Some("tesseract on PATH"),
         ),
-        capability("ml.user-onnx", true, "tract", None),
+        Capability {
+            compiled: cfg!(feature = "onnx"),
+            ..capability(
+                "ml.user-onnx",
+                cfg!(feature = "onnx"),
+                "tract",
+                Some("onnx feature"),
+            )
+        },
         capability(
             "batch.streaming",
             true,
             "bounded one-session logical-side stream",
             None,
         ),
+    ]
+}
+
+fn interface_capabilities() -> Vec<Capability> {
+    vec![
         capability(
             "gui",
             cfg!(feature = "gui"),
@@ -133,28 +194,36 @@ pub fn feature_matrix() -> Value {
             "headless plugin host launcher",
             Some("a separate TWAIN-capable host or bridge"),
         ),
-    ];
-    json!({
-        "app": APP_NAME,
-        "version": VERSION,
-        "features": features,
-        "notes": [
-            "hardware availability is reported separately from compiled support",
-            "TWAIN support is host integration, not a native acquisition data source"
-        ]
-    })
+    ]
 }
 
 pub fn ml_module_info() -> Value {
     json!({
         "auto_crop": true,
         "orientation": true,
-        "run_user_onnx": true,
+        "run_user_onnx": cfg!(feature = "onnx"),
         "onnxruntime_available": false,
-        "tract_onnx_available": true,
+        "tract_onnx_available": cfg!(feature = "onnx"),
         "cli_worker_isolation": true,
+        "explicit_worker_runtime": true,
+        "automatic_worker_discovery": false,
         "bundled_models": [],
         "methods": ["luma-threshold-bbox", "gradient-energy", "user-onnx"],
         "ok": true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::feature_matrix;
+
+    #[test]
+    fn ocrs_diagnostics_disclose_that_confidence_is_not_available() {
+        let features = feature_matrix()["features"].as_array().unwrap().clone();
+        let ocrs = features
+            .iter()
+            .find(|entry| entry["id"] == "ocr.ocrs")
+            .unwrap();
+        assert_eq!(ocrs["confidence_available"], false);
+    }
 }

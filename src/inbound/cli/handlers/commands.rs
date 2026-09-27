@@ -16,7 +16,7 @@ use crate::infrastructure::acquisition::{list_all_devices, list_backends};
 use crate::infrastructure::config::json::{default_config_path, load_config, save_config};
 use crate::infrastructure::distribution::{build_portable, PackagingOptions};
 use crate::infrastructure::media::convert_image_with_cancellation;
-use crate::infrastructure::media::ocr::ocr_file_with_cancellation;
+use crate::infrastructure::media::ocr::{model_pack, ocr_file_with_engine_with_cancellation};
 use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
@@ -176,10 +176,10 @@ pub(super) fn convert(
 pub(super) fn ocr(
     inp: PathBuf,
     lang: String,
-    offline: bool,
+    engine: crate::OcrEngine,
     cancellation: CancellationToken,
 ) -> i32 {
-    match ocr_file_with_cancellation(&inp, &lang, offline, cancellation) {
+    match ocr_file_with_engine_with_cancellation(&inp, &lang, engine, cancellation) {
         Ok(result) => {
             println!(
                 "{}",
@@ -189,6 +189,38 @@ pub(super) fn ocr(
         }
         Err(e) => {
             eprintln!("ocr error: {e}");
+            1
+        }
+    }
+}
+
+pub(super) fn ocr_model_install(detection: PathBuf, recognition: PathBuf) -> i32 {
+    match model_pack::install(&detection, &recognition) {
+        Ok(pack) => {
+            println!(
+                "{}",
+                serde_json::json!({"installed": true, "active": pack.id, "ok": true})
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("ocr-model install error: {error}");
+            1
+        }
+    }
+}
+
+pub(super) fn ocr_model_status() -> i32 {
+    match model_pack::status() {
+        Ok(status) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".into())
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("ocr-model status error: {error}");
             1
         }
     }
@@ -311,32 +343,7 @@ impl BatchRequest {
         scan::apply_explicit_bool(&mut pipeline.auto_crop, self.auto_crop);
         scan::apply_explicit_bool(&mut pipeline.auto_orient, self.auto_orient);
         scan::apply_explicit_bool(&mut pipeline.invert, self.invert);
-        let configured_format = self
-            .format
-            .clone()
-            .unwrap_or_else(|| config.output_format.clone());
-        let page_format = if configured_format.eq_ignore_ascii_case("pdf") {
-            "png".to_string()
-        } else {
-            configured_format.clone()
-        };
-        let mut multipage_out = self.multipage_out.clone();
-        if multipage_out.is_none() && self.multipage_pdf.is_none() && self.multipage_tiff.is_none()
-        {
-            let format = if configured_format.eq_ignore_ascii_case("pdf") {
-                Some("pdf")
-            } else if config.multipage {
-                Some(config.multipage_format.as_str())
-            } else {
-                None
-            };
-            if let Some(format) = format {
-                multipage_out = Some(
-                    self.out_dir
-                        .join(format!("{}_multipage.{}", config.output_name, format)),
-                );
-            }
-        }
+        let outputs = self.output_targets(config);
         BatchScanArgs {
             device: self
                 .device
@@ -353,20 +360,70 @@ impl BatchRequest {
                 .map(ScanSource::mode)
                 .unwrap_or(config.scan_mode),
             duplex: self.duplex.unwrap_or(config.duplex),
-            format: page_format,
+            format: outputs.page_format,
             multipage_tiff: self.multipage_tiff.clone(),
             multipage_pdf: self.multipage_pdf.clone(),
-            multipage_out,
-            contact_sheet: self.contact_sheet.clone().or_else(|| {
-                config.contact_sheet.then(|| {
-                    self.out_dir
-                        .join(format!("{}_contact.bmp", config.output_name))
-                })
-            }),
+            multipage_out: outputs.multipage_out,
+            contact_sheet: outputs.contact_sheet,
             pipeline,
             on_progress: None,
         }
     }
+
+    fn output_targets(&self, config: &AppConfig) -> BatchOutputTargets {
+        let configured_format = self
+            .format
+            .clone()
+            .unwrap_or_else(|| config.output_format.clone());
+        BatchOutputTargets {
+            page_format: page_format(&configured_format),
+            multipage_out: self.multipage_output(config, &configured_format),
+            contact_sheet: self.contact_sheet_output(config),
+        }
+    }
+
+    fn multipage_output(&self, config: &AppConfig, configured_format: &str) -> Option<PathBuf> {
+        if self.multipage_out.is_some()
+            || self.multipage_pdf.is_some()
+            || self.multipage_tiff.is_some()
+        {
+            return self.multipage_out.clone();
+        }
+        let format = if configured_format.eq_ignore_ascii_case("pdf") {
+            Some("pdf")
+        } else if config.multipage {
+            Some(config.multipage_format.as_str())
+        } else {
+            None
+        }?;
+        Some(
+            self.out_dir
+                .join(format!("{}_multipage.{}", config.output_name, format)),
+        )
+    }
+
+    fn contact_sheet_output(&self, config: &AppConfig) -> Option<PathBuf> {
+        self.contact_sheet.clone().or_else(|| {
+            config.contact_sheet.then(|| {
+                self.out_dir
+                    .join(format!("{}_contact.bmp", config.output_name))
+            })
+        })
+    }
+}
+
+fn page_format(configured_format: &str) -> String {
+    if configured_format.eq_ignore_ascii_case("pdf") {
+        "png".to_string()
+    } else {
+        configured_format.to_owned()
+    }
+}
+
+struct BatchOutputTargets {
+    page_format: String,
+    multipage_out: Option<PathBuf>,
+    contact_sheet: Option<PathBuf>,
 }
 
 fn report_batch_outputs(paths: &[PathBuf], requested_outputs: &[Option<PathBuf>; 4]) {

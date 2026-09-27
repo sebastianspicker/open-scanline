@@ -1,5 +1,11 @@
+mod options;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
+
+pub(super) use options::{
+    Adjustments, BatchOptions, ExportOptions, FilterOptions, ProcessOptions, ScanOptions,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct CurvePoints(pub(super) Vec<[i32; 2]>);
@@ -26,7 +32,7 @@ fn parse_curves(value: &str) -> Result<CurvePoints, String> {
         .ok_or_else(|| "curves must contain at least two x:y points".to_string())
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(super) enum ScanSource {
     Flatbed,
     Adf,
@@ -82,9 +88,10 @@ pub(super) enum RunMode {
 }
 
 /// OCR implementation for a searchable PDF export.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(super) enum OcrEngineArg {
     Offline,
+    Ocrs,
     Tesseract,
 }
 
@@ -92,6 +99,7 @@ impl OcrEngineArg {
     pub(super) fn as_export(self) -> crate::OcrEngine {
         match self {
             Self::Offline => crate::OcrEngine::Offline,
+            Self::Ocrs => crate::OcrEngine::Ocrs,
             Self::Tesseract => crate::OcrEngine::Tesseract,
         }
     }
@@ -109,21 +117,28 @@ pub(super) enum InfoModule {
     Manufacturers,
 }
 
+#[derive(Debug, Subcommand)]
+pub(super) enum OcrModelCommand {
+    /// Validate and install a local OCRS RTen detection/recognition pair.
+    Install {
+        #[arg(long)]
+        detection: PathBuf,
+        #[arg(long)]
+        recognition: PathBuf,
+    },
+    /// Report the active OCRS model pack and verify its integrity.
+    Status,
+}
+
 #[derive(Debug, Parser)]
-#[command(
-    name = "open-scanline",
-    about = "Local scanning, processing, and OCR in Rust.",
-    version = env!("CARGO_PKG_VERSION")
-)]
+#[command(name = "open-scanline", about = "Local scanning, processing, and OCR in Rust.", version = env!("CARGO_PKG_VERSION"))]
 pub(super) struct Cli {
     /// Path to config.json (default: platform config dir)
     #[arg(long, global = true)]
     pub(super) config: Option<PathBuf>,
-
     /// Run mode: normal (default) or plugin (headless host entry)
     #[arg(long, global = true, value_enum, default_value_t = RunMode::Normal)]
     pub(super) mode: RunMode,
-
     #[command(subcommand)]
     pub(super) cmd: Option<Commands>,
 }
@@ -135,122 +150,8 @@ pub(super) enum Commands {
         after_long_help = "Configuration-aware switches accept --flag or --flag=false. Omit a switch to retain its configured value."
     )]
     Scan {
-        #[arg(long)]
-        device: Option<String>,
-        /// Trust a strict direct eSCL endpoint that was not discovered or allow-listed
-        #[arg(long = "allow-unlisted-escl", action = clap::ArgAction::SetTrue)]
-        allow_unlisted_escl: bool,
-        #[arg(long, required = true)]
-        out: PathBuf,
-        /// Add an OCR text layer when exporting to PDF
-        #[arg(long = "pdf-searchable", action = clap::ArgAction::SetTrue)]
-        pdf_searchable: bool,
-        /// UNSAFE/DEPRECATED: literal PDF password; requires explicit opt-in
-        #[arg(
-            long = "pdf-password",
-            conflicts_with = "pdf_password_file",
-            requires = "allow_insecure_password_argv"
-        )]
-        pdf_password: Option<String>,
-        /// Read a PDF password from PATH, or - for standard input
-        #[arg(long = "pdf-password-file", conflicts_with = "pdf_password")]
-        pdf_password_file: Option<PathBuf>,
-        /// Allow the unsafe/deprecated --pdf-password command-line value
-        #[arg(long = "allow-insecure-password-argv", action = clap::ArgAction::SetTrue)]
-        allow_insecure_password_argv: bool,
-        /// OCR language for a searchable PDF
-        #[arg(long = "ocr-lang")]
-        ocr_lang: Option<String>,
-        /// OCR engine for a searchable PDF: offline or tesseract
-        #[arg(long = "ocr-engine", value_enum)]
-        ocr_engine: Option<OcrEngineArg>,
-        /// Scanner profile JSON applied before export
-        #[arg(long = "scanner-profile")]
-        scanner_profile: Option<PathBuf>,
-        #[arg(long)]
-        width: Option<u32>,
-        #[arg(long)]
-        height: Option<u32>,
-        #[arg(long, default_value_t = 1)]
-        seed: u32,
-        #[arg(long)]
-        dpi: Option<u32>,
-        /// Hardware input source: flatbed, ADF, or film/transparency unit
-        #[arg(long, value_enum)]
-        source: Option<ScanSource>,
-        /// Duplex returns multiple sides; use `batch --source adf --duplex`
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        duplex: Option<bool>,
-        #[arg(long)]
-        rotate: Option<i32>,
-        #[arg(long = "flip-h", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_h: Option<bool>,
-        #[arg(long = "flip-v", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_v: Option<bool>,
-        /// Crop as x,y,w,h in source pixels before rotate
-        #[arg(long)]
-        crop: Option<String>,
-        #[arg(long)]
-        brightness: Option<i32>,
-        #[arg(long)]
-        contrast: Option<i32>,
-        /// Saturation delta from -100 to 100
-        #[arg(long, value_parser = parse_saturation)]
-        saturation: Option<f64>,
-        /// Hue shift in degrees from -180 to 180
-        #[arg(long, value_parser = parse_hue)]
-        hue: Option<f64>,
-        /// Tone curve as x:y,x:y (0..255 values; x values strictly increasing)
-        #[arg(long, value_parser = parse_curves)]
-        curves: Option<CurvePoints>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        desaturate: Option<bool>,
-        #[arg(long = "levels-black")]
-        levels_black: Option<i32>,
-        #[arg(long = "levels-white")]
-        levels_white: Option<i32>,
-        #[arg(long = "levels-gamma")]
-        levels_gamma: Option<f64>,
-        #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_deskew: Option<bool>,
-        #[arg(long)]
-        deskew: Option<f64>,
-        #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        white_balance: Option<bool>,
-        #[arg(long = "auto-levels", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_levels: Option<bool>,
-        #[arg(long = "auto-crop", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_crop: Option<bool>,
-        #[arg(long = "auto-orient", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_orient: Option<bool>,
-        /// Infrared clean tier: off|light|medium|heavy
-        #[arg(long = "infrared-clean")]
-        infrared_clean: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        descreen: Option<bool>,
-        #[arg(long = "descreen-dpi")]
-        descreen_dpi: Option<i32>,
-        #[arg(long)]
-        sharpen: Option<f64>,
-        #[arg(long = "film-type")]
-        film_type: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        invert: Option<bool>,
-        #[arg(long = "restore-colors", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_colors: Option<bool>,
-        #[arg(long = "restore-fading", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_fading: Option<bool>,
-        #[arg(long = "grain-reduction")]
-        grain_reduction: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flatten: Option<bool>,
-        #[arg(long = "hole-punch", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        hole_punch: Option<bool>,
-        #[arg(long = "colorize-mode")]
-        colorize_mode: Option<String>,
-        /// Save the pre-processing acquisition buffer (TIFF when extension is omitted)
-        #[arg(long = "raw-out")]
-        raw_out: Option<PathBuf>,
+        #[command(flatten)]
+        options: ScanOptions,
     },
     /// List available devices
     Devices,
@@ -300,8 +201,18 @@ pub(super) enum Commands {
         inp: PathBuf,
         #[arg(long, default_value = "eng")]
         lang: String,
-        #[arg(long, action = clap::ArgAction::SetTrue)]
+        /// Deprecated alias for `--engine offline`.
+        #[arg(long, action = clap::ArgAction::SetTrue, conflicts_with = "engine")]
         offline: bool,
+        /// OCR engine: offline, ocrs, or tesseract.
+        #[arg(long, value_enum, default_value_t = OcrEngineArg::Tesseract, conflicts_with = "offline")]
+        engine: OcrEngineArg,
+    },
+    /// Manage locally installed OCRS model packs. This command never downloads models.
+    #[command(name = "ocr-model")]
+    OcrModel {
+        #[command(subcommand)]
+        command: OcrModelCommand,
     },
     /// Run a user-supplied ONNX image model and print its inference report
     Onnx {
@@ -340,234 +251,16 @@ pub(super) enum Commands {
         after_long_help = "Configuration-aware switches accept --flag or --flag=false. Omit a switch to retain its configured value. Use off or none for optional processing tiers, film type, and colorization mode."
     )]
     Process {
-        #[arg(long = "in")]
-        inp: PathBuf,
-        #[arg(long)]
-        out: PathBuf,
-        /// Add an OCR text layer when exporting to PDF
-        #[arg(long = "pdf-searchable", action = clap::ArgAction::SetTrue)]
-        pdf_searchable: bool,
-        /// UNSAFE/DEPRECATED: literal PDF password; requires explicit opt-in
-        #[arg(
-            long = "pdf-password",
-            conflicts_with = "pdf_password_file",
-            requires = "allow_insecure_password_argv"
-        )]
-        pdf_password: Option<String>,
-        /// Read a PDF password from PATH, or - for standard input
-        #[arg(long = "pdf-password-file", conflicts_with = "pdf_password")]
-        pdf_password_file: Option<PathBuf>,
-        /// Allow the unsafe/deprecated --pdf-password command-line value
-        #[arg(long = "allow-insecure-password-argv", action = clap::ArgAction::SetTrue)]
-        allow_insecure_password_argv: bool,
-        /// OCR language for a searchable PDF
-        #[arg(long = "ocr-lang")]
-        ocr_lang: Option<String>,
-        /// OCR engine for a searchable PDF: offline or tesseract
-        #[arg(long = "ocr-engine", value_enum)]
-        ocr_engine: Option<OcrEngineArg>,
-        /// Scanner profile JSON applied before export
-        #[arg(long = "scanner-profile")]
-        scanner_profile: Option<PathBuf>,
-        #[arg(long)]
-        rotate: Option<i32>,
-        #[arg(long = "flip-h", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_h: Option<bool>,
-        #[arg(long = "flip-v", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_v: Option<bool>,
-        #[arg(long)]
-        crop: Option<String>,
-        #[arg(long)]
-        brightness: Option<i32>,
-        #[arg(long)]
-        contrast: Option<i32>,
-        /// Saturation delta from -100 to 100
-        #[arg(long, value_parser = parse_saturation)]
-        saturation: Option<f64>,
-        /// Hue shift in degrees from -180 to 180
-        #[arg(long, value_parser = parse_hue)]
-        hue: Option<f64>,
-        /// Tone curve as x:y,x:y (0..255 values; x values strictly increasing)
-        #[arg(long, value_parser = parse_curves)]
-        curves: Option<CurvePoints>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        desaturate: Option<bool>,
-        #[arg(long = "levels-black")]
-        levels_black: Option<i32>,
-        #[arg(long = "levels-white")]
-        levels_white: Option<i32>,
-        #[arg(long = "levels-gamma")]
-        levels_gamma: Option<f64>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        invert: Option<bool>,
-        #[arg(long)]
-        sharpen: Option<f64>,
-        #[arg(long = "auto-levels", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_levels: Option<bool>,
-        #[arg(long = "auto-crop", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_crop: Option<bool>,
-        #[arg(long = "auto-orient", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_orient: Option<bool>,
-        #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_deskew: Option<bool>,
-        #[arg(long)]
-        deskew: Option<f64>,
-        #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        white_balance: Option<bool>,
-        /// Infrared clean tier: off|light|medium|heavy
-        #[arg(long = "infrared-clean")]
-        infrared_clean: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        descreen: Option<bool>,
-        #[arg(long = "descreen-dpi")]
-        descreen_dpi: Option<i32>,
-        #[arg(long = "film-type")]
-        film_type: Option<String>,
-        #[arg(long = "restore-colors", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_colors: Option<bool>,
-        #[arg(long = "restore-fading", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_fading: Option<bool>,
-        #[arg(long = "grain-reduction")]
-        grain_reduction: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flatten: Option<bool>,
-        #[arg(long = "hole-punch", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        hole_punch: Option<bool>,
-        #[arg(long = "colorize-mode")]
-        colorize_mode: Option<String>,
-        #[arg(long)]
-        quality: Option<u8>,
+        #[command(flatten)]
+        options: ProcessOptions,
     },
     /// Multi-page batch scan via shared path
     #[command(
         after_long_help = "Configuration-aware switches accept --flag or --flag=false. Omit a switch to retain its configured value. Use off or none for optional processing tiers, film type, and colorization mode."
     )]
     Batch {
-        /// Device id; defaults to the configured last device
-        #[arg(long)]
-        device: Option<String>,
-        /// Trust a strict direct eSCL endpoint that was not discovered or allow-listed
-        #[arg(long = "allow-unlisted-escl", action = clap::ArgAction::SetTrue)]
-        allow_unlisted_escl: bool,
-        #[arg(long = "out-dir", required = true)]
-        out_dir: PathBuf,
-        /// Maximum logical image sides to acquire (1..=1000)
-        #[arg(long)]
-        pages: Option<u32>,
-        #[arg(long)]
-        width: Option<u32>,
-        #[arg(long)]
-        height: Option<u32>,
-        #[arg(long, default_value_t = 1)]
-        seed: u32,
-        #[arg(long)]
-        dpi: Option<u32>,
-        /// Hardware input source: flatbed, ADF, or film/transparency unit
-        #[arg(long, value_enum)]
-        source: Option<ScanSource>,
-        /// Acquire both sides from an ADF; --pages must be even
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        duplex: Option<bool>,
-        /// Per-page image format; defaults to the configured output format
-        #[arg(long)]
-        format: Option<String>,
-        #[arg(long)]
-        rotate: Option<i32>,
-        #[arg(long = "flip-h", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_h: Option<bool>,
-        #[arg(long = "flip-v", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flip_v: Option<bool>,
-        /// Crop as x,y,w,h in source pixels before rotate
-        #[arg(long)]
-        crop: Option<String>,
-        #[arg(long)]
-        brightness: Option<i32>,
-        #[arg(long)]
-        contrast: Option<i32>,
-        #[arg(long, value_parser = parse_saturation)]
-        saturation: Option<f64>,
-        #[arg(long, value_parser = parse_hue)]
-        hue: Option<f64>,
-        #[arg(long, value_parser = parse_curves)]
-        curves: Option<CurvePoints>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        desaturate: Option<bool>,
-        #[arg(long = "levels-black")]
-        levels_black: Option<i32>,
-        #[arg(long = "levels-white")]
-        levels_white: Option<i32>,
-        #[arg(long = "levels-gamma")]
-        levels_gamma: Option<f64>,
-        #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_deskew: Option<bool>,
-        #[arg(long)]
-        deskew: Option<f64>,
-        #[arg(long = "auto-crop", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_crop: Option<bool>,
-        #[arg(long = "auto-orient", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_orient: Option<bool>,
-        #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        white_balance: Option<bool>,
-        #[arg(long = "auto-levels", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        auto_levels: Option<bool>,
-        #[arg(long = "infrared-clean")]
-        infrared_clean: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        descreen: Option<bool>,
-        #[arg(long = "descreen-dpi")]
-        descreen_dpi: Option<i32>,
-        #[arg(long)]
-        sharpen: Option<f64>,
-        #[arg(long = "film-type")]
-        film_type: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        invert: Option<bool>,
-        #[arg(long = "restore-colors", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_colors: Option<bool>,
-        #[arg(long = "restore-fading", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        restore_fading: Option<bool>,
-        #[arg(long = "grain-reduction")]
-        grain_reduction: Option<String>,
-        #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        flatten: Option<bool>,
-        #[arg(long = "hole-punch", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
-        hole_punch: Option<bool>,
-        #[arg(long = "colorize-mode")]
-        colorize_mode: Option<String>,
-        #[arg(long = "multipage-tiff")]
-        multipage_tiff: Option<PathBuf>,
-        #[arg(long = "multipage-pdf")]
-        multipage_pdf: Option<PathBuf>,
-        /// Extension-driven multipage output (.pdf, .tif, or .tiff)
-        #[arg(long = "multipage-out")]
-        multipage_out: Option<PathBuf>,
-        /// Add OCR text layers to the multipage PDF destination
-        #[arg(long = "pdf-searchable", action = clap::ArgAction::SetTrue)]
-        pdf_searchable: bool,
-        /// UNSAFE/DEPRECATED: literal PDF password; requires explicit opt-in
-        #[arg(
-            long = "pdf-password",
-            conflicts_with = "pdf_password_file",
-            requires = "allow_insecure_password_argv"
-        )]
-        pdf_password: Option<String>,
-        /// Read a PDF password from PATH, or - for standard input
-        #[arg(long = "pdf-password-file", conflicts_with = "pdf_password")]
-        pdf_password_file: Option<PathBuf>,
-        /// Allow the unsafe/deprecated --pdf-password command-line value
-        #[arg(long = "allow-insecure-password-argv", action = clap::ArgAction::SetTrue)]
-        allow_insecure_password_argv: bool,
-        /// OCR language for a searchable multipage PDF
-        #[arg(long = "ocr-lang")]
-        ocr_lang: Option<String>,
-        /// OCR engine for a searchable multipage PDF: offline or tesseract
-        #[arg(long = "ocr-engine", value_enum)]
-        ocr_engine: Option<OcrEngineArg>,
-        /// Scanner profile JSON applied to every exported page
-        #[arg(long = "scanner-profile")]
-        scanner_profile: Option<PathBuf>,
-        #[arg(long = "contact-sheet")]
-        contact_sheet: Option<PathBuf>,
+        #[command(flatten)]
+        options: BatchOptions,
     },
     /// Create and validate a portable ZIP around an existing executable
     Package {
@@ -584,4 +277,93 @@ pub(super) enum Commands {
     /// Print built-in user manual text
     #[command(name = "help-text")]
     HelpText,
+}
+
+#[cfg(test)]
+mod ocr_contract_tests {
+    use super::*;
+
+    #[test]
+    fn direct_ocr_defaults_to_tesseract_and_accepts_each_explicit_engine() {
+        let cli = Cli::try_parse_from(["open-scanline", "ocr", "--in", "page.png"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Commands::Ocr {
+                offline: false,
+                engine: OcrEngineArg::Tesseract,
+                ..
+            })
+        ));
+        for (value, expected) in [
+            ("offline", OcrEngineArg::Offline),
+            ("ocrs", OcrEngineArg::Ocrs),
+            ("tesseract", OcrEngineArg::Tesseract),
+        ] {
+            let cli = Cli::try_parse_from([
+                "open-scanline",
+                "ocr",
+                "--in",
+                "page.png",
+                "--engine",
+                value,
+            ])
+            .unwrap();
+            assert!(
+                matches!(cli.cmd, Some(Commands::Ocr { offline: false, engine, .. }) if engine == expected)
+            );
+        }
+    }
+
+    #[test]
+    fn deprecated_offline_alias_does_not_conflict_with_engine_default_but_rejects_an_explicit_engine(
+    ) {
+        let cli =
+            Cli::try_parse_from(["open-scanline", "ocr", "--in", "page.png", "--offline"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Commands::Ocr {
+                offline: true,
+                engine: OcrEngineArg::Tesseract,
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from([
+            "open-scanline",
+            "ocr",
+            "--in",
+            "page.png",
+            "--offline",
+            "--engine",
+            "ocrs"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn ocr_model_status_parses_without_paths() {
+        let cli = Cli::try_parse_from(["open-scanline", "ocr-model", "status"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Commands::OcrModel {
+                command: OcrModelCommand::Status
+            })
+        ));
+    }
+
+    #[test]
+    fn scan_invert_accepts_explicit_true_and_false_overrides() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let cli = Cli::try_parse_from([
+                "open-scanline",
+                "scan",
+                "--out",
+                "page.png",
+                &format!("--invert={value}"),
+            ])
+            .unwrap();
+            assert!(
+                matches!(cli.cmd, Some(Commands::Scan { options }) if options.invert == Some(expected))
+            );
+        }
+    }
 }

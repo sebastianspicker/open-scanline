@@ -3,7 +3,7 @@
 use crate::domain::acquisition::{
     validate_scan_dpi, DeviceOpenPolicy, ScanMode, ScanProgress, ScanRequest,
 };
-use crate::domain::image::{checked_image_len, PixelFormat, Rect};
+use crate::domain::image::{checked_image_len, ImageBuffer, PixelFormat, Rect};
 use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
 use crate::workflows::operation::CancellationToken;
@@ -267,8 +267,21 @@ impl<'args> ScanContext<'args> {
         session: &(impl DeviceSession + ?Sized),
         media: &M,
     ) -> Result<PathBuf> {
+        let image = self.acquire_image(session)?;
+        let path = self.publish_image(image, session, media)?;
+        report_progress(self.args, "done", 1.0, &path.display().to_string());
+        Ok(path)
+    }
+
+    fn acquire_image(&self, session: &(impl DeviceSession + ?Sized)) -> Result<ImageBuffer> {
         self.cancel_if_requested(session)?;
         session.set_params(&self.request)?;
+        self.report_acquisition_start();
+        self.cancel_if_requested(session)?;
+        self.acquire_from_session(session)
+    }
+
+    fn report_acquisition_start(&self) {
         report_progress(
             self.args,
             "acquire",
@@ -279,20 +292,37 @@ impl<'args> ScanContext<'args> {
                 "scanning"
             },
         );
-        self.cancel_if_requested(session)?;
-        let image = if self.args.use_preview {
-            session.preview(&self.request)?
+    }
+
+    fn acquire_from_session(&self, session: &(impl DeviceSession + ?Sized)) -> Result<ImageBuffer> {
+        if self.args.use_preview {
+            session.preview(&self.request)
         } else {
-            session.scan(&self.request)?
-        };
+            session.scan(&self.request)
+        }
+    }
+
+    fn publish_image<M: MediaPort>(
+        &self,
+        image: ImageBuffer,
+        session: &(impl DeviceSession + ?Sized),
+        media: &M,
+    ) -> Result<PathBuf> {
         if let Some(raw_out) = self.args.raw_out.as_ref() {
-            media.publish_raw(raw_out, &image, Some(self.args.dpi), Some(self.token))?;
+            let raw_path =
+                media.publish_raw(raw_out, &image, Some(self.args.dpi), Some(self.token))?;
+            report_progress(
+                self.args,
+                "raw-saved",
+                0.55,
+                &raw_path.display().to_string(),
+            );
         }
         self.cancel_if_requested(session)?;
         report_progress(self.args, "pipeline", 0.7, "pipeline");
         self.cancel_if_requested(session)?;
         report_progress(self.args, "save", 0.9, &self.args.out.display().to_string());
-        let path = process_and_publish_page_with_media(
+        process_and_publish_page_with_media(
             image,
             PageWorkflowRequest {
                 destination: &self.args.out,
@@ -304,10 +334,8 @@ impl<'args> ScanContext<'args> {
                 cancellation: Some(self.token),
             },
             media,
-        )?
-        .path;
-        report_progress(self.args, "done", 1.0, &path.display().to_string());
-        Ok(path)
+        )
+        .map(|result| result.path)
     }
 
     fn cancel_if_requested(&self, session: &(impl DeviceSession + ?Sized)) -> Result<()> {

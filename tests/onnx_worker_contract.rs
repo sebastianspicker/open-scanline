@@ -1,7 +1,12 @@
+#![cfg(feature = "onnx")]
+
 use open_scanline::core::{ImageBuffer, PixelFormat};
 use open_scanline::imaging::save_image;
 #[cfg(not(windows))]
-use open_scanline::ml::{run_user_onnx_with_worker, OnnxInferenceOptions};
+#[allow(deprecated)]
+use open_scanline::ml::{
+    run_user_onnx, run_user_onnx_with_worker, OnnxInferenceOptions, OnnxRuntime,
+};
 use std::process::Command;
 
 fn push_varint(bytes: &mut Vec<u8>, mut value: u64) {
@@ -60,31 +65,38 @@ fn identity_onnx() -> Vec<u8> {
     model
 }
 
-#[test]
-fn cli_runs_user_model_in_the_contained_worker() {
+fn test_directory(name: &str) -> std::path::PathBuf {
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).unwrap();
     let directory = std::env::temp_dir().join(format!(
-        "open-scanline-onnx-worker-contract-{}-{}",
+        "open-scanline-{name}-{}-{}",
         std::process::id(),
         u128::from_le_bytes(nonce)
     ));
     std::fs::create_dir(&directory).unwrap();
+    directory
+}
+
+fn test_image() -> ImageBuffer {
+    ImageBuffer::new(
+        2,
+        2,
+        PixelFormat::Rgb8,
+        vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+    )
+    .unwrap()
+}
+
+fn cli_test_assets() -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let directory = test_directory("onnx-worker-contract");
     let input = directory.join("input.png");
     let model = directory.join("identity.onnx");
-    save_image(
-        &input,
-        &ImageBuffer::new(
-            2,
-            2,
-            PixelFormat::Rgb8,
-            vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
-        )
-        .unwrap(),
-        None,
-        None,
-    )
-    .unwrap();
+    save_image(&input, &test_image(), None, None).unwrap();
     std::fs::write(&model, identity_onnx()).unwrap();
 
     #[cfg(windows)]
@@ -98,6 +110,13 @@ fn cli_runs_user_model_in_the_contained_worker() {
     };
     #[cfg(not(windows))]
     let executable = std::path::PathBuf::from(env!("CARGO_BIN_EXE_open-scanline"));
+
+    (directory, input, model, executable)
+}
+
+#[test]
+fn cli_runs_user_model_in_the_contained_worker() {
+    let (directory, input, model, executable) = cli_test_assets();
 
     let output = Command::new(executable)
         .args([
@@ -128,32 +147,117 @@ fn cli_runs_user_model_in_the_contained_worker() {
 #[cfg(not(windows))]
 #[test]
 fn library_uses_an_explicit_version_matched_worker() {
-    let directory = std::env::temp_dir().join(format!(
-        "open-scanline-onnx-library-worker-contract-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).unwrap();
+    let directory = test_directory("onnx-library-worker-contract");
     let model = directory.join("identity.onnx");
     std::fs::write(&model, identity_onnx()).unwrap();
-    let image = ImageBuffer::new(
-        2,
-        2,
-        PixelFormat::Rgb8,
-        vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
-    )
-    .unwrap();
+    let image = test_image();
 
+    let runtime = OnnxRuntime::from_worker(env!("CARGO_BIN_EXE_open-scanline")).unwrap();
+    let report = runtime.run(&image, &model).unwrap();
+    let _ = std::fs::remove_dir_all(directory);
+
+    assert!(report.ok);
+    assert_eq!(report.engine, "tract-onnx");
+    assert_eq!(report.outputs[0].shape, vec![1, 3, 2, 2]);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn runtime_rejects_missing_non_regular_and_wrong_version_workers() {
+    let directory = test_directory("onnx-invalid-worker-contract");
+    let missing = directory.join("missing-worker");
+    assert!(OnnxRuntime::from_worker(&missing).is_err());
+    assert!(OnnxRuntime::from_worker(&directory).is_err());
+
+    let wrong_version = directory.join("wrong-version-worker");
+    std::fs::write(&wrong_version, "#!/bin/sh\necho open-scanline 0.0.0\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&wrong_version, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let error = OnnxRuntime::from_worker(&wrong_version).unwrap_err();
+    assert!(error.to_string().contains("version-matched"));
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn runtime_rejects_a_worker_replaced_after_construction() {
+    let directory = test_directory("onnx-replaced-worker-contract");
+    let worker = directory.join("open-scanline-worker");
+    let replacement = directory.join("open-scanline-worker-replacement");
+    std::fs::write(&worker, "#!/bin/sh\necho open-scanline 1.0.0\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let runtime = OnnxRuntime::from_worker(&worker).unwrap();
+    std::fs::write(&replacement, "replaced worker").unwrap();
+    std::fs::rename(&replacement, &worker).unwrap();
+
+    let model = directory.join("identity.onnx");
+    std::fs::write(&model, identity_onnx()).unwrap();
+    let error = runtime.run(&test_image(), &model).unwrap_err();
+    assert!(error.to_string().contains("was replaced"));
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn runtime_rejects_same_inode_content_changes_with_restored_metadata() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = test_directory("onnx-mutated-worker-contract");
+    let worker = directory.join("open-scanline-worker");
+    let original = "#!/bin/sh\n# worker-a\necho open-scanline 1.0.0\n";
+    let replacement = "#!/bin/sh\n# worker-b\necho open-scanline 1.0.0\n";
+    assert_eq!(original.len(), replacement.len());
+    std::fs::write(&worker, original).unwrap();
+    std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let original_modified = std::fs::metadata(&worker).unwrap().modified().unwrap();
+    let runtime = OnnxRuntime::from_worker(&worker).unwrap();
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&worker)
+        .unwrap();
+    file.write_all(replacement.as_bytes()).unwrap();
+    file.sync_all().unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(original_modified))
+        .unwrap();
+
+    let model = directory.join("identity.onnx");
+    std::fs::write(&model, identity_onnx()).unwrap();
+    let error = runtime.run(&test_image(), &model).unwrap_err();
+    assert!(error.to_string().contains("was replaced"));
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn one_shot_wrapper_uses_the_explicit_worker_runtime() {
+    let directory = test_directory("onnx-one-shot-worker-contract");
+    let model = directory.join("identity.onnx");
+    std::fs::write(&model, identity_onnx()).unwrap();
     let report = run_user_onnx_with_worker(
-        &image,
+        &test_image(),
         &model,
         &OnnxInferenceOptions::default(),
         env!("CARGO_BIN_EXE_open-scanline"),
     )
     .unwrap();
     let _ = std::fs::remove_dir_all(directory);
-
     assert!(report.ok);
-    assert_eq!(report.engine, "tract-onnx");
-    assert_eq!(report.outputs[0].shape, vec![1, 3, 2, 2]);
+}
+
+#[cfg(not(windows))]
+#[test]
+#[allow(deprecated)]
+fn legacy_api_does_not_discover_a_sibling_worker() {
+    let directory = test_directory("onnx-no-auto-discovery-contract");
+    let model = directory.join("identity.onnx");
+    std::fs::write(&model, identity_onnx()).unwrap();
+    let error = run_user_onnx(&test_image(), &model).unwrap_err();
+    let _ = std::fs::remove_dir_all(directory);
+    assert!(error
+        .to_string()
+        .contains("automatic worker discovery is disabled"));
 }

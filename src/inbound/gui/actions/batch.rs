@@ -3,6 +3,7 @@ use super::super::state::GuiState;
 use crate::error::Result;
 use crate::inbound::api::batch::{run_batch_scan, BatchScanArgs};
 use crate::infrastructure::config::json::validate_output_name;
+use crate::workflows::publication::OcrEngine;
 use std::path::PathBuf;
 
 /// Immutable OCR request assembled on the UI thread before a worker starts.
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 pub(in crate::inbound::gui) struct OcrAction {
     pub(in crate::inbound::gui) src: PathBuf,
     pub(in crate::inbound::gui) language: String,
-    pub(in crate::inbound::gui) offline: bool,
+    pub(in crate::inbound::gui) engine: OcrEngine,
 }
 
 #[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
@@ -46,11 +47,11 @@ impl GuiState {
             self.set_open_error();
             return None;
         };
-        let (language, offline) = self.ocr_options();
+        let (language, engine) = self.ocr_options();
         Some(OcrAction {
             src,
             language: language.into(),
-            offline,
+            engine,
         })
     }
 
@@ -97,11 +98,27 @@ impl GuiState {
         })
     }
 
-    pub(in super::super) fn ocr_options(&self) -> (&str, bool) {
+    pub(in super::super) fn ocr_options(&self) -> (&str, OcrEngine) {
         let language = self.ocr_language.trim();
         (
             if language.is_empty() { "eng" } else { language },
-            self.ocr_engine == "offline",
+            self.selected_ocr_engine(),
         )
+    }
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_ocr_preserves_the_ocrs_engine_choice() {
+        let mut state = GuiState::new(None);
+        state.last_image = Some(PathBuf::from("source.png"));
+        state.ocr_engine = "ocrs".into();
+
+        let action = state.prepare_ocr().expect("OCR action");
+
+        assert_eq!(action.engine, OcrEngine::Ocrs);
     }
 }

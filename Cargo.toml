@@ -5,6 +5,7 @@ edition = "2021"
 rust-version = "1.91"
 description = "Local scanning, processing, and OCR in Rust."
 license = "MIT"
+repository = "https://github.com/sebastianspicker/open-scanline"
 publish = false
 default-run = "open-scanline"
 include = [
@@ -28,8 +29,15 @@ path = "src/main.rs"
 name = "open_scanline"
 path = "src/lib.rs"
 
+[lints.clippy]
+excessive_nesting = "warn"
+too_many_arguments = "warn"
+too_many_lines = "warn"
+
 [features]
-default = ["gui"]
+default = ["gui", "ocrs", "onnx"]
+ocrs = ["dep:ocrs", "dep:rten"]
+onnx = ["dep:tract-onnx"]
 gui = ["dep:eframe", "dep:egui", "dep:rfd"]
 
 [dependencies]
@@ -44,7 +52,7 @@ sha2 = "0.10"
 libc = "0.2"
 dirs = "5"
 tiff = "0.11"
-tract-onnx = "0.23.4"
+tract-onnx = { version = "0.23.4", optional = true }
 eframe = { version = "0.32.3", optional = true, default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "web_screen_reader", "x11"] }
 mdns-sd = "0.13"
 ureq = { version = "3.1", default-features = false, features = ["rustls"] }
@@ -54,3 +62,5 @@ lopdf = "0.44"
 stringprep = "0.1"
 rfd = { version = "0.15", optional = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+ocrs = { version = "=0.12.2", optional = true }
+rten = { version = "=0.24.0", optional = true }

@@ -17,322 +17,111 @@ pub struct FilmProfile {
     pub gamma: f64,
 }
 
-fn cn(
-    id: &str,
-    name: &str,
-    mfr: &str,
-    mask: (f64, f64, f64),
-    contrast: f64,
-    gamma: f64,
-) -> FilmProfile {
-    FilmProfile {
-        id: id.into(),
-        name: name.into(),
-        kind: "color_negative".into(),
-        manufacturer: mfr.into(),
-        note: format!("{name} color negative profile."),
-        orange_mask: Some(mask),
-        contrast,
-        gamma,
+#[derive(Clone, Copy)]
+enum FilmKind {
+    ColorNegative,
+    Slide,
+    BwNegative,
+}
+
+impl FilmKind {
+    fn metadata(self) -> (&'static str, &'static str) {
+        match self {
+            Self::ColorNegative => ("color_negative", "color negative profile."),
+            Self::Slide => ("slide", "slide/positive profile."),
+            Self::BwNegative => ("bw_negative", "black-and-white negative profile."),
+        }
     }
 }
 
-fn sl(id: &str, name: &str, mfr: &str, contrast: f64, gamma: f64) -> FilmProfile {
-    FilmProfile {
-        id: id.into(),
-        name: name.into(),
-        kind: "slide".into(),
-        manufacturer: mfr.into(),
-        note: format!("{name} slide/positive profile."),
-        orange_mask: None,
-        contrast,
-        gamma,
+struct FilmProfileData(
+    &'static str,
+    &'static str,
+    FilmKind,
+    &'static str,
+    Option<(f64, f64, f64)>,
+    f64,
+    f64,
+);
+
+impl FilmProfileData {
+    fn to_profile(&self) -> FilmProfile {
+        let (kind, note_suffix) = self.2.metadata();
+        FilmProfile {
+            id: self.0.into(),
+            name: self.1.into(),
+            kind: kind.into(),
+            manufacturer: self.3.into(),
+            note: format!("{} {note_suffix}", self.1),
+            orange_mask: self.4,
+            contrast: self.5,
+            gamma: self.6,
+        }
     }
 }
 
-fn bw(id: &str, name: &str, mfr: &str, contrast: f64, gamma: f64) -> FilmProfile {
-    FilmProfile {
-        id: id.into(),
-        name: name.into(),
-        kind: "bw_negative".into(),
-        manufacturer: mfr.into(),
-        note: format!("{name} black-and-white negative profile."),
-        orange_mask: None,
-        contrast,
-        gamma,
-    }
-}
+#[rustfmt::skip]
+const FILM_CATALOG: &[FilmProfileData] = &[
+    FilmProfileData("generic_color_negative", "Generic Color Negative", FilmKind::ColorNegative, "Generic", Some((1.15, 0.62, 0.45)), 1.15, 1.0),
+    FilmProfileData("kodak_gold_200", "Kodak Gold 200", FilmKind::ColorNegative, "Kodak", Some((1.18, 0.60, 0.42)), 1.12, 1.05),
+    FilmProfileData("kodak_gold_100", "Kodak Gold 100", FilmKind::ColorNegative, "Kodak", Some((1.16, 0.61, 0.44)), 1.10, 1.04),
+    FilmProfileData("kodak_gold_400", "Kodak Gold 400", FilmKind::ColorNegative, "Kodak", Some((1.17, 0.59, 0.43)), 1.14, 1.05),
+    FilmProfileData("kodak_portra_160", "Kodak Portra 160", FilmKind::ColorNegative, "Kodak", Some((1.11, 0.62, 0.47)), 1.08, 1.08),
+    FilmProfileData("kodak_portra_400", "Kodak Portra 400", FilmKind::ColorNegative, "Kodak", Some((1.12, 0.61, 0.46)), 1.10, 1.08),
+    FilmProfileData("kodak_portra_800", "Kodak Portra 800", FilmKind::ColorNegative, "Kodak", Some((1.13, 0.60, 0.45)), 1.12, 1.06),
+    FilmProfileData("kodak_ektar_100", "Kodak Ektar 100", FilmKind::ColorNegative, "Kodak", Some((1.20, 0.60, 0.40)), 1.20, 1.02),
+    FilmProfileData("kodak_colorplus_200", "Kodak ColorPlus 200", FilmKind::ColorNegative, "Kodak", Some((1.17, 0.59, 0.44)), 1.14, 1.04),
+    FilmProfileData("kodak_ultramax_400", "Kodak UltraMax 400", FilmKind::ColorNegative, "Kodak", Some((1.16, 0.58, 0.43)), 1.13, 1.06),
+    FilmProfileData("fuji_superia_100", "Fuji Superia 100", FilmKind::ColorNegative, "Fuji", Some((1.09, 0.64, 0.48)), 1.10, 1.05),
+    FilmProfileData("fuji_superia_200", "Fuji Superia 200", FilmKind::ColorNegative, "Fuji", Some((1.10, 0.63, 0.47)), 1.11, 1.05),
+    FilmProfileData("fuji_superia_400", "Fuji Superia 400", FilmKind::ColorNegative, "Fuji", Some((1.10, 0.63, 0.47)), 1.12, 1.05),
+    FilmProfileData("fuji_pro_400h", "Fuji Pro 400H", FilmKind::ColorNegative, "Fuji", Some((1.08, 0.62, 0.48)), 1.08, 1.10),
+    FilmProfileData("agfa_vista_200", "Agfa Vista 200", FilmKind::ColorNegative, "Agfa", Some((1.14, 0.61, 0.45)), 1.16, 1.03),
+    FilmProfileData("cinestill_800t", "CineStill 800T", FilmKind::ColorNegative, "CineStill", Some((1.05, 0.58, 0.70)), 1.18, 1.0),
+    FilmProfileData("lomography_color_400", "Lomography Color 400", FilmKind::ColorNegative, "Lomography", Some((1.17, 0.57, 0.41)), 1.20, 1.0),
+    FilmProfileData("konica_centuria_200", "Konica Centuria 200", FilmKind::ColorNegative, "Konica", Some((1.14, 0.60, 0.44)), 1.13, 1.04),
+    FilmProfileData("generic_consumer_cn", "Generic Consumer Color Negative", FilmKind::ColorNegative, "Generic", Some((1.16, 0.60, 0.44)), 1.14, 1.04),
+    FilmProfileData("generic_portrait_cn", "Generic Portrait Color Negative", FilmKind::ColorNegative, "Generic", Some((1.11, 0.62, 0.47)), 1.09, 1.08),
+    FilmProfileData("generic_slide", "Generic Slide", FilmKind::Slide, "Generic", None, 1.0, 1.0),
+    FilmProfileData("fuji_velvia_50", "Fuji Velvia 50", FilmKind::Slide, "Fuji", None, 1.15, 0.95),
+    FilmProfileData("fuji_velvia_100", "Fuji Velvia 100", FilmKind::Slide, "Fuji", None, 1.12, 0.97),
+    FilmProfileData("fuji_provia_100f", "Fuji Provia 100F", FilmKind::Slide, "Fuji", None, 1.0, 1.0),
+    FilmProfileData("kodak_ektachrome_e100", "Kodak Ektachrome E100", FilmKind::Slide, "Kodak", None, 1.05, 1.05),
+    FilmProfileData("kodachrome_64", "Kodachrome 64", FilmKind::Slide, "Kodak", None, 1.08, 1.0),
+    FilmProfileData("agfa_ct_precisa_100", "Agfa CT Precisa 100", FilmKind::Slide, "Agfa", None, 1.06, 1.02),
+    FilmProfileData("generic_e6_slide", "Generic E-6 Slide", FilmKind::Slide, "Generic", None, 1.04, 1.02),
+    FilmProfileData("generic_bw_negative", "Generic B&W Negative", FilmKind::BwNegative, "Generic", None, 1.2, 1.0),
+    FilmProfileData("ilford_hp5_plus", "Ilford HP5 Plus", FilmKind::BwNegative, "Ilford", None, 1.25, 1.0),
+    FilmProfileData("ilford_fp4_plus", "Ilford FP4 Plus", FilmKind::BwNegative, "Ilford", None, 1.15, 1.05),
+    FilmProfileData("ilford_delta_100", "Ilford Delta 100", FilmKind::BwNegative, "Ilford", None, 1.28, 0.96),
+    FilmProfileData("ilford_delta_400", "Ilford Delta 400", FilmKind::BwNegative, "Ilford", None, 1.30, 0.95),
+    FilmProfileData("kodak_tri_x_400", "Kodak Tri-X 400", FilmKind::BwNegative, "Kodak", None, 1.28, 1.0),
+    FilmProfileData("kodak_tmax_100", "Kodak T-Max 100", FilmKind::BwNegative, "Kodak", None, 1.30, 0.98),
+    FilmProfileData("kodak_tmax_400", "Kodak T-Max 400", FilmKind::BwNegative, "Kodak", None, 1.35, 0.92),
+    FilmProfileData("fuji_acros_100", "Fuji Acros 100", FilmKind::BwNegative, "Fuji", None, 1.24, 1.0),
+    FilmProfileData("fomapan_100", "Fomapan 100", FilmKind::BwNegative, "Foma", None, 1.20, 1.02),
+    FilmProfileData("fomapan_400", "Fomapan 400", FilmKind::BwNegative, "Foma", None, 1.24, 1.0),
+    FilmProfileData("rolle_rp_x_400", "Rollei RPX 400", FilmKind::BwNegative, "Rollei", None, 1.26, 1.0),
+    FilmProfileData("kodak_ultramax_800", "Kodak UltraMax 800", FilmKind::ColorNegative, "Kodak", Some((1.15, 0.57, 0.42)), 1.16, 1.04),
+    FilmProfileData("fuji_superia_800", "Fuji Superia 800", FilmKind::ColorNegative, "Fuji", Some((1.11, 0.62, 0.46)), 1.14, 1.04),
+    FilmProfileData("fuji_c200", "Fuji C200", FilmKind::ColorNegative, "Fuji", Some((1.09, 0.64, 0.48)), 1.10, 1.06),
+    FilmProfileData("agfa_vista_100", "Agfa Vista 100", FilmKind::ColorNegative, "Agfa", Some((1.14, 0.61, 0.45)), 1.14, 1.03),
+    FilmProfileData("agfa_vista_400", "Agfa Vista 400", FilmKind::ColorNegative, "Agfa", Some((1.15, 0.60, 0.44)), 1.17, 1.02),
+    FilmProfileData("cinestill_50d", "CineStill 50D", FilmKind::ColorNegative, "CineStill", Some((1.14, 0.61, 0.44)), 1.12, 1.04),
+    FilmProfileData("fuji_astia_100f", "Fuji Astia 100F", FilmKind::Slide, "Fuji", None, 1.02, 1.02),
+    FilmProfileData("kodachrome_25", "Kodachrome 25", FilmKind::Slide, "Kodak", None, 1.10, 0.98),
+    FilmProfileData("ilford_pan_f_plus", "Ilford Pan F Plus", FilmKind::BwNegative, "Ilford", None, 1.22, 1.02),
+    FilmProfileData("ilford_xp2_super", "Ilford XP2 Super", FilmKind::BwNegative, "Ilford", None, 1.18, 1.04),
+    FilmProfileData("fuji_neopan_400", "Fuji Neopan 400", FilmKind::BwNegative, "Fuji", None, 1.22, 1.03),
+];
 
 /// Built-in film catalog (≥50 profiles, matches open-scanline productive set).
 pub fn list_film_profiles() -> Vec<FilmProfile> {
-    vec![
-        cn(
-            "generic_color_negative",
-            "Generic Color Negative",
-            "Generic",
-            (1.15, 0.62, 0.45),
-            1.15,
-            1.0,
-        ),
-        cn(
-            "kodak_gold_200",
-            "Kodak Gold 200",
-            "Kodak",
-            (1.18, 0.60, 0.42),
-            1.12,
-            1.05,
-        ),
-        cn(
-            "kodak_gold_100",
-            "Kodak Gold 100",
-            "Kodak",
-            (1.16, 0.61, 0.44),
-            1.10,
-            1.04,
-        ),
-        cn(
-            "kodak_gold_400",
-            "Kodak Gold 400",
-            "Kodak",
-            (1.17, 0.59, 0.43),
-            1.14,
-            1.05,
-        ),
-        cn(
-            "kodak_portra_160",
-            "Kodak Portra 160",
-            "Kodak",
-            (1.11, 0.62, 0.47),
-            1.08,
-            1.08,
-        ),
-        cn(
-            "kodak_portra_400",
-            "Kodak Portra 400",
-            "Kodak",
-            (1.12, 0.61, 0.46),
-            1.10,
-            1.08,
-        ),
-        cn(
-            "kodak_portra_800",
-            "Kodak Portra 800",
-            "Kodak",
-            (1.13, 0.60, 0.45),
-            1.12,
-            1.06,
-        ),
-        cn(
-            "kodak_ektar_100",
-            "Kodak Ektar 100",
-            "Kodak",
-            (1.20, 0.60, 0.40),
-            1.20,
-            1.02,
-        ),
-        cn(
-            "kodak_colorplus_200",
-            "Kodak ColorPlus 200",
-            "Kodak",
-            (1.17, 0.59, 0.44),
-            1.14,
-            1.04,
-        ),
-        cn(
-            "kodak_ultramax_400",
-            "Kodak UltraMax 400",
-            "Kodak",
-            (1.16, 0.58, 0.43),
-            1.13,
-            1.06,
-        ),
-        cn(
-            "fuji_superia_100",
-            "Fuji Superia 100",
-            "Fuji",
-            (1.09, 0.64, 0.48),
-            1.10,
-            1.05,
-        ),
-        cn(
-            "fuji_superia_200",
-            "Fuji Superia 200",
-            "Fuji",
-            (1.10, 0.63, 0.47),
-            1.11,
-            1.05,
-        ),
-        cn(
-            "fuji_superia_400",
-            "Fuji Superia 400",
-            "Fuji",
-            (1.10, 0.63, 0.47),
-            1.12,
-            1.05,
-        ),
-        cn(
-            "fuji_pro_400h",
-            "Fuji Pro 400H",
-            "Fuji",
-            (1.08, 0.62, 0.48),
-            1.08,
-            1.10,
-        ),
-        cn(
-            "agfa_vista_200",
-            "Agfa Vista 200",
-            "Agfa",
-            (1.14, 0.61, 0.45),
-            1.16,
-            1.03,
-        ),
-        cn(
-            "cinestill_800t",
-            "CineStill 800T",
-            "CineStill",
-            (1.05, 0.58, 0.70),
-            1.18,
-            1.0,
-        ),
-        cn(
-            "lomography_color_400",
-            "Lomography Color 400",
-            "Lomography",
-            (1.17, 0.57, 0.41),
-            1.20,
-            1.0,
-        ),
-        cn(
-            "konica_centuria_200",
-            "Konica Centuria 200",
-            "Konica",
-            (1.14, 0.60, 0.44),
-            1.13,
-            1.04,
-        ),
-        cn(
-            "generic_consumer_cn",
-            "Generic Consumer Color Negative",
-            "Generic",
-            (1.16, 0.60, 0.44),
-            1.14,
-            1.04,
-        ),
-        cn(
-            "generic_portrait_cn",
-            "Generic Portrait Color Negative",
-            "Generic",
-            (1.11, 0.62, 0.47),
-            1.09,
-            1.08,
-        ),
-        sl("generic_slide", "Generic Slide", "Generic", 1.0, 1.0),
-        sl("fuji_velvia_50", "Fuji Velvia 50", "Fuji", 1.15, 0.95),
-        sl("fuji_velvia_100", "Fuji Velvia 100", "Fuji", 1.12, 0.97),
-        sl("fuji_provia_100f", "Fuji Provia 100F", "Fuji", 1.0, 1.0),
-        sl(
-            "kodak_ektachrome_e100",
-            "Kodak Ektachrome E100",
-            "Kodak",
-            1.05,
-            1.05,
-        ),
-        sl("kodachrome_64", "Kodachrome 64", "Kodak", 1.08, 1.0),
-        sl(
-            "agfa_ct_precisa_100",
-            "Agfa CT Precisa 100",
-            "Agfa",
-            1.06,
-            1.02,
-        ),
-        sl(
-            "generic_e6_slide",
-            "Generic E-6 Slide",
-            "Generic",
-            1.04,
-            1.02,
-        ),
-        bw(
-            "generic_bw_negative",
-            "Generic B&W Negative",
-            "Generic",
-            1.2,
-            1.0,
-        ),
-        bw("ilford_hp5_plus", "Ilford HP5 Plus", "Ilford", 1.25, 1.0),
-        bw("ilford_fp4_plus", "Ilford FP4 Plus", "Ilford", 1.15, 1.05),
-        bw("ilford_delta_100", "Ilford Delta 100", "Ilford", 1.28, 0.96),
-        bw("ilford_delta_400", "Ilford Delta 400", "Ilford", 1.30, 0.95),
-        bw("kodak_tri_x_400", "Kodak Tri-X 400", "Kodak", 1.28, 1.0),
-        bw("kodak_tmax_100", "Kodak T-Max 100", "Kodak", 1.30, 0.98),
-        bw("kodak_tmax_400", "Kodak T-Max 400", "Kodak", 1.35, 0.92),
-        bw("fuji_acros_100", "Fuji Acros 100", "Fuji", 1.24, 1.0),
-        bw("fomapan_100", "Fomapan 100", "Foma", 1.20, 1.02),
-        bw("fomapan_400", "Fomapan 400", "Foma", 1.24, 1.0),
-        bw("rolle_rp_x_400", "Rollei RPX 400", "Rollei", 1.26, 1.0),
-        // Extra entries for ≥50 catalog
-        cn(
-            "kodak_ultramax_800",
-            "Kodak UltraMax 800",
-            "Kodak",
-            (1.15, 0.57, 0.42),
-            1.16,
-            1.04,
-        ),
-        cn(
-            "fuji_superia_800",
-            "Fuji Superia 800",
-            "Fuji",
-            (1.11, 0.62, 0.46),
-            1.14,
-            1.04,
-        ),
-        cn(
-            "fuji_c200",
-            "Fuji C200",
-            "Fuji",
-            (1.09, 0.64, 0.48),
-            1.10,
-            1.06,
-        ),
-        cn(
-            "agfa_vista_100",
-            "Agfa Vista 100",
-            "Agfa",
-            (1.14, 0.61, 0.45),
-            1.14,
-            1.03,
-        ),
-        cn(
-            "agfa_vista_400",
-            "Agfa Vista 400",
-            "Agfa",
-            (1.15, 0.60, 0.44),
-            1.17,
-            1.02,
-        ),
-        cn(
-            "cinestill_50d",
-            "CineStill 50D",
-            "CineStill",
-            (1.14, 0.61, 0.44),
-            1.12,
-            1.04,
-        ),
-        sl("fuji_astia_100f", "Fuji Astia 100F", "Fuji", 1.02, 1.02),
-        sl("kodachrome_25", "Kodachrome 25", "Kodak", 1.10, 0.98),
-        bw(
-            "ilford_pan_f_plus",
-            "Ilford Pan F Plus",
-            "Ilford",
-            1.22,
-            1.02,
-        ),
-        bw("ilford_xp2_super", "Ilford XP2 Super", "Ilford", 1.18, 1.04),
-        bw("fuji_neopan_400", "Fuji Neopan 400", "Fuji", 1.22, 1.03),
-    ]
+    FILM_CATALOG
+        .iter()
+        .map(FilmProfileData::to_profile)
+        .collect()
 }
-
 pub fn get_film_profile(id: &str) -> Result<FilmProfile> {
     list_film_profiles()
         .into_iter()

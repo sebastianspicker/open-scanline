@@ -97,49 +97,112 @@ fn run_plugin_mode_inner_with_token(
     device: Option<&str>,
     cancellation: CancellationToken,
 ) -> Result<i32> {
-    if cancellation.is_cancelled() {
-        return Err(ScanError::Cancelled("plugin cancelled".into()));
-    }
+    check_plugin_cancellation(&cancellation)?;
     let mut status = plugin_status_with_cancellation(config_path, Some(&cancellation));
+    check_plugin_cancellation(&cancellation)?;
+    if let Some(scan) = optional_plugin_scan(config_path, out, device, &cancellation)? {
+        add_plugin_scan_status(&mut status, scan);
+    }
+    print_plugin_status(&status, quiet)?;
+    Ok(plugin_status_code(&status))
+}
+
+fn add_plugin_scan_status(status: &mut Value, scan: PluginScan) {
+    if let Some(obj) = status.as_object_mut() {
+        obj.insert("scanned".into(), json!(scan.path.display().to_string()));
+        obj.insert("bytes".into(), json!(scan.bytes));
+        obj.insert("device".into(), json!(scan.device));
+    }
+}
+
+fn print_plugin_status(status: &Value, quiet: bool) -> Result<()> {
+    if !quiet {
+        println!("{}", serde_json::to_string_pretty(status)?);
+    }
+    Ok(())
+}
+
+fn plugin_status_code(status: &Value) -> i32 {
+    if status.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        0
+    } else {
+        1
+    }
+}
+
+fn check_plugin_cancellation(cancellation: &CancellationToken) -> Result<()> {
     if cancellation.is_cancelled() {
         return Err(ScanError::Cancelled("plugin cancelled".into()));
     }
-    if let Some(out_path) = out {
-        let cfg = load_config(config_path)
-            .map_err(|error| ScanError::Other(format!("config load: {error}")))?;
-        let devices = list_all_devices_with_cancellation(Some(&cancellation));
-        if cancellation.is_cancelled() {
-            return Err(ScanError::Cancelled("plugin cancelled".into()));
-        }
-        let dev = device
-            .map(|s| s.to_string())
-            .or_else(|| devices.first().map(|d| d.id.clone()))
-            .unwrap_or_else(|| "mock".into());
-        let defaults = crate::workflows::settings::resolve_defaults(&cfg);
-        let path = run_scan_to_file_with_token(
-            ScanToFileArgs {
-                device: Some(dev.clone()),
-                out: out_path.to_path_buf(),
-                width: defaults.acquisition.width,
-                height: defaults.acquisition.height,
-                dpi: defaults.acquisition.dpi_x,
-                mode: defaults.acquisition.mode,
-                duplex: defaults.acquisition.duplex,
-                pipeline: defaults.processing,
-                ..ScanToFileArgs::default()
-            },
-            cancellation,
-        )?;
-        let bytes = std::fs::metadata(&path)?.len();
-        if let Some(obj) = status.as_object_mut() {
-            obj.insert("scanned".into(), json!(path.display().to_string()));
-            obj.insert("bytes".into(), json!(bytes));
-            obj.insert("device".into(), json!(dev));
-        }
+    Ok(())
+}
+
+struct PluginScan {
+    path: std::path::PathBuf,
+    bytes: u64,
+    device: String,
+}
+
+fn optional_plugin_scan(
+    config_path: Option<&Path>,
+    out: Option<&Path>,
+    device: Option<&str>,
+    cancellation: &CancellationToken,
+) -> Result<Option<PluginScan>> {
+    let Some(out_path) = out else {
+        return Ok(None);
+    };
+    perform_plugin_scan(config_path, out_path, device, cancellation).map(Some)
+}
+
+fn perform_plugin_scan(
+    config_path: Option<&Path>,
+    out_path: &Path,
+    device: Option<&str>,
+    cancellation: &CancellationToken,
+) -> Result<PluginScan> {
+    let cfg = load_config(config_path)
+        .map_err(|error| ScanError::Other(format!("config load: {error}")))?;
+    let devices = list_all_devices_with_cancellation(Some(cancellation));
+    check_plugin_cancellation(cancellation)?;
+    let device = selected_plugin_device(device, &devices);
+    let defaults = crate::workflows::settings::resolve_defaults(&cfg);
+    let path = run_scan_to_file_with_token(
+        plugin_scan_args(out_path, &device, defaults),
+        cancellation.clone(),
+    )?;
+    let bytes = std::fs::metadata(&path)?.len();
+    Ok(PluginScan {
+        path,
+        bytes,
+        device,
+    })
+}
+
+fn selected_plugin_device(
+    device: Option<&str>,
+    devices: &[crate::workflows::ports::acquisition::DeviceInfo],
+) -> String {
+    device
+        .map(str::to_owned)
+        .or_else(|| devices.first().map(|device| device.id.clone()))
+        .unwrap_or_else(|| "mock".into())
+}
+
+fn plugin_scan_args(
+    out_path: &Path,
+    device: &str,
+    defaults: crate::workflows::settings::ResolvedSettings,
+) -> ScanToFileArgs {
+    ScanToFileArgs {
+        device: Some(device.to_owned()),
+        out: out_path.to_path_buf(),
+        width: defaults.acquisition.width,
+        height: defaults.acquisition.height,
+        dpi: defaults.acquisition.dpi_x,
+        mode: defaults.acquisition.mode,
+        duplex: defaults.acquisition.duplex,
+        pipeline: defaults.processing,
+        ..ScanToFileArgs::default()
     }
-    if !quiet {
-        println!("{}", serde_json::to_string_pretty(&status)?);
-    }
-    let ok = status.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-    Ok(if ok { 0 } else { 1 })
 }

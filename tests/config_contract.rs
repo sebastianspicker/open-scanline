@@ -72,6 +72,21 @@ fn config_validation_rejects_unsafe_output_names_and_ocr_languages() {
     }
 }
 
+#[test]
+fn config_accepts_ocrs_only_with_its_supported_english_language() {
+    let mut supported = serde_json::to_value(AppConfig::default()).unwrap();
+    supported["ocr_engine"] = Value::String("ocrs".into());
+    assert_eq!(config_from_value(supported).unwrap().ocr_engine, "ocrs");
+
+    let mut unsupported = serde_json::to_value(AppConfig::default()).unwrap();
+    unsupported["ocr_engine"] = Value::String("ocrs".into());
+    unsupported["ocr_language"] = Value::String("deu".into());
+    assert!(matches!(
+        config_from_value(unsupported),
+        Err(ScanError::Invalid(_))
+    ));
+}
+
 struct ScratchDirectory(PathBuf);
 
 impl ScratchDirectory {

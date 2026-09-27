@@ -7,13 +7,15 @@
 use open_scanline::batch::{self, BatchScanArgs};
 use open_scanline::core::{ImageBuffer, PixelFormat, Result, ScanMode, ScanRequest};
 use open_scanline::device::{
-    AnySession, BackendInfo, CancellationToken, DeviceInfo, DeviceOpenPolicy, DeviceSession,
-    FileDeviceSession, MockDevice, MockDeviceSession, ScanPagesEnd, ScanPagesResult,
+    AnySession, BackendInfo, CancellationToken, DeviceInfo, DeviceMaintenanceCapabilities,
+    DeviceOpenPolicy, DeviceSession, FileDeviceSession, FocusCapability, MaintenanceAvailability,
+    MockDevice, MockDeviceSession, ScanPagesEnd, ScanPagesResult,
 };
 use open_scanline::export::{ExportOptions, OcrEngine};
 use open_scanline::imaging::{self, PdfOptions};
 use open_scanline::ml::{
     OnnxInferenceOptions, OnnxInputLayout, OnnxNormalization, OnnxOutputSummary, OnnxReport,
+    OnnxRuntime,
 };
 use open_scanline::packaging::PackagingOptions;
 use open_scanline::process::{self, ProcessOptions};
@@ -52,8 +54,7 @@ impl sane::ImageDecoder for InertDecoder {
     }
 }
 
-#[test]
-fn preserved_public_facades_remain_usable_by_external_callers() {
+fn assert_public_device_contract() {
     assert_device_session::<AnySession>();
     assert_device_session::<MockDeviceSession>();
     assert_device_session::<FileDeviceSession>();
@@ -76,6 +77,12 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
     };
     assert!(backend.available);
     assert_eq!(MockDevice::DEVICE_ID, "mock");
+    let simulated = DeviceMaintenanceCapabilities::simulated_point_focus();
+    assert!(matches!(
+        &simulated.calibration,
+        MaintenanceAvailability::Simulated
+    ));
+    assert!(matches!(&simulated.focus, FocusCapability::Point { .. }));
     assert_eq!(
         ScanPagesResult::limit_reached(2).end,
         ScanPagesEnd::LimitReached
@@ -84,7 +91,9 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         ScanPagesResult::feeder_exhausted(1).end,
         ScanPagesEnd::FeederExhausted
     );
+}
 
+fn public_image_and_request() -> (ImageBuffer, ScanRequest) {
     let image = ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![1, 2, 3])
         .expect("public image constructor accepts packed RGB data");
     let request = ScanRequest {
@@ -92,7 +101,10 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         ..ScanRequest::default()
     };
     assert_eq!(request.dpi_x, 150);
+    (image, request)
+}
 
+fn public_export_and_pdf_options() -> (ExportOptions, PdfOptions) {
     let export = ExportOptions {
         pdf_password: None,
         searchable_pdf: true,
@@ -101,6 +113,7 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         scanner_profile: None,
     };
     assert!(export.searchable_pdf);
+    let _: OcrEngine = OcrEngine::Ocrs;
     let pdf = PdfOptions {
         dpi: 150,
         title: "compatibility".into(),
@@ -108,7 +121,10 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         searchable_pages: None,
     };
     assert_eq!(pdf.dpi, 150);
+    (export, pdf)
+}
 
+fn assert_public_ml_contract(image: &ImageBuffer) {
     let onnx_options = OnnxInferenceOptions {
         input_name: Some("pixels".into()),
         layout: OnnxInputLayout::Nchw,
@@ -133,7 +149,19 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         }],
     };
     assert_eq!(report.as_dict()["input_name"], "pixels");
+    let ml_info = open_scanline::ml::ml_module_info();
+    assert_eq!(ml_info["explicit_worker_runtime"], true);
+    assert_eq!(ml_info["automatic_worker_discovery"], false);
+    let runtime: Result<OnnxRuntime> = OnnxRuntime::from_worker(Path::new("open-scanline"));
+    if false {
+        let runtime = runtime.expect("only type-check the public runtime API");
+        let _: Result<OnnxReport> = runtime.run(image, Path::new("model.onnx"));
+        let _: Result<OnnxReport> =
+            runtime.run_with_options(image, Path::new("model.onnx"), &onnx_options);
+    }
+}
 
+fn assert_public_request_types() {
     let package = PackagingOptions {
         binary: PathBuf::from("open-scanline"),
         out: PathBuf::from("open-scanline.zip"),
@@ -160,7 +188,15 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
     assert_eq!(scan_args.out, PathBuf::from("scan.png"));
     assert_eq!(batch_args.out_dir, PathBuf::from("pages"));
     assert_eq!(process_options.quality, Some(90));
+}
 
+fn assert_public_operation_signatures() {
+    assert_public_scan_signatures();
+    assert_public_batch_signatures();
+    assert_public_process_signatures();
+}
+
+fn assert_public_scan_signatures() {
     let _: fn(ScanToFileArgs) -> Result<PathBuf> = scan::run_scan_to_file;
     let _: fn(ScanToFileArgs, CancellationToken) -> Result<PathBuf> =
         scan::run_scan_to_file_with_token;
@@ -174,6 +210,9 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         CancellationToken,
         DeviceOpenPolicy,
     ) -> Result<PathBuf> = scan::run_scan_to_file_with_export_options_and_token_and_policy;
+}
+
+fn assert_public_batch_signatures() {
     let _: fn(BatchScanArgs) -> Result<Vec<PathBuf>> = batch::run_batch_scan;
     let _: fn(BatchScanArgs, CancellationToken) -> Result<Vec<PathBuf>> =
         batch::run_batch_scan_with_token;
@@ -192,6 +231,9 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         &ExportOptions,
         Option<&batch::BatchCancelCheck>,
     ) -> Result<Vec<PathBuf>> = batch::run_batch_scan_with_export_options_and_cancel;
+}
+
+fn assert_public_process_signatures() {
     let _: fn(&ProcessOptions) -> Result<PathBuf> = process::process_image_file;
     let _: fn(&ProcessOptions, CancellationToken) -> Result<PathBuf> =
         process::process_image_file_with_token;
@@ -199,7 +241,9 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         process::process_image_file_with_export_options;
     let _: fn(&ProcessOptions, &ExportOptions, CancellationToken) -> Result<PathBuf> =
         process::process_image_file_with_export_options_and_token;
+}
 
+fn assert_public_adapter_contracts(request: &ScanRequest) {
     let runner: Arc<dyn sane::CommandRunner> = Arc::new(InertRunner);
     let decoder: Arc<dyn sane::ImageDecoder> = Arc::new(InertDecoder);
     let sane_session = sane::SaneDeviceSession::new_with_adapters(
@@ -225,31 +269,45 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
         sane::scanimage_command(
             Path::new("scanimage"),
             "compat",
-            &request,
+            request,
             Path::new("scan.png")
         )
         .program,
         "scanimage"
     );
     assert!(
-        wia::wia_transfer_command("compat", &request, Path::new("scan.png"))
+        wia::wia_transfer_command("compat", request, Path::new("scan.png"))
             .args
             .iter()
             .any(|argument| argument == "-Command")
     );
+}
 
+fn assert_public_pdf_contract(image: ImageBuffer, pdf: &PdfOptions) {
     // These calls prove the public, generic PDF API without producing files.
     if false {
         let pages = vec![PathBuf::from("page.png")];
-        let _ = imaging::save_pdf_with_options(Path::new("out.pdf"), &[image], &pdf);
+        let _ = imaging::save_pdf_with_options(Path::new("out.pdf"), &[image], pdf);
         let _ = imaging::save_pdf_with_options_and_cancellation(
             Path::new("out.pdf"),
             &[],
-            &pdf,
+            pdf,
             Some(&CancellationToken::new()),
         );
-        let _ = imaging::save_multipage_pdf(&pages, Path::new("out.pdf"), &pdf);
+        let _ = imaging::save_multipage_pdf(&pages, Path::new("out.pdf"), pdf);
         let _ =
-            imaging::save_multipage_pdf_with_cancellation(&pages, Path::new("out.pdf"), &pdf, None);
+            imaging::save_multipage_pdf_with_cancellation(&pages, Path::new("out.pdf"), pdf, None);
     }
+}
+
+#[test]
+fn preserved_public_facades_remain_usable_by_external_callers() {
+    assert_public_device_contract();
+    let (image, request) = public_image_and_request();
+    let (_export, pdf) = public_export_and_pdf_options();
+    assert_public_ml_contract(&image);
+    assert_public_request_types();
+    assert_public_operation_signatures();
+    assert_public_adapter_contracts(&request);
+    assert_public_pdf_contract(image, &pdf);
 }

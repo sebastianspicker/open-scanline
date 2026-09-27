@@ -3,7 +3,59 @@
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
 use crate::workflows::operation::CancellationToken;
+use crate::workflows::publication::OcrEngine;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// Prepared image adjustment owned by an infrastructure adapter.
+pub(crate) trait ImageTransform: Send + Sync {
+    fn apply_owned(&self, image: ImageBuffer) -> Result<ImageBuffer>;
+}
+
+/// One export-scoped OCR executor. Implementations may lazily prepare native
+/// engine state and reuse it across all pages in the export.
+pub(crate) trait OcrJob: Send + Sync {
+    fn recognize(
+        &self,
+        image: &ImageBuffer,
+        language: &str,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<String>;
+}
+
+/// Private document-publication session used when a batch requests several
+/// aggregate derivatives from the same already-published pages.
+pub(crate) trait AggregateMediaSession {
+    fn publish_pdf(&mut self, request: PdfPathPublication<'_>) -> Result<PathBuf>;
+
+    fn publish_tiff(
+        &mut self,
+        paths: &[PathBuf],
+        destination: &Path,
+        dpi: Option<u32>,
+        transform: Option<&dyn ImageTransform>,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<PathBuf>;
+
+    fn publish_contact_sheet(
+        &mut self,
+        paths: &[PathBuf],
+        destination: &Path,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<PathBuf>;
+}
+
+/// Internal request for assembling a PDF from already-published pages.
+pub(crate) struct PdfPathPublication<'a> {
+    pub(crate) paths: &'a [PathBuf],
+    pub(crate) destination: &'a Path,
+    pub(crate) dpi: u32,
+    pub(crate) title: &'a str,
+    pub(crate) password: Option<&'a str>,
+    pub(crate) searchable_pages: Option<Vec<String>>,
+    pub(crate) transform: Option<&'a dyn ImageTransform>,
+    pub(crate) cancellation: Option<&'a CancellationToken>,
+}
 
 /// The media operations that workflows need as one coherent boundary.
 ///
@@ -28,6 +80,30 @@ pub trait MediaPort: Send + Sync {
     /// Load and validate a scanner profile at the application boundary.
     fn load_scanner_profile(&self, source: &Path) -> Result<serde_json::Value>;
 
+    /// Prepare a reusable typed profile. Legacy adapters may keep using the
+    /// JSON application hook by accepting this default.
+    fn prepare_scanner_profile(
+        &self,
+        _profile: &serde_json::Value,
+    ) -> Result<Option<Arc<dyn ImageTransform>>> {
+        Ok(None)
+    }
+
+    /// Prepare private OCR state once for an export. Adapters that do not
+    /// provide a job retain the legacy per-call `recognize` behavior.
+    fn prepare_ocr_job(&self, _engine: OcrEngine) -> Result<Option<Arc<dyn OcrJob>>> {
+        Ok(None)
+    }
+
+    /// Begin a shared decoded-page session for aggregate outputs. The default
+    /// preserves existing adapters and their publication call ordering.
+    fn begin_aggregate_session(
+        &self,
+        _paths: &[PathBuf],
+    ) -> Result<Option<Box<dyn AggregateMediaSession + '_>>> {
+        Ok(None)
+    }
+
     /// Reject passwords the PDF backend cannot safely encode.
     fn validate_pdf_password(&self, password: &str) -> Result<()>;
 
@@ -41,7 +117,7 @@ pub trait MediaPort: Send + Sync {
         &self,
         image: &ImageBuffer,
         language: &str,
-        offline: bool,
+        engine: OcrEngine,
         cancellation: Option<&CancellationToken>,
     ) -> Result<String>;
 
@@ -85,18 +161,7 @@ pub trait MediaPort: Send + Sync {
     ) -> Result<PathBuf>;
 
     /// Assemble a PDF from already-published pages.
-    #[allow(clippy::too_many_arguments)]
-    fn publish_pdf_from_paths(
-        &self,
-        paths: &[PathBuf],
-        destination: &Path,
-        dpi: u32,
-        title: &str,
-        password: Option<&str>,
-        searchable_pages: Option<Vec<String>>,
-        profile: Option<&serde_json::Value>,
-        cancellation: Option<&CancellationToken>,
-    ) -> Result<PathBuf>;
+    fn publish_pdf_from_paths(&self, request: PdfPathPublication<'_>) -> Result<PathBuf>;
 
     /// Assemble TIFF pages, optionally applying a scanner profile as pages load.
     fn publish_tiff_from_paths(
@@ -104,7 +169,7 @@ pub trait MediaPort: Send + Sync {
         paths: &[PathBuf],
         destination: &Path,
         dpi: Option<u32>,
-        profile: Option<&serde_json::Value>,
+        transform: Option<&dyn ImageTransform>,
         cancellation: Option<&CancellationToken>,
     ) -> Result<PathBuf>;
 

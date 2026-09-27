@@ -1,10 +1,14 @@
 //! Native image, profile, OCR, and document-media integrations.
 
+mod aggregate_cache;
+#[cfg(test)]
+mod aggregate_integration_tests;
 mod codecs;
 pub mod icc;
 mod multipage;
 pub mod ocr;
 mod pdf;
+mod pixels;
 mod preview;
 mod tiff;
 
@@ -49,6 +53,84 @@ pub fn convert_image_with_cancellation(
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NativeMedia;
 
+struct NativeAggregateSession {
+    loader: aggregate_cache::SharedPageLoader,
+}
+
+impl crate::workflows::ports::media::AggregateMediaSession for NativeAggregateSession {
+    fn publish_pdf(
+        &mut self,
+        request: crate::workflows::ports::media::PdfPathPublication<'_>,
+    ) -> crate::error::Result<std::path::PathBuf> {
+        let crate::workflows::ports::media::PdfPathPublication {
+            paths,
+            destination,
+            dpi,
+            title,
+            password,
+            searchable_pages,
+            transform,
+            cancellation,
+        } = request;
+        let options = PdfOptions {
+            dpi,
+            title: title.into(),
+            password: password.map(str::to_owned),
+            searchable_pages,
+        };
+        pdf::save_pdf_from_paths_with_loader_and_transform(
+            paths,
+            destination,
+            &options,
+            |path| self.loader.load(path, cancellation),
+            |image| match transform {
+                Some(transform) => transform.apply_owned(image),
+                None => Ok(image),
+            },
+            cancellation,
+        )
+    }
+
+    fn publish_tiff(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        destination: &std::path::Path,
+        dpi: Option<u32>,
+        transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
+        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+    ) -> crate::error::Result<std::path::PathBuf> {
+        tiff::save_multipage_tiff_with_loader_and_transform(
+            paths,
+            destination,
+            dpi,
+            |path| self.loader.load(path, cancellation),
+            |image| match transform {
+                Some(transform) => transform.apply_owned(image),
+                None => Ok(image),
+            },
+            cancellation,
+        )
+    }
+
+    fn publish_contact_sheet(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        destination: &std::path::Path,
+        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+    ) -> crate::error::Result<std::path::PathBuf> {
+        multipage::save_index_contact_sheet_with_loader(
+            paths,
+            destination,
+            4,
+            160,
+            None,
+            4,
+            |path| self.loader.load(path, cancellation),
+            cancellation,
+        )
+    }
+}
+
 impl crate::workflows::ports::media::MediaPort for NativeMedia {
     fn validate_output_leaf(
         &self,
@@ -89,6 +171,36 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         load_scanner_profile(source)
     }
 
+    fn prepare_scanner_profile(
+        &self,
+        profile: &serde_json::Value,
+    ) -> crate::error::Result<
+        Option<std::sync::Arc<dyn crate::workflows::ports::media::ImageTransform>>,
+    > {
+        Ok(Some(std::sync::Arc::new(icc::prepare_scanner_profile(
+            profile,
+        )?)))
+    }
+
+    fn prepare_ocr_job(
+        &self,
+        engine: crate::workflows::publication::OcrEngine,
+    ) -> crate::error::Result<Option<std::sync::Arc<dyn crate::workflows::ports::media::OcrJob>>>
+    {
+        ocr::prepare_job(engine).map(Some)
+    }
+
+    fn begin_aggregate_session(
+        &self,
+        _paths: &[std::path::PathBuf],
+    ) -> crate::error::Result<
+        Option<Box<dyn crate::workflows::ports::media::AggregateMediaSession + '_>>,
+    > {
+        Ok(Some(Box::new(NativeAggregateSession {
+            loader: aggregate_cache::SharedPageLoader::new(),
+        })))
+    }
+
     fn validate_pdf_password(&self, password: &str) -> crate::error::Result<()> {
         validate_pdf_password(password)
     }
@@ -108,10 +220,10 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         &self,
         image: &crate::domain::image::ImageBuffer,
         language: &str,
-        offline: bool,
+        engine: crate::workflows::publication::OcrEngine,
         cancellation: Option<&crate::workflows::operation::CancellationToken>,
     ) -> crate::error::Result<String> {
-        Ok(ocr_image_with_cancellation(image, language, offline, cancellation)?.text)
+        Ok(ocr_image_with_engine_with_cancellation(image, language, engine, cancellation)?.text)
     }
 
     fn publish_page(
@@ -168,30 +280,33 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn publish_pdf_from_paths(
         &self,
-        paths: &[std::path::PathBuf],
-        destination: &std::path::Path,
-        dpi: u32,
-        title: &str,
-        password: Option<&str>,
-        searchable_pages: Option<Vec<String>>,
-        profile: Option<&serde_json::Value>,
-        cancellation: Option<&crate::workflows::operation::CancellationToken>,
+        request: crate::workflows::ports::media::PdfPathPublication<'_>,
     ) -> crate::error::Result<std::path::PathBuf> {
+        let crate::workflows::ports::media::PdfPathPublication {
+            paths,
+            destination,
+            dpi,
+            title,
+            password,
+            searchable_pages,
+            transform,
+            cancellation,
+        } = request;
         let options = PdfOptions {
             dpi,
             title: title.into(),
             password: password.map(str::to_owned),
             searchable_pages,
         };
-        match profile {
-            Some(profile) => save_pdf_from_paths_with_options_and_transform_and_cancellation(
+        match transform {
+            Some(transform) => pdf::save_pdf_from_paths_with_loader_and_transform(
                 paths,
                 destination,
                 &options,
-                |image| apply_scanner_profile(image, profile),
+                |path| load_image(path),
+                |image| transform.apply_owned(image),
                 cancellation,
             ),
             None => save_pdf_from_paths_with_options_and_cancellation(
@@ -208,15 +323,16 @@ impl crate::workflows::ports::media::MediaPort for NativeMedia {
         paths: &[std::path::PathBuf],
         destination: &std::path::Path,
         dpi: Option<u32>,
-        profile: Option<&serde_json::Value>,
+        transform: Option<&dyn crate::workflows::ports::media::ImageTransform>,
         cancellation: Option<&crate::workflows::operation::CancellationToken>,
     ) -> crate::error::Result<std::path::PathBuf> {
-        match profile {
-            Some(profile) => save_multipage_tiff_from_paths_with_transform_and_cancellation(
+        match transform {
+            Some(transform) => tiff::save_multipage_tiff_with_loader_and_transform(
                 paths,
                 destination,
                 dpi,
-                |image| apply_scanner_profile(image, profile),
+                |path| load_image(path),
+                |image| transform.apply_owned(image),
                 cancellation,
             ),
             None => save_multipage_tiff_with_cancellation(paths, destination, dpi, cancellation),

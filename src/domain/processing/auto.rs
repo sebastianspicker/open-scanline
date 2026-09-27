@@ -86,8 +86,20 @@ pub fn detect_orientation(image: &ImageBuffer) -> Result<OrientationResult> {
             method: "too-small".into(),
         });
     }
-    let mut gx_sum = 0_u64;
-    let mut gy_sum = 0_u64;
+    let (gx_sum, gy_sum) = gradient_energy(width, height, &gray);
+    let (degrees, confidence) = primary_orientation(gx_sum, gy_sum);
+    let (degrees, confidence) =
+        refine_horizontal_orientation(width, height, &gray, degrees, confidence);
+    Ok(OrientationResult {
+        degrees,
+        confidence: confidence.min(1.0),
+        method: "gradient-energy".into(),
+    })
+}
+
+fn gradient_energy(width: u32, height: u32, gray: &[u8]) -> (u64, u64) {
+    let mut gx_sum = 0;
+    let mut gy_sum = 0;
     for y in 1..height as usize - 1 {
         for x in 1..width as usize - 1 {
             let index = y * width as usize + x;
@@ -96,36 +108,45 @@ pub fn detect_orientation(image: &ImageBuffer) -> Result<OrientationResult> {
                 .unsigned_abs() as u64;
         }
     }
+    (gx_sum, gy_sum)
+}
+
+fn primary_orientation(gx_sum: u64, gy_sum: u64) -> (i32, f64) {
     let total = gx_sum + gy_sum + 1;
     let horizontal = gx_sum as f64 / total as f64;
     let vertical = gy_sum as f64 / total as f64;
-    let (mut degrees, mut confidence) = if horizontal >= vertical {
+    if horizontal >= vertical {
         (0, horizontal)
     } else {
         (90, vertical)
-    };
-    if degrees == 0 {
-        let top = gray[..width as usize]
-            .iter()
-            .map(|&value| value as f64)
-            .sum::<f64>()
-            / width as f64;
-        let bottom_start = ((height - 1) * width) as usize;
-        let bottom = gray[bottom_start..bottom_start + width as usize]
-            .iter()
-            .map(|&value| value as f64)
-            .sum::<f64>()
-            / width as f64;
-        if top < bottom - 8.0 {
-            degrees = 180;
-            confidence = (confidence + 0.1).min(1.0);
-        }
     }
-    Ok(OrientationResult {
-        degrees,
-        confidence: confidence.min(1.0),
-        method: "gradient-energy".into(),
-    })
+}
+
+fn refine_horizontal_orientation(
+    width: u32,
+    height: u32,
+    gray: &[u8],
+    degrees: i32,
+    confidence: f64,
+) -> (i32, f64) {
+    if degrees != 0 {
+        return (degrees, confidence);
+    }
+    let top = row_average(gray, 0, width);
+    let bottom = row_average(gray, height - 1, width);
+    if top < bottom - 8.0 {
+        return (180, (confidence + 0.1).min(1.0));
+    }
+    (degrees, confidence)
+}
+
+fn row_average(gray: &[u8], row: u32, width: u32) -> f64 {
+    let start = (row * width) as usize;
+    gray[start..start + width as usize]
+        .iter()
+        .map(|&value| value as f64)
+        .sum::<f64>()
+        / width as f64
 }
 
 pub fn apply_orientation(image: &ImageBuffer) -> Result<ImageBuffer> {
