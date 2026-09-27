@@ -64,14 +64,18 @@ GUI, diagnostics, plugin mode, host integration, and UI translations (loaded fro
 session or publishes output through more than one adapter. It may call
 infrastructure directly only for single-step capabilities listed in
 `scripts/check_architecture.py` (device inventory, config persistence, platform
-information, packaging, single-file convert, OCR and ONNX command entries).
+information, packaging, single-file convert, single-image OCR and the OCRS
+model pack, and the ONNX command entries).
 
 `src/error.rs` (`ScanError`) and `src/operation.rs` (`CancellationToken`) are
 shared by every layer.
 
 There are no traits whose only purpose is to separate layers. `DeviceSession` is a
 trait because five backends implement it and library callers may implement it
-too; everything else is a concrete type or function.
+too. The remaining traits are injection seams for a process or engine that
+tests replace: `CommandRunner` and `ImageDecoder` (SANE/WIA commands and
+artifact decoding), `OcrsRunner`, and `ModelPairValidator`. Everything else is a
+concrete type or function.
 
 ## State and data flow
 

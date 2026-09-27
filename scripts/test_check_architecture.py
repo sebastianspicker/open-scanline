@@ -79,6 +79,16 @@ class ArchitectureTests(unittest.TestCase):
             True,
             "src/inbound/x.rs",
         )
+        self.check(
+            "let ok = crate::infrastructure::acquisition::sane::available();",
+            False,
+            "src/inbound/x.rs",
+        )
+        self.check(
+            "use crate::infrastructure::acquisition::sane::SaneDeviceSession;",
+            True,
+            "src/inbound/x.rs",
+        )
 
     def test_facade_modules_may_only_re_export(self):
         self.check("pub fn x() {}", True, "src/pipeline.rs")

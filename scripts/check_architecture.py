@@ -13,13 +13,12 @@ FACADES = set(
 )
 LAYERS = set("domain error inbound infrastructure operation workflows".split())
 
-# Inbound may reach `crate::infrastructure::<...>` only through these
-# `(module, name)` prefixes. Anything that opens an acquisition session and
-# acts on it, or assembles output through more than one media adapter, is a
-# workflow use case and must be called through `crate::workflows::*`
-# instead, even though `infrastructure` itself is not a forbidden root for
-# `src/inbound/`. See docs/architecture.md and the task handoff for the
-# one-line justification behind each entry.
+# Inbound may reach `crate::infrastructure::<...>` only through these path
+# prefixes (segments after `infrastructure`), each naming a single-step
+# capability. Anything that opens an acquisition session and acts on it, or
+# assembles output through more than one media adapter, is a workflow use
+# case and must be called through `crate::workflows::*`. See
+# docs/architecture.md.
 INBOUND_INFRASTRUCTURE_ALLOWLIST = {
     # Device inventory/capability snapshots for the GUI device picker and
     # CLI `devices`/`info` output. Opening a session to scan, batch, or run
@@ -33,8 +32,8 @@ INBOUND_INFRASTRUCTURE_ALLOWLIST = {
     ("acquisition", "DeviceInfo"),
     ("acquisition", "DeviceMaintenanceCapabilities"),
     ("acquisition", "ScanPagesEnd"),
-    ("acquisition", "sane"),
-    ("acquisition", "wia"),
+    ("acquisition", "sane", "available"),
+    ("acquisition", "wia", "available"),
     # Config JSON persistence and the AppConfig value type: CLI `config`
     # subcommands and GUI settings load/save.
     ("config", "json"),
@@ -57,7 +56,13 @@ INBOUND_INFRASTRUCTURE_ALLOWLIST = {
     ("media", "image_buffer_to_rgba"),
     ("media", "save_image"),
     ("media", "supported_extensions"),
-    ("media", "ocr"),
+    # OCR command entries, GUI OCR of one loaded image, and the OCRS
+    # model-pack install/status commands.
+    ("media", "ocr", "ocr_module_info"),
+    ("media", "ocr", "ocr_file_with_engine_with_cancellation"),
+    ("media", "ocr", "ocr_image_with_engine_with_cancellation"),
+    ("media", "ocr", "OFFLINE_OCR_ENGINE"),
+    ("media", "ocr", "model_pack"),
     # ONNX inference CLI entry points, including the hidden `__onnx-worker`
     # subprocess re-entry point.
     ("onnx", "run_isolated_onnx_with_executable"),
@@ -84,7 +89,10 @@ def inbound_infrastructure_violation(path, segments):
     """`segments` is `("infrastructure", ...)`; check its allowlist prefix."""
     if not path.startswith("src/inbound/"):
         return False
-    return tuple(segments[1:3]) not in INBOUND_INFRASTRUCTURE_ALLOWLIST
+    target = tuple(segments[1:])
+    return not any(
+        target[: len(prefix)] == prefix for prefix in INBOUND_INFRASTRUCTURE_ALLOWLIST
+    )
 
 
 def expression_dependency(items, index):
