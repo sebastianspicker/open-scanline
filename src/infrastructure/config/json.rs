@@ -120,7 +120,7 @@ fn validate_config_formats(config: &AppConfig) -> Result<()> {
     validate_config_choice(
         "OCR engine",
         &config.ocr_engine,
-        &["offline", "ocrs", "tesseract"],
+        &crate::domain::export::OcrEngine::NAMES,
     )?;
     validate_ocr_language(&config.ocr_language)?;
     if config.ocr_engine.eq_ignore_ascii_case("ocrs") && config.ocr_language != "eng" {

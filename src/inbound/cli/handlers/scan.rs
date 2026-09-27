@@ -236,32 +236,16 @@ fn apply_filter_overrides(pipeline: &mut PipelinePrefs, overrides: &FilterOverri
 }
 
 fn apply_enabled_tier(target: &mut Option<String>, value: Option<&str>) {
-    let Some(value) = value else {
-        return;
-    };
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    if matches!(
-        value.to_ascii_lowercase().as_str(),
-        "off" | "none" | "false"
-    ) {
-        *target = None;
-    } else {
-        *target = Some(value.to_string());
+    if let Some(effective) =
+        crate::domain::settings::override_disableable_setting(value, &["false"])
+    {
+        *target = effective;
     }
 }
 
 fn apply_optional_value(target: &mut Option<String>, value: Option<&str>) {
-    let Some(value) = value else {
-        return;
-    };
-    let value = value.trim();
-    if matches!(value.to_ascii_lowercase().as_str(), "off" | "none") {
-        *target = None;
-    } else if !value.is_empty() {
-        *target = Some(value.to_string());
+    if let Some(effective) = crate::domain::settings::override_disableable_setting(value, &[]) {
+        *target = effective;
     }
 }
 

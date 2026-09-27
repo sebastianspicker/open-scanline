@@ -13,6 +13,64 @@ FACADES = set(
 )
 LAYERS = set("domain error inbound infrastructure operation workflows".split())
 
+# Inbound may reach `crate::infrastructure::<...>` only through these
+# `(module, name)` prefixes. Anything that opens an acquisition session and
+# acts on it, or assembles output through more than one media adapter, is a
+# workflow use case and must be called through `crate::workflows::*`
+# instead, even though `infrastructure` itself is not a forbidden root for
+# `src/inbound/`. See docs/architecture.md and the task handoff for the
+# one-line justification behind each entry.
+INBOUND_INFRASTRUCTURE_ALLOWLIST = {
+    # Device inventory/capability snapshots for the GUI device picker and
+    # CLI `devices`/`info` output. Opening a session to scan, batch, or run
+    # a maintenance action stays behind workflows::capture / ::maintenance.
+    ("acquisition", "list_all_devices"),
+    ("acquisition", "list_all_devices_with_cancellation"),
+    ("acquisition", "list_backends"),
+    ("acquisition", "list_backends_with_cancellation"),
+    ("acquisition", "find_scanners_with_cancellation"),
+    ("acquisition", "maintenance_capabilities_with_cancellation"),
+    ("acquisition", "DeviceInfo"),
+    ("acquisition", "DeviceMaintenanceCapabilities"),
+    ("acquisition", "ScanPagesEnd"),
+    ("acquisition", "sane"),
+    ("acquisition", "wia"),
+    # Config JSON persistence and the AppConfig value type: CLI `config`
+    # subcommands and GUI settings load/save.
+    ("config", "json"),
+    ("config", "AppConfig"),
+    # Read-only runtime platform diagnostics, headless availability probes,
+    # and the RAII temporary-file value type GUI jobs stage working images
+    # in; none of these compose more than one adapter.
+    ("runtime", "platform"),
+    ("runtime", "availability_probe_succeeds"),
+    ("runtime", "CommandSpec"),
+    ("runtime", "TemporaryOutput"),
+    # Distribution packaging for `open-scanline package`.
+    ("distribution", "build_portable"),
+    ("distribution", "PackagingOptions"),
+    # Single-adapter media convert/codec/profile helpers for CLI `convert`,
+    # GUI open/preview, and scanner-profile capture. Multi-adapter output
+    # (multipage/PDF assembly, ICC-profile-aware publication) stays in
+    # workflows::publication.
+    ("media", "convert_image_with_cancellation"),
+    ("media", "load_image"),
+    ("media", "image_buffer_to_rgba"),
+    ("media", "save_image"),
+    ("media", "supported_extensions"),
+    ("media", "make_it8_target_image"),
+    ("media", "profile_scanner_it8"),
+    ("media", "save_profile_json"),
+    ("media", "ocr"),
+    # ONNX inference CLI entry points, including the hidden `__onnx-worker`
+    # subprocess re-entry point.
+    ("onnx", "run_isolated_onnx_with_executable"),
+    ("onnx", "run_onnx_worker"),
+    ("onnx", "OnnxInferenceOptions"),
+    ("onnx", "OnnxInputLayout"),
+    ("onnx", "OnnxNormalization"),
+}
+
 
 def forbidden_roots(path):
     if path.startswith("src/domain/"):
@@ -24,6 +82,13 @@ def forbidden_roots(path):
     if path.startswith("src/inbound/"):
         return FACADES
     return set()
+
+
+def inbound_infrastructure_violation(path, segments):
+    """`segments` is `("infrastructure", ...)`; check its allowlist prefix."""
+    if not path.startswith("src/inbound/"):
+        return False
+    return tuple(segments[1:3]) not in INBOUND_INFRASTRUCTURE_ALLOWLIST
 
 
 def expression_dependency(items, index):
@@ -56,11 +121,17 @@ def dependencies(items):
     """Include expression paths as well as grouped, multiline use trees."""
     roots = crate_aliases(items)
     normalized = [("crate" if word in roots else word, pos) for word, pos in items]
+    previous = None
     for index, (token, offset) in enumerate(items):
-        if token in roots:
+        # A root token that heads a `use` path is fully handled by
+        # `import_dependencies` below; also walking it as a bare expression
+        # path would naively swallow a following group's `{` as a fake path
+        # segment (e.g. `use crate::infrastructure::acquisition::{...}`).
+        if token in roots and previous != "use":
             yield from expression_dependency(items, index)
         elif token == "use":
             yield from import_dependencies(normalized, index + 1, offset)
+        previous = token
 
 
 def is_facade_path(path):
@@ -88,6 +159,14 @@ def violations(path, source):
     forbidden = forbidden_roots(path)
     seen = set()
     for root, offset, segments in dependencies(items):
+        if root == "infrastructure" and inbound_infrastructure_violation(path, segments):
+            if (root, offset) in seen:
+                continue
+            seen.add((root, offset))
+            line = source.count("\n", 0, offset) + 1
+            dotted = "::".join(segments)
+            yield f"{path}:{line}: inbound import outside the infrastructure allowlist: crate::{dotted}"
+            continue
         if root not in forbidden:
             continue
         if (root, offset) in seen:

@@ -31,15 +31,15 @@ impl GuiState {
             sharpen_amount: self.sharpen_amount,
             invert: self.invert_colors,
             auto_levels: self.auto_levels,
-            infrared_clean: (self.infrared_clean != "off").then(|| self.infrared_clean.clone()),
+            infrared_clean: disabled_tier_or(&self.infrared_clean),
             descreen: self.descreen,
             descreen_dpi: self.descreen_dpi,
             restore_colors: self.restore_colors,
             restore_fading: self.restore_fading,
-            grain_reduction: (self.grain_reduction != "off").then(|| self.grain_reduction.clone()),
+            grain_reduction: disabled_tier_or(&self.grain_reduction),
             flatten: self.flatten,
             hole_punch: self.hole_punch,
-            colorize_mode: (self.colorize_mode != "off").then(|| self.colorize_mode.clone()),
+            colorize_mode: disabled_value_or(&self.colorize_mode),
             film_type: (!self.film_type.trim().is_empty()).then(|| self.film_type.clone()),
         }
     }

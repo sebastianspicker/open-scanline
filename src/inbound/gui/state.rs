@@ -4,8 +4,8 @@ use crate::domain::export::{ExportOptions, OcrEngine};
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
 use crate::domain::settings::{
-    format_curve_points, parse_curve_points, validate_hue, validate_output_name,
-    validate_saturation,
+    disabled_tier_or, disabled_value_or, format_curve_points, parse_curve_points, validate_hue,
+    validate_output_name, validate_saturation,
 };
 use crate::error::Result;
 use crate::inbound::i18n::Translator;
@@ -284,11 +284,12 @@ fn nonempty_or(value: &str, fallback: &str) -> String {
 }
 
 fn ocr_engine(value: &str) -> String {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "ocrs" => "ocrs".into(),
-        "tesseract" => "tesseract".into(),
-        _ => "offline".into(),
-    }
+    value
+        .trim()
+        .parse::<OcrEngine>()
+        .unwrap_or(OcrEngine::Offline)
+        .as_str()
+        .into()
 }
 
 fn multipage_format(value: &str) -> String {

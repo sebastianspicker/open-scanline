@@ -286,6 +286,9 @@ fn render_output_tab(ui: &mut egui::Ui, state: &mut super::super::state::GuiStat
     ui.text_edit_singleline(&mut state.output_name);
     ui.label(state.translator.t("output.format"));
     ui.horizontal(|ui| {
+        // Deliberately narrower than `infrastructure::media::supported_extensions()`:
+        // this is a canonical-extension picker, so alias spellings ("jpeg",
+        // "tiff") that `normalize_image_ext` maps onto these are left out.
         for format in ["png", "jpg", "tif", "webp", "bmp", "gif", "pdf", "jxl"] {
             ui.selectable_value(&mut state.output_fmt, format.into(), format);
         }

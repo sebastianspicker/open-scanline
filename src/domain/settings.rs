@@ -207,6 +207,54 @@ pub(crate) fn validate_ocr_language(language: &str) -> Result<()> {
     Ok(())
 }
 
+/// Fold a settings string's case-insensitive, trimmed "off"/"none" (and any
+/// `extra_sentinels`) disable spellings to `None`; other non-empty text
+/// becomes `Some(trimmed value)`. Shared by CLI override parsing and GUI
+/// pipeline preference derivation so "disabled" has one spelling rule.
+fn disabled_or(value: &str, extra_sentinels: &[&str]) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "off" || lower == "none" || extra_sentinels.contains(&lower.as_str()) {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// GUI pipeline preference derivation for tier-style controls (dust
+/// removal, grain reduction) that also accept "false" as a synonym for
+/// "off". A mandatory settings string is always present, so this only folds
+/// the disable sentinel to `None`.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn disabled_tier_or(value: &str) -> Option<String> {
+    disabled_or(value, &["false"])
+}
+
+/// GUI pipeline preference derivation for plain named-value controls
+/// (colorize mode) that only recognize "off"/"none" as the disable sentinel.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn disabled_value_or(value: &str) -> Option<String> {
+    disabled_or(value, &[])
+}
+
+/// CLI override parsing: `None` means "the flag was not given, leave the
+/// target untouched"; `Some(None)` is an explicit disable; `Some(Some(_))`
+/// is an explicit value. `extra_sentinels` widens the disable spelling for
+/// tier-style overrides that also accept "false".
+pub fn override_disableable_setting(
+    value: Option<&str>,
+    extra_sentinels: &[&str],
+) -> Option<Option<String>> {
+    let value = value?;
+    if value.trim().is_empty() {
+        return None;
+    }
+    Some(disabled_or(value, extra_sentinels))
+}
+
 /// Return true if the key is banned (activation / license / serial / DRM).
 pub fn is_banned_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();

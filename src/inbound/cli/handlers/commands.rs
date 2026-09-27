@@ -19,7 +19,9 @@ use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
 use crate::operation::CancellationToken;
-use crate::workflows::capture::batch::{self, BatchCaptureOptions, BatchScanArgs};
+use crate::workflows::capture::batch::{
+    self, plan_batch_outputs, BatchCaptureOptions, BatchOutputRequest, BatchScanArgs,
+};
 use std::path::{Path, PathBuf};
 
 pub(super) fn devices() -> i32 {
@@ -376,48 +378,26 @@ impl BatchRequest {
             .format
             .clone()
             .unwrap_or_else(|| config.output_format.clone());
-        BatchOutputTargets {
-            page_format: page_format(&configured_format),
-            multipage_out: self.multipage_output(config, &configured_format),
-            contact_sheet: self.contact_sheet_output(config),
-        }
-    }
-
-    fn multipage_output(&self, config: &AppConfig, configured_format: &str) -> Option<PathBuf> {
-        if self.multipage_out.is_some()
+        let has_explicit_multipage = self.multipage_out.is_some()
             || self.multipage_pdf.is_some()
-            || self.multipage_tiff.is_some()
-        {
-            return self.multipage_out.clone();
+            || self.multipage_tiff.is_some();
+        let plan = plan_batch_outputs(BatchOutputRequest {
+            out_dir: &self.out_dir,
+            output_name: &config.output_name,
+            configured_format: &configured_format,
+            want_multipage: config.multipage,
+            multipage_format: &config.multipage_format,
+            want_contact_sheet: config.contact_sheet,
+        });
+        BatchOutputTargets {
+            page_format: plan.page_format,
+            multipage_out: if has_explicit_multipage {
+                self.multipage_out.clone()
+            } else {
+                plan.multipage_out
+            },
+            contact_sheet: self.contact_sheet.clone().or(plan.contact_sheet),
         }
-        let format = if configured_format.eq_ignore_ascii_case("pdf") {
-            Some("pdf")
-        } else if config.multipage {
-            Some(config.multipage_format.as_str())
-        } else {
-            None
-        }?;
-        Some(
-            self.out_dir
-                .join(format!("{}_multipage.{}", config.output_name, format)),
-        )
-    }
-
-    fn contact_sheet_output(&self, config: &AppConfig) -> Option<PathBuf> {
-        self.contact_sheet.clone().or_else(|| {
-            config.contact_sheet.then(|| {
-                self.out_dir
-                    .join(format!("{}_contact.bmp", config.output_name))
-            })
-        })
-    }
-}
-
-fn page_format(configured_format: &str) -> String {
-    if configured_format.eq_ignore_ascii_case("pdf") {
-        "png".to_string()
-    } else {
-        configured_format.to_owned()
     }
 }
 

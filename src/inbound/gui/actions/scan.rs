@@ -1,31 +1,10 @@
 use super::super::state::GuiState;
 use crate::workflows::capture::single::ScanToFileArgs;
-use crate::workflows::compat::run_scan_to_file;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-#[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
-    #[allow(dead_code)]
-    pub(in super::super) fn do_scan(&mut self, preview: bool) {
-        if let Err(error) = self.validate_color_controls() {
-            self.set_error(format!("invalid color controls: {error}"));
-            return;
-        }
-        self.cancel_requested.store(false, Ordering::SeqCst);
-        self.scanning = true;
-        let result = self.scan_args(preview).and_then(run_scan_to_file);
-        self.scanning = false;
-        match result {
-            Ok(path) => self.set_image_success(path),
-            Err(crate::error::ScanError::Cancelled(_)) => {
-                self.status = self.translator.t("status.cancelled");
-            }
-            Err(error) => self.set_error(error),
-        }
-    }
-
     pub(in super::super) fn do_cancel(&mut self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
         self.status = self.translator.t(if self.scanning {

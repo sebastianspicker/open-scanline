@@ -3,8 +3,7 @@ use super::super::state::GuiState;
 use crate::domain::export::OcrEngine;
 use crate::domain::settings::validate_output_name;
 use crate::error::Result;
-use crate::workflows::capture::batch::BatchScanArgs;
-use crate::workflows::compat::run_batch_scan;
+use crate::workflows::capture::batch::{plan_batch_outputs, BatchOutputRequest, BatchScanArgs};
 use std::path::PathBuf;
 
 /// Immutable OCR request assembled on the UI thread before a worker starts.
@@ -18,29 +17,6 @@ pub(in crate::inbound::gui) struct OcrAction {
 
 #[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
-    #[allow(dead_code)]
-    pub(in super::super) fn do_batch(&mut self) {
-        let pages = self.batch_pages.max(1);
-        let out_dir = PathBuf::from(&self.output_dir).join("batch");
-        let args = match self.batch_args(out_dir.clone(), pages) {
-            Ok(args) => args,
-            Err(error) => {
-                self.set_error(error);
-                return;
-            }
-        };
-        match run_batch_scan(args) {
-            Ok(paths) => {
-                if let Some(last) = paths.last() {
-                    self.last_image = Some(last.clone());
-                    self.update_histogram();
-                }
-                self.status = format!("{} {}", self.translator.t("batch.done"), paths.len());
-            }
-            Err(error) => self.set_error(error),
-        }
-    }
-
     /// Validate and snapshot an OCR request without performing any OCR.
     #[cfg(feature = "gui")]
     pub(in super::super) fn prepare_ocr(&mut self) -> Option<OcrAction> {
@@ -68,8 +44,14 @@ impl GuiState {
                 "GUI batch pages must use a built-in raster format; JPEG XL is available for single-image scan, reprocess, and save".into(),
             ));
         }
-        let pdf_output = format == "pdf";
-        let page_format = if pdf_output { "png".into() } else { format };
+        let plan = plan_batch_outputs(BatchOutputRequest {
+            out_dir: &out_dir,
+            output_name,
+            configured_format: &format,
+            want_multipage: self.multipage,
+            multipage_format: &self.multipage_format,
+            want_contact_sheet: self.contact_sheet,
+        });
         Ok(BatchScanArgs {
             device: self.device.clone(),
             out_dir: out_dir.clone(),
@@ -80,20 +62,11 @@ impl GuiState {
             dpi: self.dpi,
             mode: self.scan_mode(),
             duplex: self.duplex,
-            format: page_format,
+            format: plan.page_format,
             multipage_tiff: None,
             multipage_pdf: None,
-            multipage_out: (self.multipage || pdf_output).then(|| {
-                let multipage_format = if pdf_output {
-                    "pdf"
-                } else {
-                    &self.multipage_format
-                };
-                out_dir.join(format!("{}_multipage.{}", output_name, multipage_format))
-            }),
-            contact_sheet: self
-                .contact_sheet
-                .then(|| out_dir.join(format!("{output_name}_contact.bmp"))),
+            multipage_out: plan.multipage_out,
+            contact_sheet: plan.contact_sheet,
             pipeline: self.pipeline_prefs(),
             on_progress: None,
         })

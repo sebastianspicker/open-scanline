@@ -17,7 +17,7 @@ pub use auto::{
 };
 pub use color::{
     adjust_brightness_contrast, adjust_hue, adjust_levels, adjust_saturation, apply_curves,
-    auto_levels, desaturate, histogram, invert, white_balance,
+    auto_levels, desaturate, gray_mean, histogram, invert, rgb_channel_means, white_balance,
 };
 pub use film::{convert_film, get_film_profile, list_film_profiles, FilmProfile};
 pub use filters::{

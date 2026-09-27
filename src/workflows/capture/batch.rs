@@ -4,6 +4,7 @@
 mod aggregate_integration_tests;
 mod destinations;
 pub(crate) mod outputs;
+mod plan;
 
 use crate::domain::acquisition::MAX_SCAN_PAGES;
 use crate::domain::acquisition::{
@@ -21,6 +22,7 @@ use destinations::validate_batch_destinations;
 use outputs::{
     check_output_cancellation, report_batch_completion, write_requested_outputs_with_observer,
 };
+pub(crate) use plan::{plan_batch_outputs, BatchOutputRequest};
 use std::path::PathBuf;
 
 /// A file whose publication completed during a batch workflow.
@@ -244,10 +246,11 @@ fn batch_file_extension(format: &str) -> Result<String> {
     if let Some(stripped) = ext.strip_prefix('.') {
         ext = stripped.to_string();
     }
-    if !matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp" | "gif" | "jxl"
-    ) {
+    // Deliberately narrower than `infrastructure::media::supported_extensions()`:
+    // a batch page is always a raster image, so "pdf" (a container format) is
+    // never a valid per-page extension even though it is a supported output.
+    if ext == "pdf" || !crate::infrastructure::media::supported_extensions().contains(&ext.as_str())
+    {
         return Err(ScanError::Invalid(format!(
             "unsupported batch format '{ext}'"
         )));

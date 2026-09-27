@@ -3,13 +3,14 @@
 use crate::domain::export::ExportOptions;
 use crate::domain::image::ImageBuffer;
 use crate::domain::processing::{apply_pipeline_owned, white_balance, PipelinePrefs};
-use crate::error::{Result, ScanError};
+use crate::error::Result;
 use crate::operation::CancellationToken;
 use crate::workflows::publication::{
-    apply_export_profile_owned, prepare_export_options, save_final_image_with_searchable_text,
-    PreparedExportOptions,
+    apply_export_profile, apply_export_profile_owned, prepare_export_options,
+    save_final_image_with_cancellation, save_final_image_with_searchable_text,
+    validate_supported_output_path, PreparedExportOptions,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessOptions {
@@ -32,7 +33,7 @@ pub(crate) fn process_image_file(
     run: ProcessRunOptions,
 ) -> Result<PathBuf> {
     // Validate destination semantics and profile before writing any output.
-    validate_process_destination(&options.dst)?;
+    validate_supported_output_path(&options.dst, "process output")?;
     let export = prepare_export_options(&options.dst, &run.export)?;
     let image = crate::infrastructure::media::load_image(&options.src)?;
     process_and_publish_page(
@@ -48,6 +49,47 @@ pub(crate) fn process_image_file(
         },
     )
     .map(|publication| publication.path)
+}
+
+/// Process a source into `options.dst`, then optionally republish that
+/// result through a prepared export profile onto `published_path`.
+///
+/// GUI-style callers that write a PDF or JPEG XL destination point
+/// `options.dst` at a temporary raster first (so a raster copy survives for
+/// further interactive work) and supply `prepared_export` to re-encode that
+/// raster onto the real `published_path` afterward. Callers that publish
+/// directly pass `prepared_export: None` and `options.dst == published_path`.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn process_and_republish(
+    options: &ProcessOptions,
+    working_export: ExportOptions,
+    published_path: &Path,
+    dpi: u32,
+    prepared_export: Option<&PreparedExportOptions>,
+    cancellation: Option<&CancellationToken>,
+) -> Result<PathBuf> {
+    let raster = process_image_file(
+        options,
+        ProcessRunOptions {
+            export: working_export,
+            cancellation: cancellation.cloned(),
+        },
+    )?;
+    let Some(prepared) = prepared_export else {
+        return Ok(raster);
+    };
+    let image = apply_export_profile(
+        &crate::infrastructure::media::load_image(&raster)?,
+        prepared,
+    )?;
+    save_final_image_with_cancellation(
+        published_path,
+        &image,
+        Some(dpi),
+        None,
+        prepared,
+        cancellation,
+    )
 }
 
 /// The shared per-page workflow kernel: processing plan, profile, optional
@@ -93,22 +135,4 @@ pub(crate) struct PageWorkflowRequest<'a> {
 pub(crate) struct PagePublication {
     pub(crate) path: PathBuf,
     pub(crate) searchable_text: Option<String>,
-}
-
-fn validate_process_destination(destination: &std::path::Path) -> Result<()> {
-    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(
-        destination,
-        "process output",
-    )?;
-    let extension = destination
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid("process output has no supported extension".into()))?;
-    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported process output extension '.{extension}'"
-        )));
-    }
-    Ok(())
 }

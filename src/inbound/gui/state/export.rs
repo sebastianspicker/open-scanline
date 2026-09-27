@@ -30,10 +30,6 @@ impl GuiState {
     }
 
     pub(in crate::inbound::gui) fn selected_ocr_engine(&self) -> OcrEngine {
-        match self.ocr_engine.as_str() {
-            "ocrs" => OcrEngine::Ocrs,
-            "tesseract" => OcrEngine::Tesseract,
-            _ => OcrEngine::Offline,
-        }
+        self.ocr_engine.parse().unwrap_or(OcrEngine::Offline)
     }
 }

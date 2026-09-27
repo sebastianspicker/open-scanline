@@ -11,7 +11,9 @@ use crate::infrastructure::acquisition::DeviceSession;
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
 use crate::workflows::process::{process_and_publish_page, PageWorkflowRequest};
-use crate::workflows::publication::{prepare_export_options, PreparedExportOptions};
+use crate::workflows::publication::{
+    prepare_export_options, validate_supported_output_path, PreparedExportOptions,
+};
 use std::path::PathBuf;
 
 /// Typed scan arguments shared by each application entry point.
@@ -137,7 +139,7 @@ fn validate_scan_args(args: &ScanToFileArgs, pipeline: &PipelinePrefs) -> Result
 }
 
 fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
-    validate_image_output_path(&args.out, "scan output")?;
+    validate_supported_output_path(&args.out, "scan output")?;
     let Some(raw_out) = args.raw_out.as_ref() else {
         return Ok(());
     };
@@ -145,7 +147,7 @@ fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
     if effective_raw_out.extension().is_none() {
         effective_raw_out.set_extension("tif");
     }
-    validate_image_output_path(&effective_raw_out, "raw output")?;
+    validate_supported_output_path(&effective_raw_out, "raw output")?;
     if crate::infrastructure::runtime::atomic_publish::output_paths_alias(
         &args.out,
         &effective_raw_out,
@@ -153,21 +155,6 @@ fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
         return Err(ScanError::Invalid(format!(
             "raw output aliases final output: {}",
             args.out.display()
-        )));
-    }
-    Ok(())
-}
-
-fn validate_image_output_path(path: &std::path::Path, label: &str) -> Result<()> {
-    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(path, label)?;
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))?;
-    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported {label} extension '.{extension}'"
         )));
     }
     Ok(())

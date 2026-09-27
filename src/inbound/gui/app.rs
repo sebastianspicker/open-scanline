@@ -19,7 +19,6 @@ use crate::{
 #[cfg(feature = "gui")]
 use crate::{
     infrastructure::media::ocr::ocr_image_with_engine_with_cancellation,
-    workflows::process::{self, ProcessRunOptions},
     workflows::publication::{
         apply_export_profile, prepare_export_options, save_final_image_with_cancellation,
         save_final_multipage_from_paths_with_cancellation,

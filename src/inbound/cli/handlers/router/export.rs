@@ -45,12 +45,9 @@ pub(super) fn report_error(error: String) -> i32 {
 }
 
 fn ocr_engine_from_config(value: &str) -> Result<crate::OcrEngine, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "offline" => Ok(crate::OcrEngine::Offline),
-        "ocrs" => Ok(crate::OcrEngine::Ocrs),
-        "tesseract" => Ok(crate::OcrEngine::Tesseract),
-        _ => Err("config OCR engine must be offline, ocrs, or tesseract".into()),
-    }
+    value
+        .parse()
+        .map_err(|_| "config OCR engine must be offline, ocrs, or tesseract".into())
 }
 
 fn resolve_pdf_password(

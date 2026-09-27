@@ -78,23 +78,12 @@ fn execute_reprocess_action(
     let process_export = prepared_export
         .map(|_| crate::domain::export::ExportOptions::default())
         .unwrap_or_else(|| action.export.clone());
-    let raster = process::process_image_file(
+    crate::workflows::process::process_and_republish(
         &action.options,
-        ProcessRunOptions {
-            export: process_export,
-            cancellation: Some(token.clone()),
-        },
-    )?;
-    let Some(prepared) = prepared_export else {
-        return Ok(raster);
-    };
-    let image = apply_export_profile(&load_image(&raster)?, prepared)?;
-    save_final_image_with_cancellation(
+        process_export,
         published_path,
-        &image,
-        Some(action.dpi),
-        None,
-        prepared,
+        action.dpi,
+        prepared_export,
         Some(token),
     )
 }

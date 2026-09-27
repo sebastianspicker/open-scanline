@@ -15,7 +15,9 @@ class ArchitectureTests(unittest.TestCase):
             True,
         )
         self.check(
-            "use crate::{infrastructure::{media as m}, domain::image::*};", False
+            "use crate::{infrastructure::{media as m}, domain::image::*};",
+            False,
+            "src/workflows/x.rs",
         )
         self.check("use crate :: r#core :: ScanError as Error;", True)
         self.check(
@@ -62,6 +64,18 @@ class ArchitectureTests(unittest.TestCase):
         self.check("use crate::scan::run_scan_to_file;", True, "src/inbound/x.rs")
         self.check(
             "use crate::infrastructure::media::load_image;", False, "src/inbound/x.rs"
+        )
+
+    def test_inbound_infrastructure_allowlist_admits_leaf_helpers_only(self):
+        self.check(
+            "use crate::infrastructure::config::json::load_config;",
+            False,
+            "src/inbound/x.rs",
+        )
+        self.check(
+            "use crate::infrastructure::acquisition::open_device;",
+            True,
+            "src/inbound/x.rs",
         )
 
     def test_pipeline_facade_module_is_covered_by_the_facade_rule(self):

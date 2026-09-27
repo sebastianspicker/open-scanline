@@ -4,8 +4,6 @@ use super::super::open_image_file;
 #[cfg(any(test, not(feature = "gui")))]
 use super::super::save_image_to_with_export_options;
 use super::super::state::GuiState;
-#[cfg(any(test, not(feature = "gui")))]
-use crate::workflows::compat::process_image_file_with_export_options;
 use crate::workflows::process::ProcessOptions;
 #[cfg(any(test, not(feature = "gui")))]
 use crate::workflows::publication::save_final_multipage_from_paths_with_cancellation;
@@ -28,11 +26,14 @@ pub(in crate::inbound::gui) struct SaveAction {
 }
 
 /// Immutable reprocess request assembled before the worker starts.
+///
+/// Only `execute_reprocess_action` (gui-gated) reads every field; without
+/// the `gui` feature this snapshot is assembled but never executed.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(in crate::inbound::gui) struct ReprocessAction {
     pub(in crate::inbound::gui) options: ProcessOptions,
     pub(in crate::inbound::gui) export: ExportOptions,
-    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub(in crate::inbound::gui) dpi: u32,
     pub(in crate::inbound::gui) pending_pdf_password: Option<String>,
 }
@@ -46,6 +47,10 @@ impl GuiState {
         });
         #[cfg(feature = "gui")]
         let selected = selected.or_else(|| {
+            // Deliberately narrower than `infrastructure::media::supported_extensions()`:
+            // this dialog picks a file for `load_image`, which decodes raster
+            // formats only; "pdf" and "jxl" are supported write targets but not
+            // read here.
             rfd::FileDialog::new()
                 .add_filter(
                     "Images",
@@ -147,23 +152,6 @@ impl GuiState {
         })
     }
 
-    /// Synchronous test/non-GUI compatibility path. The desktop UI always
-    /// uses `prepare_reprocess` and runs this work through `OpenScanlineApp`.
-    #[allow(dead_code)]
-    #[cfg(any(test, not(feature = "gui")))]
-    pub(in super::super) fn do_reprocess(&mut self) {
-        let Some(action) = self.prepare_reprocess() else {
-            return;
-        };
-        match process_image_file_with_export_options(&action.options, &action.export) {
-            Ok(path) => self.set_image_success(path),
-            Err(error) => {
-                self.restore_export_password(action.pending_pdf_password);
-                self.set_error(error);
-            }
-        }
-    }
-
     fn save_destination(&self) -> crate::error::Result<Option<PathBuf>> {
         let dest = if self.multipage {
             self.multipage_save_destination()?
@@ -245,17 +233,8 @@ impl GuiState {
     }
 
     /// Synchronous test/non-GUI compatibility path. The desktop UI always
-    /// uses `prepare_save` / `prepare_save_plus` and runs this through the
-    /// cancellable app worker.
-    #[allow(dead_code)]
-    #[cfg(any(test, not(feature = "gui")))]
-    pub(in super::super) fn do_save(&mut self) {
-        let Some(action) = self.prepare_save() else {
-            return;
-        };
-        self.run_save_action(action);
-    }
-
+    /// uses `prepare_save_plus` and runs this through the cancellable app
+    /// worker.
     #[cfg(any(test, not(feature = "gui")))]
     pub(in super::super) fn do_save_plus(&mut self) {
         let Some(action) = self.prepare_save_plus() else {

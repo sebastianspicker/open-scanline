@@ -34,15 +34,14 @@ pub fn parse_crop_string(value: &str) -> Result<Option<[i32; 4]>, String> {
 
 pub fn normalize_image_ext(format: &str, default: &str) -> String {
     let extension = format.trim().trim_start_matches('.').to_ascii_lowercase();
-    match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp" | "gif" | "pdf" | "jxl" => {
-            match extension.as_str() {
-                "jpeg" => "jpg".into(),
-                "tiff" => "tif".into(),
-                _ => extension,
-            }
+    if crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
+        match extension.as_str() {
+            "jpeg" => "jpg".into(),
+            "tiff" => "tif".into(),
+            _ => extension,
         }
-        _ => default.into(),
+    } else {
+        default.into()
     }
 }
 

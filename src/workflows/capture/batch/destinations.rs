@@ -2,6 +2,7 @@
 
 use super::BatchScanArgs;
 use crate::error::{Result, ScanError};
+use crate::workflows::publication::{output_extension, validate_supported_output_path};
 use std::path::{Path, PathBuf};
 
 pub(super) fn validate_batch_destinations(args: &BatchScanArgs, file_ext: &str) -> Result<()> {
@@ -89,7 +90,7 @@ fn add_contact_sheet(
     } else {
         path.to_path_buf()
     };
-    validate_image_output_path(&effective, "contact sheet")?;
+    validate_supported_output_path(&effective, "contact sheet")?;
     destinations.push(("contact sheet", effective));
     Ok(())
 }
@@ -151,22 +152,4 @@ fn validate_named_container_path(path: &Path, label: &str, allowed: &[&str]) -> 
         )));
     }
     Ok(())
-}
-
-fn validate_image_output_path(path: &Path, label: &str) -> Result<()> {
-    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(path, label)?;
-    let extension = output_extension(path, label)?;
-    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported {label} extension '.{extension}'"
-        )));
-    }
-    Ok(())
-}
-
-fn output_extension(path: &Path, label: &str) -> Result<String> {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))
 }

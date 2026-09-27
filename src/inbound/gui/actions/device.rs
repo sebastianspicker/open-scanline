@@ -2,9 +2,9 @@ use super::super::state::GuiState;
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::Result;
-use crate::infrastructure::acquisition::{calibrate_device, exposure_from_preview, focus_device};
 use crate::infrastructure::media::load_image;
 use crate::infrastructure::media::{make_it8_target_image, profile_scanner_it8, save_profile_json};
+use crate::workflows::maintenance::{calibrate_device, exposure_from_preview, focus_device};
 use serde_json::Value;
 use std::path::PathBuf;
 

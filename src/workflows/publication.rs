@@ -119,6 +119,28 @@ fn load_export_transform(options: &ExportOptions) -> Result<Option<Arc<PreparedS
         .transpose()
 }
 
+/// Extract and lowercase an output path's extension, or reject when absent.
+pub(crate) fn output_extension(path: &Path, label: &str) -> Result<String> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))
+}
+
+/// Validate an output leaf name and its extension against the media adapter's
+/// supported set. Shared by single-shot scan, process, and batch page/
+/// contact-sheet destinations.
+pub(crate) fn validate_supported_output_path(path: &Path, label: &str) -> Result<()> {
+    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(path, label)?;
+    let extension = output_extension(path, label)?;
+    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
+        return Err(ScanError::Invalid(format!(
+            "unsupported {label} extension '.{extension}'"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_export_profile(
     image: &ImageBuffer,
     prepared: &PreparedExportOptions,

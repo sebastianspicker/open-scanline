@@ -4,6 +4,7 @@ use crate::domain::acquisition::ScanMode;
 use crate::domain::export::OcrEngine;
 use crate::infrastructure::acquisition::DeviceMaintenanceCapabilities;
 use crate::infrastructure::config::json::load_config;
+use crate::workflows::capture::single::{run_scan_to_file, CaptureOptions};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -111,7 +112,16 @@ fn unsafe_output_name_cannot_escape_selected_directory_or_mutate_sentinel() {
     assert!(state.out_path("scan").is_err());
     assert!(state.out_path_plain("save").is_err());
     assert!(state.batch_args(safe_dir.join("batch"), 1).is_err());
-    state.do_scan(false);
+    // Exercise the same `scan_args` -> canonical `run_scan_to_file` path the
+    // production async scan job uses (see `app::scan::scan_job_plan` and
+    // `app::acquire::launch_scan_job`), without the GUI job/thread plumbing.
+    let result = state
+        .scan_args(false)
+        .and_then(|args| run_scan_to_file(args, CaptureOptions::default()));
+    match result {
+        Ok(_) => panic!("an unsafe output name must fail before any scan runs"),
+        Err(error) => state.set_error(error),
+    }
     assert!(state.status.contains("invalid"));
     assert_eq!(
         std::fs::read_to_string(&outside).unwrap(),
@@ -124,26 +134,28 @@ fn assert_cancelled_scan(dir: &std::path::Path) {
     use crate::domain::image::{ImageBuffer, PixelFormat};
     use crate::domain::processing::PipelinePrefs;
     use crate::workflows::capture::single::ScanToFileArgs;
-    use crate::workflows::compat::run_scan_to_file;
 
     let flag = Arc::new(AtomicBool::new(true));
-    let err = run_scan_to_file(ScanToFileArgs {
-        device: Some("mock".into()),
-        out: dir.join("cancelled.png"),
-        width: 16,
-        height: 12,
-        seed: 1,
-        dpi: 150,
-        mode: ScanMode::Reflective,
-        duplex: false,
-        pipeline: PipelinePrefs::default(),
-        invert_colors: false,
-        use_preview: false,
-        config: None,
-        on_progress: None,
-        cancel_check: Some(Box::new(move || flag.load(Ordering::SeqCst))),
-        raw_out: None,
-    });
+    let err = run_scan_to_file(
+        ScanToFileArgs {
+            device: Some("mock".into()),
+            out: dir.join("cancelled.png"),
+            width: 16,
+            height: 12,
+            seed: 1,
+            dpi: 150,
+            mode: ScanMode::Reflective,
+            duplex: false,
+            pipeline: PipelinePrefs::default(),
+            invert_colors: false,
+            use_preview: false,
+            config: None,
+            on_progress: None,
+            cancel_check: Some(Box::new(move || flag.load(Ordering::SeqCst))),
+            raw_out: None,
+        },
+        CaptureOptions::default(),
+    );
     assert!(err
         .unwrap_err()
         .to_string()
@@ -155,17 +167,19 @@ fn assert_cancelled_scan(dir: &std::path::Path) {
 #[test]
 fn gui_open_save_plus_and_cancel_traverse_the_shared_handlers() {
     use crate::workflows::capture::single::ScanToFileArgs;
-    use crate::workflows::compat::run_scan_to_file;
     let dir = std::env::temp_dir().join("open_scanline_gui_actions");
     let _ = std::fs::create_dir_all(&dir);
     let src = dir.join("opened.png");
-    run_scan_to_file(ScanToFileArgs {
-        out: src.clone(),
-        width: 24,
-        height: 16,
-        seed: 3,
-        ..ScanToFileArgs::default()
-    })
+    run_scan_to_file(
+        ScanToFileArgs {
+            out: src.clone(),
+            width: 24,
+            height: 16,
+            seed: 3,
+            ..ScanToFileArgs::default()
+        },
+        CaptureOptions::default(),
+    )
     .unwrap();
     assert_eq!(open_image_file(&src).unwrap(), src);
     let mut state = GuiState::new(None);
