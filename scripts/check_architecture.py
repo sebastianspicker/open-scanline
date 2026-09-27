@@ -148,26 +148,26 @@ def structural_errors(path, text):
             yield "compatibility facade contains implementation"
 
 
+def dependency_error(path, root, segments, forbidden):
+    if root == "infrastructure" and inbound_infrastructure_violation(path, segments):
+        dotted = "::".join(segments)
+        return f"inbound import outside the infrastructure allowlist: crate::{dotted}"
+    if root in forbidden:
+        return f"forbidden dependency crate::{root}"
+    return None
+
+
 def violations(path, source):
     items = list(tokens(source))
     forbidden = forbidden_roots(path)
     seen = set()
     for root, offset, segments in dependencies(items):
-        if root == "infrastructure" and inbound_infrastructure_violation(path, segments):
-            if (root, offset) in seen:
-                continue
-            seen.add((root, offset))
-            line = source.count("\n", 0, offset) + 1
-            dotted = "::".join(segments)
-            yield f"{path}:{line}: inbound import outside the infrastructure allowlist: crate::{dotted}"
-            continue
-        if root not in forbidden:
-            continue
-        if (root, offset) in seen:
+        error = dependency_error(path, root, segments, forbidden)
+        if error is None or (root, offset) in seen:
             continue
         seen.add((root, offset))
         line = source.count("\n", 0, offset) + 1
-        yield f"{path}:{line}: forbidden dependency crate::{root}"
+        yield f"{path}:{line}: {error}"
     normalized = " ".join(token for token, _ in items)
     for error in structural_errors(path, normalized):
         yield f"{path}: {error}"

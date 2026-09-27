@@ -41,7 +41,9 @@ class ArchitectureTests(unittest.TestCase):
             True,
             "src/domain/x.rs",
         )
-        self.check("use crate::workflows::capture::batch::Foo;", True, "src/domain/x.rs")
+        self.check(
+            "use crate::workflows::capture::batch::Foo;", True, "src/domain/x.rs"
+        )
         self.check("use crate::inbound::cli::run;", True, "src/domain/x.rs")
 
     def test_workflows_can_import_infrastructure_but_not_inbound(self):

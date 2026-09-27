@@ -63,27 +63,29 @@ def path_segments(items, start):
     return segments
 
 
+def completed_path(current, base):
+    """A path grown past its group prefix; a bare prefix is not a path."""
+    if current != base:
+        yield current
+
+
 def use_paths(items, prefix=()):
     """Expand nested use groups; aliases name bindings, not dependencies."""
     base = list(prefix)
     current = list(prefix)
     for token in items:
-        if token == "{":
-            yield from use_paths(items, tuple(current))
+        if token in ("}", ","):
+            # A trailing comma before `}` leaves `current` at the bare prefix.
+            yield from completed_path(current, base)
+            if token == "}":
+                return
             current = list(prefix)
-        elif token == "}":
-            if current != base:
-                yield current
-            return
-        elif token == ",":
-            # A trailing comma before `}` or between groups leaves `current`
-            # at the bare prefix; that is not a path of its own.
-            if current != base:
-                yield current
+        elif token == "{":
+            yield from use_paths(items, tuple(current))
             current = list(prefix)
         elif token == "as":
             next(items, None)
         elif token != "::":
             current.append(token)
-    if current != base:
-        yield current
+    yield from completed_path(current, base)
+

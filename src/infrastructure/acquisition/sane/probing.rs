@@ -1,4 +1,4 @@
-pub use crate::infrastructure::acquisition::command_backend::SystemCommandRunner;
+use crate::infrastructure::acquisition::command_backend::system_command_runner;
 use crate::infrastructure::acquisition::{
     parse_pipe_devices, simulate_backends, BackendInfo, DeviceInfo,
 };
@@ -7,9 +7,11 @@ use crate::operation::CancellationToken;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// Production command runner for the SANE `scanimage` tool.
-pub(super) const RUNNER: SystemCommandRunner =
-    SystemCommandRunner::new("scanimage", "SANE scan cancelled");
+system_command_runner!(
+    /// Production command runner for the SANE `scanimage` tool.
+    "scanimage",
+    "SANE scan cancelled"
+);
 
 /// True when the `scanimage` acquisition tool appears on PATH.
 ///
@@ -26,7 +28,7 @@ pub fn available_with_cancellation(cancellation: Option<&CancellationToken>) -> 
     }
     which("scanimage").is_some_and(|binary| {
         let cancelled = Mutex::new(false);
-        RUNNER
+        SystemCommandRunner
             .run_with_cancellation(
                 &CommandSpec {
                     program: binary.display().to_string(),
@@ -82,7 +84,7 @@ fn try_list_scanimage(cancellation: Option<&CancellationToken>) -> Vec<DeviceInf
         return Vec::new();
     };
     let cancelled = Mutex::new(false);
-    let Ok(output) = RUNNER.run_with_cancellation(
+    let Ok(output) = SystemCommandRunner.run_with_cancellation(
         &CommandSpec {
             program: bin.display().to_string(),
             args: vec!["-f".into(), "%d|%v %m%n".into()],

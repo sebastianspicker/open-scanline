@@ -243,6 +243,12 @@ fn assert_public_process_signatures() {
         process::process_image_file_with_export_options_and_token;
 }
 
+/// The production runners are unit structs callers can construct directly.
+fn assert_production_runners_are_unit_structs() {
+    let _: Arc<dyn sane::CommandRunner> = Arc::new(sane::SystemCommandRunner);
+    let _: Arc<dyn wia::CommandRunner> = Arc::new(wia::SystemCommandRunner);
+}
+
 fn assert_public_adapter_contracts(request: &ScanRequest) {
     let runner: Arc<dyn sane::CommandRunner> = Arc::new(InertRunner);
     let decoder: Arc<dyn sane::ImageDecoder> = Arc::new(InertDecoder);
@@ -309,6 +315,7 @@ fn preserved_public_facades_remain_usable_by_external_callers() {
     assert_public_request_types();
     assert_public_operation_signatures();
     assert_public_adapter_contracts(&request);
+    assert_production_runners_are_unit_structs();
     assert_public_pdf_contract(image, &pdf);
 }
 

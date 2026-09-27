@@ -1,4 +1,4 @@
-pub use crate::infrastructure::acquisition::command_backend::SystemCommandRunner;
+use crate::infrastructure::acquisition::command_backend::system_command_runner;
 use crate::infrastructure::acquisition::{
     parse_pipe_devices, simulate_backends, BackendInfo, DeviceInfo,
 };
@@ -7,9 +7,11 @@ use crate::operation::CancellationToken;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// Production command runner for WIA's PowerShell-driven commands.
-pub(super) const RUNNER: SystemCommandRunner =
-    SystemCommandRunner::new("WIA command", "WIA scan cancelled");
+system_command_runner!(
+    /// Production command runner for WIA's PowerShell-driven commands.
+    "WIA command",
+    "WIA scan cancelled"
+);
 
 pub(super) fn powershell_spec(script: String) -> CommandSpec {
     CommandSpec {
@@ -37,7 +39,7 @@ fn powershell_available_with_cancellation(_cancellation: Option<&CancellationTok
     #[cfg(target_os = "windows")]
     {
         let cancelled = Mutex::new(false);
-        RUNNER
+        SystemCommandRunner
             .run_with_cancellation(
                 &CommandSpec {
                     program: POWERSHELL.into(),
@@ -117,7 +119,7 @@ fn try_list_via_powershell(cancellation: Option<&CancellationToken>) -> Vec<Devi
         return Vec::new();
     }
     let cancelled = Mutex::new(false);
-    let Ok(output) = RUNNER.run_with_cancellation(
+    let Ok(output) = SystemCommandRunner.run_with_cancellation(
         &powershell_spec(wia_enumeration_script().into()),
         Duration::from_secs(8),
         &cancelled,

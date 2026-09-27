@@ -118,6 +118,28 @@ fn scan_with_mock_device_writes_the_documented_deterministic_gradient() {
     );
 }
 
+/// Asserts the batch wrote exactly three ordered 2x1 mock pages, each carrying
+/// the per-page seed in its blue channel.
+fn assert_mock_gradient_pages(out_dir: &Path, first_seed: u8) {
+    let mut page_names: Vec<String> = fs::read_dir(out_dir)
+        .expect("page directory should exist")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    page_names.sort();
+    assert_eq!(
+        page_names,
+        vec!["page_001.png", "page_002.png", "page_003.png"]
+    );
+
+    for (index, name) in page_names.iter().enumerate() {
+        let page = load_image(out_dir.join(name)).expect("batch page should decode");
+        assert_eq!(page.width, 2);
+        assert_eq!(page.height, 1);
+        let seed = first_seed + index as u8;
+        assert_eq!(page.data, vec![0, 0, seed, 255, 0, seed]);
+    }
+}
+
 #[test]
 fn batch_with_mock_device_writes_pages_in_order_and_an_extension_driven_multipage_tiff() {
     let directory = ScratchDirectory::new("batch");
@@ -149,24 +171,7 @@ fn batch_with_mock_device_writes_pages_in_order_and_an_extension_driven_multipag
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let mut page_names: Vec<String> = fs::read_dir(&out_dir)
-        .expect("page directory should exist")
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    page_names.sort();
-    assert_eq!(
-        page_names,
-        vec!["page_001.png", "page_002.png", "page_003.png"]
-    );
-
-    for (index, name) in page_names.iter().enumerate() {
-        let page = load_image(out_dir.join(name)).expect("batch page should decode");
-        assert_eq!(page.width, 2);
-        assert_eq!(page.height, 1);
-        let seed = 10 + index as u8;
-        assert_eq!(page.data, vec![0, 0, seed, 255, 0, seed]);
-    }
-
+    assert_mock_gradient_pages(&out_dir, 10);
     assert!(multipage_out.is_file());
     assert_eq!(tiff_page_count(&multipage_out), 3);
 }

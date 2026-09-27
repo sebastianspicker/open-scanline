@@ -4,7 +4,7 @@ use super::capabilities::{
     SaneMaintenanceOptions,
 };
 use super::command::build_scanimage_command;
-use super::probing::{which, RUNNER};
+use super::probing::{which, SystemCommandRunner};
 use super::{emit_simulated_pages, emit_single_pages};
 use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{ScanMode, ScanRequest};
@@ -43,7 +43,7 @@ impl SaneDeviceSession {
             sane_name,
             simulate,
             session: CommandSession::default(),
-            runner: Arc::new(RUNNER),
+            runner: Arc::new(SystemCommandRunner),
             decoder: Arc::new(NativeImageDecoder),
             inspect_capabilities: !simulate,
             capabilities: OnceLock::new(),

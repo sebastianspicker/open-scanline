@@ -1,5 +1,6 @@
 //! Pure export vocabulary shared by scan, process, and batch entry points.
 
+use crate::error::ScanError;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -29,28 +30,15 @@ impl OcrEngine {
     }
 }
 
-/// A name outside [`OcrEngine::NAMES`] was given where an OCR engine choice
-/// is required.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OcrEngineParseError(pub String);
-
-impl std::fmt::Display for OcrEngineParseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "unknown OCR engine: {}", self.0)
-    }
-}
-
-impl std::error::Error for OcrEngineParseError {}
-
 impl FromStr for OcrEngine {
-    type Err = OcrEngineParseError;
+    type Err = ScanError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
             "offline" => Ok(Self::Offline),
             "ocrs" => Ok(Self::Ocrs),
             "tesseract" => Ok(Self::Tesseract),
-            _ => Err(OcrEngineParseError(value.to_string())),
+            _ => Err(ScanError::Invalid(format!("unknown OCR engine: {value}"))),
         }
     }
 }

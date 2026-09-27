@@ -1,7 +1,7 @@
 use super::command::{
     feeder_exhausted, numbered_page_outputs, wia_transfer_command, wia_transfer_pages_command,
 };
-use super::probing::RUNNER;
+use super::probing::SystemCommandRunner;
 use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{
     apply_flat_dark_cal, synthetic_cal_tables, validate_scan_dpi, ScanMode, ScanRequest,
@@ -47,7 +47,7 @@ impl WiaDeviceSession {
             session: CommandSession::default(),
             cal: Mutex::new(None),
             focus: Mutex::new(None),
-            runner: Arc::new(RUNNER),
+            runner: Arc::new(SystemCommandRunner),
             decoder: Arc::new(NativeImageDecoder),
         }
     }
