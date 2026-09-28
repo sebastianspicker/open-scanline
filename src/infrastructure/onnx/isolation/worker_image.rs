@@ -7,7 +7,10 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-const MAX_ONNX_WORKER_BYTES: u64 = 256 * 1024 * 1024;
+// All-feature debug binaries can exceed 256 MiB on Linux because they retain
+// symbols for the GUI and inference stacks. Keep the staging operation bounded
+// while accepting those supported development builds.
+const MAX_ONNX_WORKER_BYTES: u64 = 512 * 1024 * 1024;
 
 /// A selected ONNX worker whose identity is pinned at construction.
 #[derive(Debug)]
@@ -58,9 +61,10 @@ fn validate_worker_metadata(metadata: &std::fs::Metadata, executable: &Path) -> 
         return Ok(());
     }
     Err(worker_unavailable(format!(
-        "ONNX worker executable {} is empty, not a regular file, or exceeds the {}-byte limit",
+        "ONNX worker executable {} is empty, not a regular file, or exceeds the {}-byte limit (actual size: {} bytes)",
         executable.display(),
-        MAX_ONNX_WORKER_BYTES
+        MAX_ONNX_WORKER_BYTES,
+        metadata.len()
     )))
 }
 
