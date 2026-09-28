@@ -1,13 +1,18 @@
 use super::super::{app::OpenScanlineApp, state::GuiState};
-use egui::{Color32, RichText};
+use super::theme::{self, color, size, space};
+use egui::RichText;
 
+mod components;
 mod header;
+mod plan;
 mod settings;
+mod sheets;
 mod status;
+
+use components::*;
 
 const TOOLS: &str = "light-workspace-tools";
 const BATCH: &str = "light-workspace-batch";
-const MUTED: Color32 = Color32::from_rgb(91, 101, 117);
 
 pub(super) use header::render_header;
 
@@ -15,29 +20,76 @@ pub(super) fn render(ctx: &egui::Context, app: &mut OpenScanlineApp) {
     let mut batch = ctx
         .data_mut(|data| data.get_temp::<bool>(egui::Id::new(BATCH)))
         .unwrap_or(app.state.multipage || app.state.batch_pages > 1 || app.state.duplex);
+    action_bar(ctx, |ui| {
+        if app.job_report().is_some() {
+            status::actions(ui, app);
+        } else {
+            prepare_actions(ui, app, batch);
+        }
+    });
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(ctx.style().visuals.panel_fill)
-                .inner_margin(egui::Margin::symmetric(24, 0)),
+                .fill(color::PAPER)
+                .inner_margin(egui::Margin::symmetric(space::XL as i8, 0)),
         )
         .show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    canvas(ui, app, &mut batch);
-                });
+                .show(ui, |ui| sheet(ui, |ui| body(ui, app, &mut batch)));
         });
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(BATCH), batch));
 }
 
-fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
-    prepare_title(ui, &app.state, *batch);
-    ui.add_space(if ui.ctx().screen_rect().height() >= 900.0 {
-        34.0
+fn body(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
+    ui.add_space(top_space(ui));
+    if app.job_report().is_some() {
+        status::render(ui, app);
     } else {
-        22.0
+        prepare(ui, app, batch);
+    }
+    ui.add_space(space::XXXL);
+}
+
+/// Center content in a column no wider than the job sheet.
+fn sheet(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.available_width().min(space::SHEET);
+    let margin = ((ui.available_width() - width) / 2.0).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(margin);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            content(ui);
+        });
     });
+}
+
+fn top_space(ui: &egui::Ui) -> f32 {
+    if ui.available_width() > space::STACK && ui.ctx().screen_rect().height() >= 900.0 {
+        space::XXXL
+    } else {
+        space::XL
+    }
+}
+
+/// The platen-colored strip that keeps the destination and primary action in
+/// view at every window height.
+fn action_bar(ctx: &egui::Context, content: impl FnOnce(&mut egui::Ui)) {
+    egui::TopBottomPanel::bottom("workspace-actions")
+        .frame(
+            egui::Frame::new()
+                .fill(color::PLATEN)
+                .inner_margin(egui::Margin::symmetric(space::XL as i8, space::M as i8)),
+        )
+        .show(ctx, |ui| sheet(ui, content));
+}
+
+fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
+    stage(ui, "New job", false);
+    title(ui, &app.state.output_name, "Untitled scan");
+    lead(ui, plan::sentence(&app.state, *batch));
+    banners(ui, app);
+    ui.add_space(space::XXL);
     ui.add_enabled_ui(!app.job_active(), |ui| {
         columns(ui, |ui, left| {
             if left {
@@ -47,48 +99,43 @@ fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
             }
         });
     });
-    ui.add_space(24.0);
-    ui.separator();
-    ui.add_space(10.0);
-    let valid = can_start(&app.state, *batch);
-    if ui.available_width() >= 850.0 {
-        ui.horizontal(|ui| {
-            destination(ui, app);
-            start_action(ui, app, *batch, valid);
-        });
-    } else {
-        ui.horizontal_wrapped(|ui| destination(ui, app));
-        ui.add_space(10.0);
-        ui.horizontal(|ui| start_action(ui, app, *batch, valid));
+    if app.state.error_message.is_none() && !app.state.status.is_empty() {
+        ui.add_space(space::XL);
+        note(ui, &app.state.status);
     }
-    ui.add_space(8.0);
+}
+
+fn banners(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
     if let Some(error) = &app.state.error_message {
-        ui.colored_label(Color32::from_rgb(160, 62, 42), error);
-    } else {
-        ui.label(RichText::new(&app.state.status).small().color(MUTED));
+        ui.add_space(space::L);
+        banner(ui, "The last job did not finish", error);
     }
-    if let Some(error) = &app.state.config_load_error {
-        ui.colored_label(Color32::from_rgb(160, 62, 42), error);
-        if ui.button("Configuration recovery").clicked() {
+    if let Some(error) = app.state.config_load_error.clone() {
+        ui.add_space(space::L);
+        banner(
+            ui,
+            "Settings could not be loaded; defaults are in use",
+            &error,
+        );
+        if ui.add(secondary("Open settings recovery")).clicked() {
             app.state.active_tab = 5;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(egui::Id::new(TOOLS), true));
         }
     }
-    if *batch {
-        note(ui, "Page images are saved during scanning. The document is created after capture succeeds.");
-    }
 }
 
 fn columns(ui: &mut egui::Ui, mut content: impl FnMut(&mut egui::Ui, bool)) {
-    if ui.available_width() >= 760.0 {
-        let width = (ui.available_width() - 96.0) / 2.0;
+    if ui.available_width() >= space::STACK {
+        let gutter = space::XXXL + space::L;
+        let spacing = ui.spacing().item_spacing.x;
+        let width = (ui.available_width() - gutter - spacing) / 2.0;
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(width);
                 content(ui, true);
             });
-            ui.add_space(84.0);
+            ui.add_space(gutter);
             ui.vertical(|ui| {
                 ui.set_width(width);
                 content(ui, false);
@@ -96,80 +143,77 @@ fn columns(ui: &mut egui::Ui, mut content: impl FnMut(&mut egui::Ui, bool)) {
         });
     } else {
         content(ui, true);
-        ui.add_space(30.0);
+        ui.add_space(space::XXL);
         content(ui, false);
     }
 }
 
-fn note(ui: &mut egui::Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text.into()).small().color(MUTED));
+/// Why Start is unavailable, in the order a person would fix it.
+fn blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
+    if state.device.trim().is_empty() {
+        Some("Choose a scanner to start.")
+    } else if crate::domain::settings::validate_output_name(&state.output_name).is_err() {
+        Some("Fix the file name to start.")
+    } else if state.output_dir.trim().is_empty() {
+        Some("Choose a folder to start.")
+    } else {
+        output_blocker(state, batch).or_else(|| duplex_blocker(state, batch))
+    }
 }
-fn primary(label: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(label).color(Color32::WHITE))
-        .fill(Color32::from_rgb(58, 103, 136))
-        .min_size(egui::vec2(180.0, 48.0))
+
+fn output_blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
+    let pdf = plan::writes_pdf(state, batch);
+    if !pdf && (state.searchable_pdf || !state.pdf_password.is_empty()) {
+        Some("Searchable text and passwords need PDF output.")
+    } else if batch && state.output_fmt == "jxl" {
+        Some("JPEG XL holds one image. Choose another format.")
+    } else {
+        None
+    }
 }
-fn field(ui: &mut egui::Ui, label: &str, value: &mut String) {
-    let response = ui.label(label);
-    ui.add(
-        egui::TextEdit::singleline(value)
-            .desired_width(ui.available_width())
-            .min_size(egui::vec2(0.0, 38.0))
-            .margin(egui::Margin::symmetric(10, 8)),
-    )
-    .labelled_by(response.id);
-}
-fn choice(ui: &mut egui::Ui, id: &str, value: &mut String, choices: &[(&str, &str)]) {
-    let label = match id {
-        "workspace-source" => "Paper source",
-        "workspace-format" => "Output format",
-        "workspace-container" => "Document format",
-        "workspace-ocr" => "Engine",
-        _ => "Selection",
-    };
-    let label_response = ui.label(label);
-    let selected = choices
-        .iter()
-        .find(|(key, _)| *key == value)
-        .map_or(value.as_str(), |(_, label)| *label)
-        .to_owned();
-    egui::ComboBox::from_id_salt(id)
-        .width(ui.available_width())
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            for (key, label) in choices {
-                ui.selectable_value(value, (*key).into(), *label);
-            }
-        })
-        .response
-        .labelled_by(label_response.id);
+
+fn duplex_blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
+    if !state.duplex {
+        None
+    } else if !batch || state.scan_mode() != crate::domain::acquisition::ScanMode::Document {
+        Some("Duplex needs the document feeder and multiple sides.")
+    } else if !state.batch_pages.is_multiple_of(2) {
+        Some("Duplex needs an even side limit.")
+    } else {
+        None
+    }
 }
 
 fn can_start(state: &GuiState, batch: bool) -> bool {
-    let pdf =
-        state.output_fmt == "pdf" || (batch && state.multipage && state.multipage_format == "pdf");
-    !state.device.trim().is_empty()
-        && !state.output_dir.trim().is_empty()
-        && crate::domain::settings::validate_output_name(&state.output_name).is_ok()
-        && (pdf || (!state.searchable_pdf && state.pdf_password.is_empty()))
-        && !(batch && state.output_fmt == "jxl")
-        && (!state.duplex
-            || (batch
-                && state.batch_pages.is_multiple_of(2)
-                && state.scan_mode() == crate::domain::acquisition::ScanMode::Document))
+    blocker(state, batch).is_none()
+}
+
+fn prepare_actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: bool) {
+    let valid = can_start(&app.state, batch);
+    if ui.available_width() >= 700.0 {
+        ui.horizontal(|ui| {
+            destination(ui, app);
+            start_action(ui, app, batch, valid);
+        });
+    } else {
+        ui.horizontal_wrapped(|ui| destination(ui, app));
+        ui.add_space(space::S);
+        start_action(ui, app, batch, valid);
+    }
 }
 
 fn destination(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
-    let label = ui.label("Save in");
+    let label = ui.label(label_text("Save to"));
     ui.add_enabled_ui(!app.job_active(), |ui| {
-        let width = if ui.available_width() > 700.0 {
-            300.0
-        } else {
-            190.0
-        };
-        ui.add(egui::TextEdit::singleline(&mut app.state.output_dir).desired_width(width))
-            .labelled_by(label.id);
-        if ui.link("Choose folder").clicked() {
+        let width = (ui.available_width() - 330.0).clamp(160.0, 380.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut app.state.output_dir)
+                .font(theme::mono(size::MONO))
+                .desired_width(width)
+                .margin(egui::Margin::symmetric(10, 10)),
+        )
+        .labelled_by(label.id);
+        if ui.add(secondary("Choose…")).clicked() {
             if let Some(folder) = rfd::FileDialog::new()
                 .set_directory(&app.state.output_dir)
                 .pick_folder()
@@ -186,8 +230,11 @@ fn start_action(
     batch: bool,
     valid: bool,
 ) -> egui::Response {
+    let reason = blocker(&app.state, batch);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let response = ui.add_enabled(valid && !app.job_active(), primary("Start scan"));
+        let response = ui
+            .add_enabled(valid && !app.job_active(), primary("Start scan"))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
             if batch {
                 app.start_batch();
@@ -195,77 +242,18 @@ fn start_action(
                 app.start_scan(false, false);
             }
         }
-        if ui.available_width() > 140.0 {
-            note(
-                ui,
-                if batch {
-                    format!("Up to {} sides", app.state.batch_pages)
-                } else {
-                    "One image".into()
-                },
+        if let Some(reason) = reason {
+            ui.label(
+                RichText::new(reason)
+                    .font(theme::body(size::SMALL))
+                    .color(color::LAMP_INK),
             );
+        } else if ui.available_width() > 120.0 {
+            note(ui, plan::limit_label(&app.state, batch));
         }
         response
     })
     .inner
-}
-
-fn canvas(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
-    let width = ui.available_width().min(1080.0);
-    let margin = ((ui.available_width() - width) / 2.0).max(0.0);
-    ui.horizontal(|ui| {
-        ui.add_space(margin);
-        ui.vertical(|ui| {
-            ui.set_width(width);
-            ui.add_space(
-                if width > 760.0 && ui.ctx().screen_rect().height() >= 900.0 {
-                    62.0
-                } else {
-                    30.0
-                },
-            );
-            if app.job_report().is_some() {
-                status::render(ui, app);
-            } else {
-                prepare(ui, app, batch);
-            }
-            ui.add_space(32.0);
-        });
-    });
-}
-
-fn prepare_title(ui: &mut egui::Ui, state: &GuiState, batch: bool) {
-    ui.label(
-        RichText::new(if state.output_name.is_empty() {
-            "New scan"
-        } else {
-            &state.output_name
-        })
-        .size(40.0),
-    );
-    ui.label(
-        RichText::new(if batch {
-            format!(
-                "Create {} from up to {} image sides.",
-                if state.output_fmt == "pdf" || (state.multipage && state.multipage_format == "pdf")
-                {
-                    "a PDF"
-                } else if state.multipage {
-                    "a TIFF document"
-                } else {
-                    "page images"
-                },
-                state.batch_pages
-            )
-        } else {
-            format!(
-                "Save one scanned image as {}.",
-                state.output_fmt.to_uppercase()
-            )
-        })
-        .size(20.0)
-        .color(MUTED),
-    );
 }
 
 #[cfg(test)]

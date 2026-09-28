@@ -77,6 +77,7 @@ fn incompatible_output_options_disable_scan_until_explicitly_corrected() {
 #[test]
 fn disabled_start_ignores_pointer_activation() {
     let context = egui::Context::default();
+    crate::inbound::gui::view::apply_theme(&context);
     let mut app = OpenScanlineApp::new(Some(std::path::Path::new(
         "target/gui-layout-test-absent.json",
     )));
@@ -119,4 +120,65 @@ fn disabled_start_ignores_pointer_activation() {
         });
         assert!(!app.job_active());
     }
+}
+
+#[test]
+fn disabled_start_explains_the_first_problem_to_fix() {
+    let mut app = OpenScanlineApp::new(Some(std::path::Path::new(
+        "target/gui-layout-test-absent.json",
+    )));
+    app.state.device = "escl:office".into();
+    app.state.output_dir = "Scans".into();
+    app.state.output_name = "invoices/september".into();
+    assert_eq!(
+        blocker(&app.state, true),
+        Some("Fix the file name to start.")
+    );
+    app.state.output_name = "September".into();
+    app.state.media = "document".into();
+    app.state.duplex = true;
+    app.state.batch_pages = 5;
+    assert_eq!(
+        blocker(&app.state, true),
+        Some("Duplex needs an even side limit.")
+    );
+    app.state.batch_pages = 6;
+    assert_eq!(blocker(&app.state, true), None);
+    assert!(can_start(&app.state, true));
+}
+
+#[test]
+fn job_sentence_counts_sheets_for_real_duplex_feeders() {
+    let mut app = OpenScanlineApp::new(Some(std::path::Path::new(
+        "target/gui-layout-test-absent.json",
+    )));
+    app.state.device = "escl:office".into();
+    app.state.output_dir = "Scans".into();
+    app.state.output_name = "September".into();
+    app.state.output_fmt = "pdf".into();
+    app.state.searchable_pdf = true;
+    app.state.media = "document".into();
+    app.state.duplex = true;
+    app.state.batch_pages = 6;
+    assert_eq!(
+        plan::sentence(&app.state, true),
+        "Up to 3 double-sided sheets, saved as a searchable PDF plus PNG page images."
+    );
+    app.state.device = "mock".into();
+    assert!(plan::sentence(&app.state, true).starts_with("Up to 6 sides"));
+}
+
+#[test]
+fn file_name_problems_use_plain_language() {
+    let error = crate::domain::settings::validate_output_name("a/b")
+        .unwrap_err()
+        .to_string();
+    assert!(plan::name_problem(&error).starts_with("File names can't contain"));
+    let error = crate::domain::settings::validate_output_name("")
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        plan::name_problem(&error),
+        "Enter a file name of 1 to 128 bytes."
+    );
 }
