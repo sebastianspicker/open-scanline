@@ -43,18 +43,19 @@ pub fn available_with_cancellation(cancellation: Option<&CancellationToken>) -> 
 }
 
 pub(super) fn which(bin: &str) -> Option<std::path::PathBuf> {
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(bin);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-            #[cfg(windows)]
-            {
-                let exe = dir.join(format!("{bin}.exe"));
-                if exe.is_file() {
-                    return Some(exe);
-                }
+    let Ok(path) = std::env::var("PATH") else {
+        return None;
+    };
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(bin);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        {
+            let exe = dir.join(format!("{bin}.exe"));
+            if exe.is_file() {
+                return Some(exe);
             }
         }
     }

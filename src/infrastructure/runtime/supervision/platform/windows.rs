@@ -72,13 +72,11 @@ impl ChildPipes {
         use std::os::windows::io::AsRawHandle;
 
         let mut startup = StartupInfoExW {
-            startup_info: StartupInfoW {
-                flags: STARTF_USESTDHANDLES,
-                std_input: self.stdin_read.as_raw_handle(),
-                std_output: self.stdout_write.as_raw_handle(),
-                std_error: self.stderr_write.as_raw_handle(),
-                ..StartupInfoW::default()
-            },
+            startup_info: StartupInfoW::with_standard_handles(
+                self.stdin_read.as_raw_handle(),
+                self.stdout_write.as_raw_handle(),
+                self.stderr_write.as_raw_handle(),
+            ),
             attribute_list,
         };
         startup.startup_info.cb = std::mem::size_of::<StartupInfoExW>() as u32;

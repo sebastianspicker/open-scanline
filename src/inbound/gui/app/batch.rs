@@ -2,6 +2,38 @@
 use super::*;
 
 #[cfg(feature = "gui")]
+fn run_batch_job(
+    mut args: crate::workflows::capture::batch::BatchScanArgs,
+    export: crate::domain::export::ExportOptions,
+    token: CancellationToken,
+    sender: Sender<GuiJobEvent>,
+) -> GuiJobEvent {
+    let progress_sender = sender.clone();
+    args.on_progress = Some(Box::new(move |progress| {
+        let _ = progress_sender.send(GuiJobEvent::Progress(progress));
+    }));
+    let observer = move |event| {
+        let _ = sender.send(GuiJobEvent::BatchWorkflow(event));
+    };
+    match crate::workflows::capture::batch::run_batch_scan_with_report(
+        args,
+        BatchCaptureOptions {
+            export,
+            token: Some(token),
+            observer: Some(&observer),
+            ..BatchCaptureOptions::default()
+        },
+    ) {
+        Ok(report) => GuiJobEvent::BatchFinished {
+            paths: report.page_paths,
+            end: report.end,
+        },
+        Err(ScanError::Cancelled(_)) => GuiJobEvent::Cancelled,
+        Err(error) => GuiJobEvent::Failed(error.to_string()),
+    }
+}
+
+#[cfg(feature = "gui")]
 impl OpenScanlineApp {
     pub(in crate::inbound::gui) fn start_batch(&mut self) {
         if self.job_active() || self.closing {
@@ -36,33 +68,7 @@ impl OpenScanlineApp {
         self.job = Some(Self::spawn_job(
             cancel,
             pending_pdf_password,
-            move |sender| {
-                let progress_sender = sender.clone();
-                let mut args = args;
-                args.on_progress = Some(Box::new(move |progress| {
-                    let _ = progress_sender.send(GuiJobEvent::Progress(progress));
-                }));
-                let event_sender = sender.clone();
-                let observer = move |event| {
-                    let _ = event_sender.send(GuiJobEvent::BatchWorkflow(event));
-                };
-                match crate::workflows::capture::batch::run_batch_scan_with_report(
-                    args,
-                    BatchCaptureOptions {
-                        export,
-                        token: Some(token),
-                        observer: Some(&observer),
-                        ..BatchCaptureOptions::default()
-                    },
-                ) {
-                    Ok(report) => GuiJobEvent::BatchFinished {
-                        paths: report.page_paths,
-                        end: report.end,
-                    },
-                    Err(ScanError::Cancelled(_)) => GuiJobEvent::Cancelled,
-                    Err(error) => GuiJobEvent::Failed(error.to_string()),
-                }
-            },
+            move |sender| run_batch_job(args, export, token, sender),
         ));
     }
 }

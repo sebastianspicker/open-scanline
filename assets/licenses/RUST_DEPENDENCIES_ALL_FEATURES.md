@@ -76,7 +76,7 @@ The portable ZIP embeds this file verbatim. It is a source-metadata record, not 
 | `cbc@0.2.1` | `MIT OR Apache-2.0` |
 | `cfg-if@1.0.4` | `MIT OR Apache-2.0` |
 | `cgl@0.3.2` | `MIT / Apache-2.0` |
-| `chacha20@0.10.1` | `MIT OR Apache-2.0` |
+| `chacha20@0.10.2` | `MIT OR Apache-2.0` |
 | `chrono@0.4.45` | `MIT OR Apache-2.0` |
 | `cipher@0.5.2` | `MIT OR Apache-2.0` |
 | `clap@4.6.6` | `MIT OR Apache-2.0` |
@@ -338,9 +338,9 @@ The portable ZIP embeds this file verbatim. It is a source-metadata record, not 
 | `rustfft@6.4.1` | `MIT OR Apache-2.0` |
 | `rustix@0.38.44` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
 | `rustix@1.1.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` |
-| `rustls@0.23.43` | `Apache-2.0 OR ISC OR MIT` |
+| `rustls@0.23.45` | `Apache-2.0 OR ISC OR MIT` |
 | `rustls-pki-types@1.15.1` | `MIT OR Apache-2.0` |
-| `rustls-webpki@0.103.13` | `ISC` |
+| `rustls-webpki@0.103.15` | `ISC` |
 | `rustversion@1.0.23` | `MIT OR Apache-2.0` |
 | `safetensors@0.8.0` | `Apache-2.0` |
 | `same-file@1.0.6` | `Unlicense/MIT` |
@@ -11484,7 +11484,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ~~~~
 
-### chacha20@0.10.1: `LICENSE-APACHE`
+### chacha20@0.10.2: `LICENSE-APACHE`
 
 Declared license metadata: `MIT OR Apache-2.0`.
 
@@ -11692,7 +11692,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ~~~~
 
-### chacha20@0.10.1: `LICENSE-MIT`
+### chacha20@0.10.2: `LICENSE-MIT`
 
 Declared license metadata: `MIT OR Apache-2.0`.
 
@@ -56195,7 +56195,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ~~~~
 
-### rustls@0.23.43: `LICENSE-APACHE`
+### rustls@0.23.45: `LICENSE-APACHE`
 
 Declared license metadata: `Apache-2.0 OR ISC OR MIT`.
 
@@ -56403,7 +56403,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ~~~~
 
-### rustls@0.23.43: `LICENSE-ISC`
+### rustls@0.23.45: `LICENSE-ISC`
 
 Declared license metadata: `Apache-2.0 OR ISC OR MIT`.
 
@@ -56425,7 +56425,7 @@ ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ~~~~
 
-### rustls@0.23.43: `LICENSE-MIT`
+### rustls@0.23.45: `LICENSE-MIT`
 
 Declared license metadata: `Apache-2.0 OR ISC OR MIT`.
 
@@ -56697,7 +56697,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ~~~~
 
-### rustls-webpki@0.103.13: `LICENSE`
+### rustls-webpki@0.103.15: `LICENSE`
 
 Declared license metadata: `ISC`.
 
