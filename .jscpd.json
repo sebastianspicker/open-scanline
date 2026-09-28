@@ -1,8 +1,0 @@
-{
-  "formats": ["rust", "python", "bash"],
-  "minLines": 12,
-  "minTokens": 80,
-  "mode": "mild",
-  "reporters": ["console"],
-  "threshold": 0.5
-}

@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use std::ops::Range;
 use std::path::Path;
 
-
 pub const IT8_COLS: usize = 6;
 pub const IT8_TOTAL_ROWS: usize = 5;
 pub const PROFILE_FORMAT: &str = "open-scanline-icc-profile";

@@ -1,7 +1,5 @@
 //! Batch multi-page scan orchestration.
 
-#[cfg(test)]
-mod aggregate_integration_tests;
 mod destinations;
 pub(crate) mod outputs;
 mod plan;

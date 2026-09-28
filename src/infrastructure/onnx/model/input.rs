@@ -254,4 +254,3 @@ fn normalize(sample: u8, normalization: OnnxNormalization) -> f32 {
         OnnxNormalization::None => sample as f32,
     }
 }
-

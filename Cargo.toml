@@ -14,7 +14,6 @@ include = [
     "/Cargo.lock",
     "/README.md",
     "/LICENSE",
-    "/CONTRIBUTING.md",
     "/SECURITY.md",
     "/THIRD_PARTY_NOTICES.md",
     "/assets/**",

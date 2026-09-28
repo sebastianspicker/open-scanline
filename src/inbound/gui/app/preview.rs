@@ -73,4 +73,3 @@ fn preview_fingerprint(path: &Path) -> Option<(std::time::SystemTime, u64)> {
     let metadata = std::fs::metadata(path).ok()?;
     Some((metadata.modified().ok()?, metadata.len()))
 }
-

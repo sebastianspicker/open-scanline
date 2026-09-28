@@ -8,9 +8,7 @@ package in the locked all-feature build. It is generated from
 `cargo tree --locked --all-features --target all -e normal`, so it covers every
 feature and target variant Cargo reports — including Windows-only packages — not
 only the packaging host or a no-GUI build. It also reproduces every cached crate
-file named `LICENSE*`, `COPYING*`, `NOTICE*`, or `COPYRIGHT*`. Run
-`scripts/generate_rust_dependency_licenses.py --check` to confirm that the tracked
-bundle still matches the locked dependency metadata and sources.
+file named `LICENSE*`, `COPYING*`, `NOTICE*`, or `COPYRIGHT*`.
 
 The portable archive embeds the file verbatim at
 `open-scanline/licenses/RUST_DEPENDENCIES_ALL_FEATURES.md`. It records, for

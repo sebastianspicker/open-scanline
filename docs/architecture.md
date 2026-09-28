@@ -62,10 +62,9 @@ and process entry points and nothing else.
 GUI, diagnostics, plugin mode, host integration, and UI translations (loaded from
 `assets/i18n/`). Inbound calls workflows for anything that opens a device
 session or publishes output through more than one adapter. It may call
-infrastructure directly only for single-step capabilities listed in
-`scripts/check_architecture.py` (device inventory, config persistence, platform
-information, packaging, single-file convert, single-image OCR and the OCRS
-model pack, and the ONNX command entries).
+infrastructure directly only for these single-step capabilities: device
+inventory, config persistence, platform information, packaging, single-file
+convert, single-image OCR and the OCRS model pack, and the ONNX command entries.
 
 `src/error.rs` (`ScanError`) and `src/operation.rs` (`CancellationToken`) are
 shared by every layer.
@@ -73,9 +72,9 @@ shared by every layer.
 There are no traits whose only purpose is to separate layers. `DeviceSession` is a
 trait because five backends implement it and library callers may implement it
 too. The remaining traits are injection seams for a process or engine that
-tests replace: `CommandRunner` and `ImageDecoder` (SANE/WIA commands and
-artifact decoding), `OcrsRunner`, and `ModelPairValidator`. Everything else is a
-concrete type or function.
+can be supplied independently: `CommandRunner` and `ImageDecoder` (SANE/WIA
+commands and artifact decoding), `OcrsRunner`, and `ModelPairValidator`.
+Everything else is a concrete type or function.
 
 ## State and data flow
 
@@ -121,9 +120,9 @@ backend.
 
 SANE maintenance parses a separate device option inventory and builds only fixed
 allowlisted commands. Real WIA, eSCL, and file maintenance stay unsupported; mock
-and test-only WIA maintenance are marked simulated. The GUI caches that snapshot
-on device selection and inventory refresh, and disables any operation the selected
-device did not advertise.
+maintenance is marked simulated. The GUI caches that snapshot on device selection
+and inventory refresh, and disables any operation the selected device did not
+advertise.
 
 Template OCR is built in. OCRS uses an explicitly installed local RTen model pack,
 while Tesseract OCR and JPEG XL depend on explicitly selected optional executables.
@@ -134,13 +133,11 @@ never search for a sibling executable.
 
 The CLI (subcommands, output, exit codes 0/1/2/130), the plugin status JSON, the
 configuration file, scanner-profile JSON, the OCRS model-pack manifest, and the
-portable archive layout are external contracts; `tests/cli_workflows.rs`,
-`tests/cli_contract.rs`, `tests/config_contract.rs`, and the CI portable smoke
-step protect them.
+portable archive layout are external contracts. The CI build also exercises the
+portable archive launcher.
 
-A passing build or test suite cannot prove a physical scanner, driver, feeder,
-firmware, desktop session, optional model pack, or optional tool on a target
-machine.
+A successful build cannot prove a physical scanner, driver, feeder, firmware,
+desktop session, optional model pack, or optional tool on a target machine.
 
 There is no deployment service and no database migration boundary. Distribution is
 an explicitly invoked portable-ZIP step around an already built binary, and
@@ -153,19 +150,16 @@ operating system and architecture.
 The top-level modules in `src/lib.rs` (`core`, `device`, `scan`, `batch`,
 `process`, `export`, `imaging`, `pipeline`, `config`, `cli`, `gui`, the
 backend-named modules, and the rest) are the documented public library. Each is a
-`pub use` list only; `tests/public_api_contract.rs` protects their names and
-signatures, and `docs/release-notes.md` records changes. The layer modules are
-private, so implementation types never leak.
+`pub use` list only, and `docs/release-notes.md` records changes to names and
+signatures. The layer modules are private, so implementation types never leak.
 
 Put new pure values and rules in domain, concrete I/O and platform behavior in
 infrastructure, multi-step use cases in workflows, and CLI/GUI/plugin translation
 in inbound. Expose something publicly only by adding it to a facade.
 
-`scripts/check_architecture.sh` enforces the dependency direction, the inbound
-infrastructure allowlist, re-export-only facades, private layer modules, and the
-ban on `#[path]` module wiring. It tokenizes Rust before checking imports, so
-grouped and multiline imports, nested groups, and aliases are expanded and
-comments and string literals are ignored.
+The architecture requires the dependency direction, the inbound infrastructure
+allowlist, re-export-only facades, private layer modules, and no `#[path]` module
+wiring.
 
 ## Image and export resource ownership
 

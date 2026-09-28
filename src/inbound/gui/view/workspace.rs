@@ -295,4 +295,3 @@ fn start_action(
     })
     .inner
 }
-
