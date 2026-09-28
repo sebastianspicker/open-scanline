@@ -521,6 +521,23 @@ fn batch_report(directory: &Path, pages: u32) -> report::JobReport {
     report::JobReport::batch("report-test".into(), &args)
 }
 
+#[test]
+fn single_scan_report_distinguishes_pdf_documents_from_tiff_images() {
+    for (extension, expected) in [
+        ("pdf", report::OutputKind::Document),
+        ("tif", report::OutputKind::Image),
+        ("png", report::OutputKind::Image),
+    ] {
+        let path = PathBuf::from(format!("scan.{extension}"));
+        let args = crate::workflows::capture::single::ScanToFileArgs {
+            out: path.clone(),
+            ..Default::default()
+        };
+        let report = report::JobReport::scan("Scan".into(), &args, path);
+        assert_eq!(report.requested_outputs.last().unwrap().kind, expected);
+    }
+}
+
 fn published_page(path: PathBuf) -> GuiJobEvent {
     GuiJobEvent::BatchWorkflow(
         crate::workflows::capture::batch::BatchWorkflowEvent::Published(
@@ -679,6 +696,32 @@ fn saved_raw_and_final_scan_outputs_are_both_confirmed() {
         .published_files
         .iter()
         .all(|file| file.path.is_file()));
+    assert!(directory.join("raw-and-final_raw_000.tif").is_file());
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn scan_plus_keeps_each_indexed_raw_output() {
+    let directory = test_directory("indexed_scan_raw");
+    let context = egui::Context::default();
+    let mut app = OpenScanlineApp::new(None);
+    app.state.output_dir = directory.display().to_string();
+    app.state.output_name = "archive".into();
+    app.state.save_raw = true;
+
+    app.start_scan(false, true);
+    drain_until_idle(&mut app, &context);
+    let first_path = directory.join("archive_raw_000.tif");
+    let first_contents = std::fs::read(&first_path).unwrap();
+
+    app.state.width = 96;
+    app.state.height = 64;
+    app.start_scan(false, true);
+    drain_until_idle(&mut app, &context);
+
+    assert_eq!(app.state.frame_index, 2);
+    assert_eq!(std::fs::read(&first_path).unwrap(), first_contents);
+    assert!(directory.join("archive_raw_001.tif").is_file());
     let _ = std::fs::remove_dir_all(directory);
 }
 

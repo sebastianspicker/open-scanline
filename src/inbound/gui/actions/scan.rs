@@ -68,7 +68,8 @@ impl GuiState {
             .then(|| {
                 crate::domain::settings::validate_output_name(&self.output_name).map(
                     |output_name| {
-                        PathBuf::from(&self.output_dir).join(format!("{output_name}_raw.tif"))
+                        PathBuf::from(&self.output_dir)
+                            .join(format!("{output_name}_raw_{:03}.tif", self.frame_index))
                     },
                 )
             })

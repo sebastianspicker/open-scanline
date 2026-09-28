@@ -40,6 +40,9 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 
+# Local visual QA captures may include workstation-specific paths
+/design-exploration/**/implementation/*.jpg
+
 # Editors and operating systems
 .DS_Store
 ._*

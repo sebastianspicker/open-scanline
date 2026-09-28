@@ -312,7 +312,7 @@ fn output_kind(path: &Path) -> OutputKind {
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("pdf" | "tif" | "tiff") => OutputKind::Document,
+        Some("pdf") => OutputKind::Document,
         _ => OutputKind::Image,
     }
 }

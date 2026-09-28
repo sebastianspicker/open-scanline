@@ -68,8 +68,7 @@ fn render_device_controls(ui: &mut egui::Ui, state: &mut super::super::state::Gu
             }
         });
     if state.discovery_loading {
-        ui.spinner();
-        ui.label("Discovering scanners and capabilities…");
+        ui.weak("Looking for scanners…");
     }
     if state.devices.is_empty() {
         ui.label("No scanners found");
@@ -154,8 +153,8 @@ pub(super) fn render_maintenance_actions(
 fn render_crop_tab(ui: &mut egui::Ui, state: &mut super::super::state::GuiState) {
     ui.label(state.translator.t("crop.region"));
     ui.text_edit_singleline(&mut state.crop_text);
-    ui.checkbox(&mut state.flip_h, "↔");
-    ui.checkbox(&mut state.flip_v, "↕");
+    ui.checkbox(&mut state.flip_h, "Flip horizontally");
+    ui.checkbox(&mut state.flip_v, "Flip vertically");
     ui.label("Rotation");
     ui.horizontal(|ui| {
         for degrees in [0, 90, 180, 270] {
@@ -370,17 +369,13 @@ pub(super) fn render_preview(
     let last_image = state.last_image.clone();
     let translator = state.translator.clone();
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.heading(format!("{} {}", crate::APP_NAME, crate::VERSION));
-        ui.label(translator.t("status.ready"));
         let Some(path) = last_image else {
-            ui.label(translator.t("preview"));
+            ui.heading(translator.t("preview"));
+            ui.weak("Open an image, or run Preview or Scan, to see it here.");
             return;
         };
-        ui.label(format!(
-            "{}: {}",
-            translator.t("output.save"),
-            path.display()
-        ));
+        ui.heading(path.file_name().unwrap_or_default().to_string_lossy());
+        ui.weak(path.display().to_string());
         if let Some(texture) = texture {
             let size = texture.size_vec2() * state.zoom;
             let scale = if size.x > ui.available_width().min(900.0) {
@@ -398,7 +393,7 @@ pub(super) fn render_preview(
             ));
         } else {
             ui.colored_label(
-                egui::Color32::from_rgb(160, 62, 42),
+                ui.visuals().error_fg_color,
                 translator.t_args("status.error", &[("msg", &translator.t("preview"))]),
             );
         }
@@ -425,7 +420,7 @@ fn render_histogram(
         egui::Sense::hover(),
     );
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, egui::Color32::from_gray(235));
+    painter.rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
     let width = rect.width() / 256.0;
     for (index, value) in luma.iter().enumerate() {
         let height = *value as f32 / max * rect.height();
@@ -436,7 +431,7 @@ fn render_histogram(
                 egui::pos2(x + width.max(1.0), rect.bottom()),
             ),
             0.0,
-            egui::Color32::from_rgb(58, 103, 136),
+            ui.visuals().text_color(),
         );
     }
     ui.label(translator.t("hist.title"));

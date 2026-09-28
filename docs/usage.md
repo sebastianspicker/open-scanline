@@ -278,19 +278,20 @@ Run the desktop interface with the default feature set:
 cargo run -- gui
 ```
 
-The desktop opens a light scan workspace with acquisition and output settings
-shown together. Select single-image or multiple-side capture, review the
-destination, and start the scan. The progress and result views distinguish
-published page files from pending document outputs, and cancelling a batch can
-leave completed page files without a final PDF or TIFF.
+The desktop opens a light scan workspace with scanner and file settings shown
+together. Select single-image or multiple-side capture, check the list of files
+the scan will write, and start the scan from the action bar at the bottom of the
+window; if Start is unavailable, the bar says which setting to fix. The
+progress and result views list published page files as they are written,
+distinguish them from pending document outputs, and state why capture stopped.
+Cancelling a batch can leave completed page files without a final PDF or TIFF.
 
-Filename bases keep the existing naming rules: a scan uses
+File names keep the existing naming rules: a scan uses
 `<name>_scan_<frame>.<format>`, and batch page images are written under
-`<output directory>/batch`. The workspace shows the resulting paths before
-capture. Image tools provides the image preview, histogram, processing controls,
-Save/Save+, OCR, and configuration. Advanced actions keeps scanner maintenance,
-profiles, preview scanning, and the existing menus. The layout stacks vertically
-in narrower windows.
+`<output directory>/batch`. Image tools provides the image preview, histogram,
+processing controls, Save/Save+, OCR, and configuration. The header's More menu
+keeps scanner maintenance, profiles, preview scanning, and the existing menus.
+The layout stacks vertically in narrower windows.
 
 The `plugin` command provides a headless JSON status and acquisition entry point
 for host software. It does not require the GUI feature:
