@@ -186,12 +186,13 @@ impl StartupInfoW {
         std_output: *mut c_void,
         std_error: *mut c_void,
     ) -> Self {
-        let mut startup = Self::default();
-        startup.flags = STARTF_USESTDHANDLES;
-        startup.std_input = std_input;
-        startup.std_output = std_output;
-        startup.std_error = std_error;
-        startup
+        Self {
+            flags: STARTF_USESTDHANDLES,
+            std_input,
+            std_output,
+            std_error,
+            ..Self::default()
+        }
     }
 }
 
