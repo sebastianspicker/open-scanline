@@ -81,13 +81,11 @@ fn tab(ui: &mut egui::Ui, label: &str, selected: bool, enabled: bool) -> egui::R
 }
 
 fn actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp, tools: &mut bool) {
-    ui.add_enabled_ui(!app.job_active(), |ui| {
-        // The menu opener reads as a header command, not a framed button.
-        let widgets = &mut ui.visuals_mut().widgets;
-        widgets.inactive.bg_stroke = Stroke::NONE;
-        widgets.inactive.weak_bg_fill = color::PLATEN;
-        ui.menu_button("More", |ui| advanced_actions(ui, app));
-    });
+    // The menu opener reads as a header command, not a framed button.
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.bg_stroke = Stroke::NONE;
+    widgets.inactive.weak_bg_fill = color::PLATEN;
+    ui.menu_button("More", |ui| advanced_actions(ui, app));
     if app.job_active() && (*tools || app.job_report().is_none()) {
         cancel(ui, app);
     } else if quiet(ui, "Open image…", !app.job_active()).clicked() {
@@ -123,10 +121,12 @@ fn open_file(app: &mut OpenScanlineApp, tools: &mut bool) {
 
 fn advanced_actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
     let ctx = ui.ctx().clone();
-    super::super::render_file_menu(ui, &ctx, app);
-    super::super::render_edit_menu(ui, app);
-    super::super::render_scan_menu(ui, app);
-    super::super::render_view_menu(ui, &mut app.state);
-    super::super::render_profile_menu(ui, &mut app.state);
+    ui.add_enabled_ui(!app.job_active(), |ui| {
+        super::super::render_file_menu(ui, &ctx, app);
+        super::super::render_edit_menu(ui, app);
+        super::super::render_scan_menu(ui, app);
+        super::super::render_view_menu(ui, &mut app.state);
+        super::super::render_profile_menu(ui, &mut app.state);
+    });
     super::super::render_help_menu(ui, &mut app.state);
 }

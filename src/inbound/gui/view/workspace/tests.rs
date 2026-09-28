@@ -169,6 +169,35 @@ fn job_sentence_counts_sheets_for_real_duplex_feeders() {
 }
 
 #[test]
+fn single_file_plan_includes_the_unprocessed_copy() {
+    let mut app = OpenScanlineApp::new(Some(std::path::Path::new(
+        "target/gui-layout-test-absent.json",
+    )));
+    app.state.output_dir = "Scans".into();
+    app.state.output_name = "September".into();
+    app.state.output_fmt = "png".into();
+    app.state.save_raw = true;
+
+    let outputs = plan::single_outputs(&app.state).unwrap();
+    assert_eq!(outputs.len(), 2);
+    assert_eq!(
+        outputs[0].0,
+        std::path::Path::new("Scans/September_scan_000.png")
+    );
+    assert_eq!(outputs[0].1, "Image");
+    assert_eq!(
+        outputs[1].0,
+        std::path::Path::new("Scans/September_raw_000.tif")
+    );
+    assert_eq!(outputs[1].1, "Unprocessed TIFF copy");
+
+    app.state.output_fmt = "pdf".into();
+    assert_eq!(plan::single_outputs(&app.state).unwrap()[0].1, "Document");
+    app.state.output_fmt = "tif".into();
+    assert_eq!(plan::single_outputs(&app.state).unwrap()[0].1, "Image");
+}
+
+#[test]
 fn file_name_problems_use_plain_language() {
     let error = crate::domain::settings::validate_output_name("a/b")
         .unwrap_err()

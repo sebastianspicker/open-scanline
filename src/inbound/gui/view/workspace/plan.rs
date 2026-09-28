@@ -1,7 +1,7 @@
 //! The output plan: what a job will write, stated before it starts.
 
 use super::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) fn writes_pdf(state: &GuiState, batch: bool) -> bool {
     state.output_fmt == "pdf" || (batch && state.multipage && state.multipage_format == "pdf")
@@ -116,8 +116,12 @@ pub(super) fn ledger(ui: &mut egui::Ui, state: &GuiState, batch: bool) {
     ui.add_space(space::XS);
     let root = Path::new(&state.output_dir);
     if !batch {
-        match state.out_path("scan") {
-            Ok(path) => row(ui, &relative(&path, root), "Image"),
+        match single_outputs(state) {
+            Ok(outputs) => {
+                for (path, role) in outputs {
+                    row(ui, &relative(&path, root), role);
+                }
+            }
             Err(_) => note(ui, "Enter a valid file name to see the plan."),
         }
         return;
@@ -147,6 +151,29 @@ pub(super) fn ledger(ui: &mut egui::Ui, state: &GuiState, batch: bool) {
     if let Some(path) = &args.contact_sheet {
         row(ui, &relative(path, root), "Contact sheet");
     }
+}
+
+/// Use the canonical scan arguments so the plan cannot drift from the files
+/// the single-image workflow will actually publish.
+pub(super) fn single_outputs(
+    state: &GuiState,
+) -> crate::error::Result<Vec<(PathBuf, &'static str)>> {
+    let args = state.scan_args(false)?;
+    let role = if args
+        .out
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+    {
+        "Document"
+    } else {
+        "Image"
+    };
+    let mut outputs = vec![(args.out, role)];
+    if let Some(path) = args.raw_out {
+        outputs.push((path, "Unprocessed TIFF copy"));
+    }
+    Ok(outputs)
 }
 
 fn relative(path: &Path, root: &Path) -> String {

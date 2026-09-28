@@ -521,6 +521,23 @@ fn batch_report(directory: &Path, pages: u32) -> report::JobReport {
     report::JobReport::batch("report-test".into(), &args)
 }
 
+#[test]
+fn single_scan_report_distinguishes_pdf_documents_from_tiff_images() {
+    for (extension, expected) in [
+        ("pdf", report::OutputKind::Document),
+        ("tif", report::OutputKind::Image),
+        ("png", report::OutputKind::Image),
+    ] {
+        let path = PathBuf::from(format!("scan.{extension}"));
+        let args = crate::workflows::capture::single::ScanToFileArgs {
+            out: path.clone(),
+            ..Default::default()
+        };
+        let report = report::JobReport::scan("Scan".into(), &args, path);
+        assert_eq!(report.requested_outputs.last().unwrap().kind, expected);
+    }
+}
+
 fn published_page(path: PathBuf) -> GuiJobEvent {
     GuiJobEvent::BatchWorkflow(
         crate::workflows::capture::batch::BatchWorkflowEvent::Published(
