@@ -211,36 +211,14 @@ fn unpublished_outputs(
 fn pages(ui: &mut egui::Ui, report: &JobReport) {
     let saved: Vec<_> = files(report, OutputKind::Page).collect();
     if let Some(first) = saved.first() {
-        ui.add_space(space::M);
-        if let Some(folder) = first.path.parent() {
-            ui.label(label_text(&format!("{} page images in", saved.len())));
-            ui.label(
-                RichText::new(display_path(folder))
-                    .font(theme::mono(size::MONO_SMALL))
-                    .color(color::GRAPHITE),
-            )
-            .on_hover_text(folder.display().to_string());
-            ui.add_space(space::XS);
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("published-pages")
-            .max_height(300.0)
-            .min_scrolled_height(saved.len().min(8) as f32 * 32.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                for file in saved {
-                    ledger_row(ui, &file_name(&file.path), "Saved", true);
-                }
-            });
+        saved_pages(ui, &saved, first);
     } else if report.side_limit > 1 {
-        note(
-            ui,
-            if report.terminal.is_none() {
-                "No page images saved yet."
-            } else {
-                "No page images were saved."
-            },
-        );
+        let message = if report.terminal.is_none() {
+            "No page images saved yet."
+        } else {
+            "No page images were saved."
+        };
+        note(ui, message);
     }
     if report.terminal.is_none() && report.sides_complete < report.side_limit {
         note(
@@ -253,6 +231,30 @@ fn pages(ui: &mut egui::Ui, report: &JobReport) {
     } else if report.terminal.is_some() {
         missing_pages(ui, report);
     }
+}
+
+fn saved_pages(ui: &mut egui::Ui, saved: &[&PublishedFile], first: &PublishedFile) {
+    ui.add_space(space::M);
+    if let Some(folder) = first.path.parent() {
+        ui.label(label_text(&format!("{} page images in", saved.len())));
+        ui.label(
+            RichText::new(display_path(folder))
+                .font(theme::mono(size::MONO_SMALL))
+                .color(color::GRAPHITE),
+        )
+        .on_hover_text(folder.display().to_string());
+        ui.add_space(space::XS);
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("published-pages")
+        .max_height(300.0)
+        .min_scrolled_height(saved.len().min(8) as f32 * 32.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for file in saved {
+                ledger_row(ui, &file_name(&file.path), "Saved", true);
+            }
+        });
 }
 
 fn missing_pages(ui: &mut egui::Ui, report: &JobReport) {
