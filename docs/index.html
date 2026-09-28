@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Scanline: local scanning, processing, and OCR in Rust</title>
+  <meta name="description" content="Open Scanline takes pages from your scanner to files on your own disk: page images, multipage PDF or TIFF, searchable and password-protected PDFs. Command-line tool, desktop app, and Rust library. No cloud, no accounts, no telemetry.">
+  <meta name="color-scheme" content="light">
+  <link rel="preload" href="assets/fonts/AtkinsonHyperlegibleNext-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/AtkinsonHyperlegibleNext-Bold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="masthead">
+    <div class="wrap masthead-row">
+      <a class="wordmark" href="#top" aria-label="Open Scanline, top of page">
+        <svg class="mark" viewBox="0 0 22 24" width="22" height="24" aria-hidden="true" focusable="false">
+          <rect x="5" y="3" width="12" height="17" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <line x1="1" y1="14" x2="21" y2="14" stroke="var(--lamp)" stroke-width="2"/>
+        </svg>
+        <span>Open Scanline</span>
+      </a>
+      <nav aria-label="Sections">
+        <a href="#tour">Tour</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#sources">Sources</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="https://github.com/sebastianspicker/open-scanline">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="intro wrap" id="top" aria-labelledby="intro-title">
+      <div class="intro-text">
+        <p class="readout">Local scanning · Rust · MIT</p>
+        <h1 id="intro-title">From the scanner glass to your disk, and nowhere else.</h1>
+        <p class="lead">
+          Open Scanline acquires pages from flatbed and document scanners, cleans
+          them up, and writes page images, searchable PDFs, and multipage TIFF or
+          PDF files on your own machine. It is a command-line tool, a desktop
+          app, and a Rust library you can embed.
+        </p>
+        <p class="promise">No cloud service, no accounts, no telemetry.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/sebastianspicker/open-scanline">Source on GitHub</a>
+          <a class="text-link" href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md">Read the usage guide</a>
+        </div>
+      </div>
+      <figure class="intro-shot platen">
+        <img src="assets/screenshots/prepare.jpg" width="1600" height="1000"
+             alt="The Prepare screen: a mock scanner, document feeder, both sides, six sides at 300 dpi, and a list of the files the scan will write">
+        <span class="scan-line" aria-hidden="true"></span>
+      </figure>
+    </section>
+
+    <section class="band" id="tour" aria-labelledby="tour-title">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">01</span>
+          <h2 id="tour-title">One job, three screens</h2>
+        </header>
+
+        <article class="step">
+          <div class="step-text">
+            <h3><span class="num">1</span> Prepare</h3>
+            <p>
+              Choose the scanner, paper source, sides, and resolution. The file
+              plan lists the exact names the scan will write before you press
+              Start, and Start says why it's disabled when a setting needs fixing.
+            </p>
+          </div>
+          <figure class="platen">
+            <img src="assets/screenshots/prepare-actions.jpg" width="1600" height="1000" loading="lazy"
+                 alt="Output settings: the file plan with the multipage PDF and six page images, searchable PDF with built-in text recognition, and the Start scan action">
+          </figure>
+        </article>
+
+        <article class="step">
+          <div class="step-text">
+            <h3><span class="num">2</span> Scanning</h3>
+            <p>
+              One slot per requested side, paired for duplex. Each page is listed
+              the moment it is written to disk. The PDF is marked as written
+              after the last side, because that is when it is assembled.
+            </p>
+          </div>
+          <figure class="platen">
+            <img src="assets/screenshots/scanning.jpg" width="1600" height="1000" loading="lazy"
+                 alt="Scanning: four of six sides saved, the fifth being captured, four page files listed as saved and the PDF waiting for the last side">
+          </figure>
+        </article>
+
+        <article class="step">
+          <div class="step-text">
+            <h3><span class="num">3</span> Saved</h3>
+            <p>
+              The result names every file that exists and why capture stopped:
+              the side limit or an empty feeder. If a scan fails, it says which
+              files were kept and which were never created.
+            </p>
+          </div>
+          <figure class="platen">
+            <img src="assets/screenshots/saved.jpg" width="1600" height="1000" loading="lazy"
+                 alt="Saved: all six sides saved, stopped at the side limit, the PDF and six page images listed with check marks">
+          </figure>
+        </article>
+
+        <div class="details">
+          <figure>
+            <img src="assets/screenshots/invalid-name.jpg" width="1600" height="1000" loading="lazy"
+                 alt="A file name containing a slash is rejected inline and Start scan is disabled with the reason">
+            <figcaption>Bad file names are caught inline, before anything is scanned.</figcaption>
+          </figure>
+          <figure class="pair">
+            <img src="assets/screenshots/narrow-prepare.jpg" width="700" height="1000" loading="lazy"
+                 alt="Narrow window showing scanner and page settings">
+            <img src="assets/screenshots/narrow-actions.jpg" width="700" height="1000" loading="lazy"
+                 alt="Narrow window showing file settings with the action bar still visible">
+            <figcaption>Narrow windows stack the same controls in reading order; the action bar stays put.</figcaption>
+          </figure>
+        </div>
+
+        <p class="fine">
+          Screenshots come from the macOS build using the built-in mock source. No
+          scanner hardware or personal documents are shown, and paths are shortened
+          to <code>~</code>.
+        </p>
+      </div>
+    </section>
+
+    <section class="wrap" id="capabilities" aria-labelledby="capabilities-title">
+      <header class="section-head">
+        <span class="num">02</span>
+        <h2 id="capabilities-title">What it does</h2>
+      </header>
+      <dl class="spec">
+        <div>
+          <dt>Acquire</dt>
+          <dd>Single pages through mock, file, WIA, SANE, and eSCL sources, plus one-session feeder batches through WIA, SANE, and eSCL when the device advertises the requested feeder controls.</dd>
+        </div>
+        <div>
+          <dt>Process</dt>
+          <dd>Crop, rotate, flip, color and levels, deskew, white balance, sharpening, document cleanup, and film-oriented controls.</dd>
+        </div>
+        <div>
+          <dt>Export</dt>
+          <dd><code>PNG</code> <code>JPEG</code> <code>TIFF</code> <code>WebP</code> <code>BMP</code> <code>GIF</code> <code>PDF</code>, multipage TIFF and PDF, including searchable and password-protected PDFs.</dd>
+        </div>
+        <div>
+          <dt>Read text</dt>
+          <dd>Built-in offline template OCR, optional local OCRS model packs for printed Latin English, and optional Tesseract integration. No silent fallback between engines.</dd>
+        </div>
+        <div>
+          <dt>Maintain</dt>
+          <dd>Capability-aware calibration and focus where the device advertises them, and clearly simulated controls for the mock source.</dd>
+        </div>
+        <div>
+          <dt>Run models</dt>
+          <dd>Local inference for user-supplied ONNX image models through an explicitly selected, version-matched worker.</dd>
+        </div>
+        <div>
+          <dt>Configure</dt>
+          <dd>JSON settings in the platform's <code>open-scanline</code> configuration directory. PDF passwords are never written to it.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="wrap" id="sources" aria-labelledby="sources-title">
+      <header class="section-head">
+        <span class="num">03</span>
+        <h2 id="sources-title">Sources and platforms</h2>
+      </header>
+      <p class="section-lead">
+        Mock and file sources are always included, so you can build, test, and try
+        the whole workflow without hardware. Real scanners depend on the operating
+        system, installed software, device permissions, and network.
+      </p>
+      <div class="table-wrap" tabindex="0" role="region" aria-labelledby="sources-title">
+        <table role="table">
+          <thead role="rowgroup">
+            <tr role="row"><th scope="col" role="columnheader">Source</th><th scope="col" role="columnheader">Linux</th><th scope="col" role="columnheader">macOS</th><th scope="col" role="columnheader">Windows</th><th scope="col" role="columnheader">Needs</th></tr>
+          </thead>
+          <tbody role="rowgroup">
+            <tr role="row"><th scope="row" role="rowheader">Mock and file</th><td role="cell" data-label="Linux"><span>Yes</span></td><td role="cell" data-label="macOS"><span>Yes</span></td><td role="cell" data-label="Windows"><span>Yes</span></td><td role="cell" data-label="Needs"><span>Nothing beyond a readable input file</span></td></tr>
+            <tr role="row"><th scope="row" role="rowheader">SANE</th><td role="cell" data-label="Linux"><span>Yes</span></td><td role="cell" data-label="macOS"><span>With SANE</span></td><td role="cell" data-label="Windows"><span>With SANE</span></td><td role="cell" data-label="Needs"><span>A working <code>scanimage</code> and a configured device</span></td></tr>
+            <tr role="row"><th scope="row" role="rowheader">WIA</th><td role="cell" data-label="Linux"><span>No</span></td><td role="cell" data-label="macOS"><span>No</span></td><td role="cell" data-label="Windows"><span>Yes</span></td><td role="cell" data-label="Needs"><span>Windows PowerShell, WIA, and a usable scanner</span></td></tr>
+            <tr role="row"><th scope="row" role="rowheader">eSCL</th><td role="cell" data-label="Linux"><span>Yes</span></td><td role="cell" data-label="macOS"><span>Yes</span></td><td role="cell" data-label="Windows"><span>Yes</span></td><td role="cell" data-label="Needs"><span>A reachable AirScan/eSCL scanner over HTTP or HTTPS</span></td></tr>
+            <tr role="row"><th scope="row" role="rowheader">TWAIN host</th><td role="cell" data-label="Linux"><span>Host</span></td><td role="cell" data-label="macOS"><span>Host</span></td><td role="cell" data-label="Windows"><span>Host</span></td><td role="cell" data-label="Needs"><span>A separate host or bridge; not an acquisition backend</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="fine">
+        A reported backend does not guarantee that a particular scanner is
+        installed, connected, or reachable. Details are in the
+        <a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/backends.md">backend guide</a>.
+      </p>
+    </section>
+
+    <section class="band" id="quick-start" aria-labelledby="quick-start-title">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">04</span>
+          <h2 id="quick-start-title">Quick start</h2>
+        </header>
+        <div class="quick">
+          <p class="section-lead">
+            The repository pins Rust 1.91.0. The core-only profile leaves out the
+            GUI, OCRS, and ONNX. Scanner hardware is optional.
+          </p>
+          <pre><code><span class="comment"># Scan one page from the mock source, then process it</span>
+cargo run --no-default-features -- scan --device mock --out scan.png \
+  --width 320 --height 240
+cargo run --no-default-features -- process --in scan.png \
+  --out processed.png --invert
+
+<span class="comment"># Launch the desktop app (default features)</span>
+cargo run -- gui</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap" id="docs" aria-labelledby="docs-title">
+      <header class="section-head">
+        <span class="num">05</span>
+        <h2 id="docs-title">Documentation</h2>
+      </header>
+      <ul class="ledger">
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/usage.md"><code>docs/usage.md</code></a><span>Commands, configuration, OCR, PDF export, desktop and plugin modes</span></li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/backends.md"><code>docs/backends.md</code></a><span>Platform and scanner requirements, discovery, optional tools</span></li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/architecture.md"><code>docs/architecture.md</code></a><span>Layers, data flow, and compatibility boundaries</span></li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/performance.md"><code>docs/performance.md</code></a><span>The reproducible benchmark runner and its limits</span></li>
+        <li><a href="https://github.com/sebastianspicker/open-scanline/blob/main/docs/release-notes.md"><code>docs/release-notes.md</code></a><span>Public API changes planned for the next release</span></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <div class="wrap colophon-row">
+      <p>MIT licensed. Set in Atkinson Hyperlegible Next and Mono, served from this site.</p>
+      <p>
+        <a href="https://github.com/sebastianspicker/open-scanline">Repository</a>
+        <a href="https://github.com/sebastianspicker/open-scanline/issues">Issues</a>
+        <a href="https://github.com/sebastianspicker/open-scanline/blob/main/SECURITY.md">Security</a>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

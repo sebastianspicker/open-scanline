@@ -3,17 +3,17 @@
 use crate::domain::acquisition::{
     validate_scan_dpi, DeviceOpenPolicy, ScanMode, ScanProgress, ScanRequest,
 };
-use crate::domain::image::{checked_image_len, PixelFormat, Rect};
+use crate::domain::export::ExportOptions;
+use crate::domain::image::{checked_image_len, ImageBuffer, PixelFormat, Rect};
 use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::acquisition::{AcquisitionPort, DeviceSession};
-use crate::workflows::ports::media::MediaPort;
-use crate::workflows::process::{process_and_publish_page_with_media, PageWorkflowRequest};
+use crate::infrastructure::acquisition::DeviceSession;
+use crate::infrastructure::config::AppConfig;
+use crate::operation::CancellationToken;
+use crate::workflows::process::{process_and_publish_page, PageWorkflowRequest};
 use crate::workflows::publication::{
-    prepare_export_options_with_media, ExportOptions, PreparedExportOptions,
+    prepare_export_options, validate_supported_output_path, PreparedExportOptions,
 };
-use crate::workflows::settings::AppConfig;
 use std::path::PathBuf;
 
 /// Typed scan arguments shared by each application entry point.
@@ -59,33 +59,36 @@ impl Default for ScanToFileArgs {
     }
 }
 
-/// Scan using explicitly supplied acquisition and media adapters.
-pub fn run_scan_to_file_with_export_options_and_token_and_policy_with_ports<
-    A: AcquisitionPort,
-    M: MediaPort,
->(
-    args: ScanToFileArgs,
-    export: &ExportOptions,
-    token: CancellationToken,
-    policy: DeviceOpenPolicy,
-    acquisition: &A,
-    media: &M,
-) -> Result<PathBuf> {
+/// Runtime controls for the canonical capture entry.
+#[derive(Default)]
+pub(crate) struct CaptureOptions {
+    pub(crate) export: ExportOptions,
+    pub(crate) cancellation: CancellationToken,
+    pub(crate) policy: DeviceOpenPolicy,
+}
+
+/// Scan using the native acquisition and media adapters.
+pub(crate) fn run_scan_to_file(args: ScanToFileArgs, options: CaptureOptions) -> Result<PathBuf> {
+    let CaptureOptions {
+        export,
+        cancellation: token,
+        policy,
+    } = options;
     // Validate output-only settings before device acquisition or any output write.
-    let export = prepare_export_options_with_media(&args.out, export, media)?;
-    let plan = prepare_scan(&args, media)?;
+    let export = prepare_export_options(&args.out, &export)?;
+    let plan = prepare_scan(&args)?;
     if is_cancelled(&args, &token) {
         return Err(ScanError::Cancelled("scan cancelled".into()));
     }
 
-    let dev_id = acquisition.resolve_device_id(args.device.as_deref());
+    let dev_id = crate::infrastructure::acquisition::resolve_device_id(args.device.as_deref());
     report_progress(&args, "open", 0.05, &format!("opening {dev_id}"));
 
-    let session = acquisition.open_device_with_policy(&dev_id, policy)?;
+    let session = crate::infrastructure::acquisition::open_device_with_policy(&dev_id, policy)?;
     session.bind_cancellation(token.clone());
     let result = {
         let context = ScanContext::new(&args, dev_id, plan, &export, &token);
-        context.run(&*session, media)
+        context.run(&session)
     };
     session.close();
     result
@@ -98,7 +101,7 @@ struct ScanPlan {
     extra_white_balance: bool,
 }
 
-fn prepare_scan<M: MediaPort>(args: &ScanToFileArgs, media: &M) -> Result<ScanPlan> {
+fn prepare_scan(args: &ScanToFileArgs) -> Result<ScanPlan> {
     let cfg = args.config.clone().unwrap_or_default();
     // Fold invert into pipeline once — never apply invert twice (pipeline + flag).
     let mut pipeline = args.pipeline.clone();
@@ -107,7 +110,7 @@ fn prepare_scan<M: MediaPort>(args: &ScanToFileArgs, media: &M) -> Result<ScanPl
     }
     // Fold config white_balance only when not already requested on pipeline.
     let extra_white_balance = cfg.white_balance && !pipeline.white_balance;
-    validate_scan_args(args, &pipeline, media)?;
+    validate_scan_args(args, &pipeline)?;
     // A scan crop is a device acquisition region. Clear it from the
     // post-acquisition pipeline so hardware and simulated sources never crop
     // the same rectangle twice.
@@ -119,14 +122,10 @@ fn prepare_scan<M: MediaPort>(args: &ScanToFileArgs, media: &M) -> Result<ScanPl
     })
 }
 
-fn validate_scan_args<M: MediaPort>(
-    args: &ScanToFileArgs,
-    pipeline: &PipelinePrefs,
-    media: &M,
-) -> Result<()> {
+fn validate_scan_args(args: &ScanToFileArgs, pipeline: &PipelinePrefs) -> Result<()> {
     validate_dimensions(args)?;
     validate_scan_dpi(args.dpi, args.dpi)?;
-    validate_output_destinations(args, media)?;
+    validate_output_destinations(args)?;
     if args.duplex {
         return Err(ScanError::Invalid(
             "single-image scan cannot return both duplex sides; use batch --source adf --duplex with an even --pages value"
@@ -139,8 +138,8 @@ fn validate_scan_args<M: MediaPort>(
     Ok(())
 }
 
-fn validate_output_destinations<M: MediaPort>(args: &ScanToFileArgs, media: &M) -> Result<()> {
-    validate_image_output_path(&args.out, "scan output", media)?;
+fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
+    validate_supported_output_path(&args.out, "scan output")?;
     let Some(raw_out) = args.raw_out.as_ref() else {
         return Ok(());
     };
@@ -148,30 +147,14 @@ fn validate_output_destinations<M: MediaPort>(args: &ScanToFileArgs, media: &M) 
     if effective_raw_out.extension().is_none() {
         effective_raw_out.set_extension("tif");
     }
-    validate_image_output_path(&effective_raw_out, "raw output", media)?;
-    if media.output_paths_alias(&args.out, &effective_raw_out)? {
+    validate_supported_output_path(&effective_raw_out, "raw output")?;
+    if crate::infrastructure::runtime::atomic_publish::output_paths_alias(
+        &args.out,
+        &effective_raw_out,
+    )? {
         return Err(ScanError::Invalid(format!(
             "raw output aliases final output: {}",
             args.out.display()
-        )));
-    }
-    Ok(())
-}
-
-fn validate_image_output_path<M: MediaPort>(
-    path: &std::path::Path,
-    label: &str,
-    media: &M,
-) -> Result<()> {
-    media.validate_output_leaf(path, label)?;
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))?;
-    if !media.supports_extension(&extension) {
-        return Err(ScanError::Invalid(format!(
-            "unsupported {label} extension '.{extension}'"
         )));
     }
     Ok(())
@@ -262,13 +245,22 @@ impl<'args> ScanContext<'args> {
         }
     }
 
-    fn run<M: MediaPort>(
-        &self,
-        session: &(impl DeviceSession + ?Sized),
-        media: &M,
-    ) -> Result<PathBuf> {
+    fn run(&self, session: &(impl DeviceSession + ?Sized)) -> Result<PathBuf> {
+        let image = self.acquire_image(session)?;
+        let path = self.publish_image(image, session)?;
+        report_progress(self.args, "done", 1.0, &path.display().to_string());
+        Ok(path)
+    }
+
+    fn acquire_image(&self, session: &(impl DeviceSession + ?Sized)) -> Result<ImageBuffer> {
         self.cancel_if_requested(session)?;
         session.set_params(&self.request)?;
+        self.report_acquisition_start();
+        self.cancel_if_requested(session)?;
+        self.acquire_from_session(session)
+    }
+
+    fn report_acquisition_start(&self) {
         report_progress(
             self.args,
             "acquire",
@@ -279,20 +271,40 @@ impl<'args> ScanContext<'args> {
                 "scanning"
             },
         );
-        self.cancel_if_requested(session)?;
-        let image = if self.args.use_preview {
-            session.preview(&self.request)?
+    }
+
+    fn acquire_from_session(&self, session: &(impl DeviceSession + ?Sized)) -> Result<ImageBuffer> {
+        if self.args.use_preview {
+            session.preview(&self.request)
         } else {
-            session.scan(&self.request)?
-        };
+            session.scan(&self.request)
+        }
+    }
+
+    fn publish_image(
+        &self,
+        image: ImageBuffer,
+        session: &(impl DeviceSession + ?Sized),
+    ) -> Result<PathBuf> {
         if let Some(raw_out) = self.args.raw_out.as_ref() {
-            media.publish_raw(raw_out, &image, Some(self.args.dpi), Some(self.token))?;
+            let raw_path = crate::infrastructure::media::save_raw_image_with_cancellation(
+                raw_out,
+                &image,
+                Some(self.args.dpi),
+                Some(self.token),
+            )?;
+            report_progress(
+                self.args,
+                "raw-saved",
+                0.55,
+                &raw_path.display().to_string(),
+            );
         }
         self.cancel_if_requested(session)?;
         report_progress(self.args, "pipeline", 0.7, "pipeline");
         self.cancel_if_requested(session)?;
         report_progress(self.args, "save", 0.9, &self.args.out.display().to_string());
-        let path = process_and_publish_page_with_media(
+        process_and_publish_page(
             image,
             PageWorkflowRequest {
                 destination: &self.args.out,
@@ -303,11 +315,8 @@ impl<'args> ScanContext<'args> {
                 export: self.export,
                 cancellation: Some(self.token),
             },
-            media,
-        )?
-        .path;
-        report_progress(self.args, "done", 1.0, &path.display().to_string());
-        Ok(path)
+        )
+        .map(|result| result.path)
     }
 
     fn cancel_if_requested(&self, session: &(impl DeviceSession + ?Sized)) -> Result<()> {

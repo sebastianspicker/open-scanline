@@ -2,7 +2,7 @@
 
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -73,12 +73,4 @@ pub trait CommandRunner: Send + Sync {
 
 pub trait ImageDecoder: Send + Sync {
     fn decode(&self, path: &Path) -> Result<ImageBuffer>;
-}
-
-pub struct NativeImageDecoder;
-
-impl ImageDecoder for NativeImageDecoder {
-    fn decode(&self, path: &Path) -> Result<ImageBuffer> {
-        crate::infrastructure::media::load_image(path)
-    }
 }

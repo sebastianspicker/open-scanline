@@ -13,7 +13,8 @@ Commands:
   convert              Convert an image to PNG, JPEG, TIFF, WebP, BMP, GIF, or PDF; JPEG XL needs cjxl
   process              Crop, transform, clean, and adjust an image
   onnx                 Run a user-supplied ONNX image model and print JSON
-  ocr                  Built-in offline OCR or optional Tesseract OCR
+  ocr                  Built-in offline, installed OCRS, or optional Tesseract OCR
+  ocr-model            Install or inspect locally supplied OCRS RTen model packs
   info                 Capability and runtime availability JSON
   config               Show or write the JSON configuration
   gui                  Desktop GUI (default gui feature and desktop session)
@@ -32,7 +33,7 @@ PDF export controls for scan, process, and batch:
   --allow-insecure-password-argv
                                Explicitly opt in to a command-line password
   --ocr-lang LANG             OCR language (default: eng)
-  --ocr-engine offline|tesseract
+  --ocr-engine offline|ocrs|tesseract
                                OCR implementation for searchable PDF output
   --scanner-profile PATH      Apply a scanner profile before export
   For batch, these PDF-only controls require a PDF destination selected by --multipage-pdf,

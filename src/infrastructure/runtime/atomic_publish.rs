@@ -128,7 +128,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
 
     let left = fs::metadata(left)?;
@@ -137,7 +137,7 @@ fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> 
 }
 
 #[cfg(windows)]
-fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> {
     use std::ffi::c_void;
     use std::os::windows::io::AsRawHandle;
 
@@ -188,7 +188,7 @@ fn files_have_same_identity(left: &Path, right: &Path) -> std::io::Result<bool> 
 }
 
 #[cfg(not(any(unix, windows)))]
-fn files_have_same_identity(_left: &Path, _right: &Path) -> std::io::Result<bool> {
+pub(crate) fn files_have_same_identity(_left: &Path, _right: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
@@ -254,6 +254,21 @@ pub(crate) fn replace_file_atomic(source: &Path, destination: &Path) -> std::io:
         fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
     }
 
+    // `canonicalize` returns verbatim (extended-length) paths on Windows.
+    // MoveFileExW otherwise applies the legacy MAX_PATH limit even though the
+    // surrounding std::fs operations accept longer model-pack paths.
+    let source = source.canonicalize()?;
+    let destination_name = destination.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "atomic destination has no file name",
+        )
+    })?;
+    let destination_parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let destination = destination_parent.canonicalize()?.join(destination_name);
     let source = source
         .as_os_str()
         .encode_wide()

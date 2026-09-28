@@ -68,39 +68,63 @@ pub(crate) fn validate_artifact_quota(directory: &Path, quota: ArtifactQuota) ->
         ))
     })?;
     for entry in entries {
-        let entry = entry.map_err(|error| {
-            ScanError::Unsupported(format!(
-                "could not inspect native artifact directory {}: {error}",
-                directory.display()
-            ))
-        })?;
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            ScanError::Unsupported(format!(
-                "could not inspect native artifact {}: {error}",
-                path.display()
-            ))
-        })?;
-        if metadata.file_type().is_dir() {
-            return Err(ScanError::Unsupported(format!(
-                "native artifact output contains unexpected nested directory {}",
-                path.display()
-            )));
-        }
-        if !metadata.file_type().is_file() {
-            return Err(ScanError::Unsupported(format!(
-                "native artifact output contains unexpected non-regular entry {}",
-                path.display()
-            )));
-        }
-        files = files.saturating_add(1);
-        bytes = bytes.saturating_add(metadata.len());
-        if files > quota.max_files || bytes > quota.max_bytes {
-            return Err(ScanError::Unsupported(format!(
-                "native artifact output exceeded the {} file / {} byte quota",
-                quota.max_files, quota.max_bytes
-            )));
-        }
+        add_artifact_entry(entry?, quota, &mut files, &mut bytes)?;
     }
     Ok(())
 }
+
+fn add_artifact_entry(
+    entry: fs::DirEntry,
+    quota: ArtifactQuota,
+    files: &mut u64,
+    bytes: &mut u64,
+) -> Result<()> {
+    // DirEntry::metadata performs fresh non-following metadata access on Unix.
+    // Windows may return enumeration-time metadata, so use a fresh path lookup.
+    // https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata
+    let metadata = fresh_entry_metadata(&entry).map_err(|error| {
+        ScanError::Unsupported(format!(
+            "could not inspect native artifact {}: {error}",
+            entry.path().display()
+        ))
+    })?;
+    validate_artifact_entry(&entry, &metadata)?;
+    *files = files.saturating_add(1);
+    *bytes = bytes.saturating_add(metadata.len());
+    if *files > quota.max_files || *bytes > quota.max_bytes {
+        return Err(ScanError::Unsupported(format!(
+            "native artifact output exceeded the {} file / {} byte quota",
+            quota.max_files, quota.max_bytes
+        )));
+    }
+    Ok(())
+}
+
+fn fresh_entry_metadata(entry: &fs::DirEntry) -> std::io::Result<fs::Metadata> {
+    #[cfg(unix)]
+    {
+        entry.metadata()
+    }
+    #[cfg(not(unix))]
+    {
+        fs::symlink_metadata(entry.path())
+    }
+}
+
+fn validate_artifact_entry(entry: &fs::DirEntry, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.file_type().is_file() {
+        return Ok(());
+    }
+    let kind = if metadata.file_type().is_dir() {
+        "nested directory"
+    } else {
+        "non-regular entry"
+    };
+    Err(ScanError::Unsupported(format!(
+        "native artifact output contains unexpected {kind} {}",
+        entry.path().display()
+    )))
+}
+
+#[cfg(test)]
+mod tests;

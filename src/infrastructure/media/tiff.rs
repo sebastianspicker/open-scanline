@@ -1,10 +1,13 @@
-use super::codecs::{buffer_to_dynamic, create_output_temp, validate_output_container};
-use super::{load_image, save_image, save_pdf_with_options, PdfOptions};
+use super::codecs::{create_output_temp, validate_output_container};
+use super::load_image;
 use crate::domain::image::{ImageBuffer, PixelFormat};
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+mod append;
+pub use append::append_page_to_multipage;
 
 const TIFF_IFD_ENTRY_COUNT: u16 = 12;
 const TIFF_IFD_SIZE: u32 = 2 + TIFF_IFD_ENTRY_COUNT as u32 * 12 + 4;
@@ -26,11 +29,7 @@ struct TiffPageLayout {
 impl TiffPageLayout {
     fn new(ifd_at: u32, strip_len: u32, has_next_page: bool) -> Result<Self> {
         let ifd_at = align_tiff_offset(ifd_at)?;
-        let bps_at = checked_tiff_offset(ifd_at, TIFF_IFD_SIZE)?;
-        let xres_at = checked_tiff_offset(bps_at, 6)?;
-        let yres_at = checked_tiff_offset(xres_at, 8)?;
-        let strip_at = checked_tiff_offset(yres_at, 8)?;
-        let strip_end = checked_tiff_offset(strip_at, strip_len)?;
+        let (bps_at, xres_at, yres_at, strip_at, strip_end) = page_data_offsets(ifd_at, strip_len)?;
         let next_ifd_at = if has_next_page {
             align_tiff_offset(strip_end)?
         } else {
@@ -48,6 +47,20 @@ impl TiffPageLayout {
             next_ifd_field_at,
         })
     }
+}
+
+fn page_data_offsets(ifd_at: u32, strip_len: u32) -> Result<(u32, u32, u32, u32, u32)> {
+    let bps_at = checked_tiff_offset(ifd_at, TIFF_IFD_SIZE)?;
+    let xres_at = checked_tiff_offset(bps_at, 6)?;
+    let yres_at = checked_tiff_offset(xres_at, 8)?;
+    let strip_at = checked_tiff_offset(yres_at, 8)?;
+    Ok((
+        bps_at,
+        xres_at,
+        yres_at,
+        strip_at,
+        checked_tiff_offset(strip_at, strip_len)?,
+    ))
 }
 
 fn checked_tiff_offset(offset: u32, length: u32) -> Result<u32> {
@@ -130,42 +143,123 @@ pub fn save_multipage_tiff_from_paths_with_transform_and_cancellation<F>(
 where
     F: FnMut(&ImageBuffer) -> Result<ImageBuffer>,
 {
+    save_multipage_tiff_with_loader_and_transform(
+        pages,
+        out.as_ref(),
+        dpi,
+        |path| load_image(path),
+        |image| transform(&image),
+        cancellation,
+    )
+}
+
+pub(crate) fn save_multipage_tiff_with_loader_and_transform<L, F>(
+    pages: &[PathBuf],
+    out: &Path,
+    dpi: Option<u32>,
+    mut load: L,
+    mut transform: F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    L: FnMut(&Path) -> Result<ImageBuffer>,
+    F: FnMut(ImageBuffer) -> Result<ImageBuffer>,
+{
+    validate_tiff_path_request(pages, cancellation)?;
+    create_tiff_parent(out)?;
+    let temp = create_output_temp(out)?;
+    write_and_publish_tiff(temp, pages, dpi, &mut load, &mut transform, cancellation)?;
+    Ok(out.to_path_buf())
+}
+
+fn validate_tiff_path_request(
+    pages: &[PathBuf],
+    cancellation: Option<&CancellationToken>,
+) -> Result<()> {
     if pages.is_empty() {
         return Err(ScanError::Invalid(
             "save_multipage_tiff requires at least one page".into(),
         ));
     }
-    check_tiff_cancellation(cancellation)?;
-    let out = out.as_ref();
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    let temp = create_output_temp(out)?;
+    check_tiff_cancellation(cancellation)
+}
+fn write_and_publish_tiff<L, F>(
+    temp: super::codecs::OutputTemp,
+    pages: &[PathBuf],
+    dpi: Option<u32>,
+    load: &mut L,
+    transform: &mut F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<()>
+where
+    L: FnMut(&Path) -> Result<ImageBuffer>,
+    F: FnMut(ImageBuffer) -> Result<ImageBuffer>,
+{
     let mut writer = TiffStreamWriter::new(temp.path())?;
-    for (page_index, path) in pages.iter().enumerate() {
-        check_tiff_cancellation(cancellation)?;
-        let buf = load_image(path)?;
-        check_tiff_cancellation(cancellation)?;
-        let buf = transform(&buf)?;
-        check_tiff_cancellation(cancellation)?;
-        writer.write_image(buf, page_index + 1 < pages.len(), dpi)?;
-    }
+    write_transformed_tiff_pages(&mut writer, pages, dpi, load, transform, cancellation)?;
     writer.finish()?;
     drop(writer);
     validate_output_container(temp.path(), "tiff")?;
     check_tiff_cancellation(cancellation)?;
-    temp.publish()?;
-    Ok(out.to_path_buf())
+    temp.publish()
+}
+
+fn create_tiff_parent(out: &Path) -> Result<()> {
+    if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn write_transformed_tiff_pages<L, F>(
+    writer: &mut TiffStreamWriter,
+    pages: &[PathBuf],
+    dpi: Option<u32>,
+    load: &mut L,
+    transform: &mut F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<()>
+where
+    L: FnMut(&Path) -> Result<ImageBuffer>,
+    F: FnMut(ImageBuffer) -> Result<ImageBuffer>,
+{
+    for (page_index, path) in pages.iter().enumerate() {
+        write_transformed_tiff_page(
+            writer,
+            path,
+            page_index + 1 < pages.len(),
+            dpi,
+            load,
+            transform,
+            cancellation,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_transformed_tiff_page<L, F>(
+    writer: &mut TiffStreamWriter,
+    path: &Path,
+    has_next: bool,
+    dpi: Option<u32>,
+    load: &mut L,
+    transform: &mut F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<()>
+where
+    L: FnMut(&Path) -> Result<ImageBuffer>,
+    F: FnMut(ImageBuffer) -> Result<ImageBuffer>,
+{
+    check_tiff_cancellation(cancellation)?;
+    let image = load(path)?;
+    check_tiff_cancellation(cancellation)?;
+    let image = transform(image)?;
+    check_tiff_cancellation(cancellation)?;
+    writer.write_image(image, has_next, dpi)
 }
 
 fn check_tiff_cancellation(cancellation: Option<&CancellationToken>) -> Result<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Err(ScanError::Cancelled("TIFF publication cancelled".into()));
-    }
-    Ok(())
+    crate::operation::check_cancellation(cancellation, "TIFF publication cancelled")
 }
 
 pub(super) fn write_multipage_tiff_rgb(
@@ -173,20 +267,34 @@ pub(super) fn write_multipage_tiff_rgb(
     out: &Path,
     dpi: Option<u32>,
 ) -> Result<()> {
-    if frames.is_empty() {
-        return Err(ScanError::Invalid(
-            "write_multipage_tiff_rgb requires at least one page".into(),
-        ));
-    }
+    validate_rgb_tiff_frames(frames)?;
     let temp = create_output_temp(out)?;
     let mut writer = TiffStreamWriter::new(temp.path())?;
-    for (page_index, frame) in frames.iter().enumerate() {
-        writer.write_rgb_frame(frame, page_index + 1 < frames.len(), dpi)?;
-    }
+    write_rgb_tiff_frames(&mut writer, frames, dpi)?;
     writer.finish()?;
     drop(writer);
     validate_output_container(temp.path(), "tiff")?;
     temp.publish()?;
+    Ok(())
+}
+
+fn validate_rgb_tiff_frames(frames: &[image::RgbImage]) -> Result<()> {
+    if frames.is_empty() {
+        Err(ScanError::Invalid(
+            "write_multipage_tiff_rgb requires at least one page".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+fn write_rgb_tiff_frames(
+    writer: &mut TiffStreamWriter,
+    frames: &[image::RgbImage],
+    dpi: Option<u32>,
+) -> Result<()> {
+    for (index, frame) in frames.iter().enumerate() {
+        writer.write_rgb_frame(frame, index + 1 < frames.len(), dpi)?;
+    }
     Ok(())
 }
 
@@ -282,11 +390,7 @@ impl TiffStreamWriter {
 }
 
 fn image_buffer_to_rgb(image: ImageBuffer) -> Result<image::RgbImage> {
-    match image.pixel_format {
-        PixelFormat::Rgb8 => image::RgbImage::from_raw(image.width, image.height, image.data)
-            .ok_or_else(|| ScanError::Image("invalid TIFF RGB image buffer".into())),
-        PixelFormat::Gray8 | PixelFormat::Rgba8 => Ok(buffer_to_dynamic(&image)?.to_rgb8()),
-    }
+    super::pixels::into_rgb_image(image, "TIFF")
 }
 
 fn write_tiff_page(
@@ -357,116 +461,4 @@ fn write_tiff_rational(output: &mut impl Write, numerator: u32, denominator: u32
     rational[4..8].copy_from_slice(&denominator.to_le_bytes());
     output.write_all(&rational)?;
     Ok(())
-}
-
-/// Append a TIFF page, or replace a PDF destination with a single-page document.
-pub fn append_page_to_multipage(
-    path: impl AsRef<Path>,
-    image: &ImageBuffer,
-    format: Option<&str>,
-    dpi: Option<u32>,
-) -> Result<PathBuf> {
-    let mut out = path.as_ref().to_path_buf();
-    let ext = format
-        .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
-        .or_else(|| {
-            out.extension()
-                .and_then(|value| value.to_str())
-                .map(str::to_ascii_lowercase)
-        })
-        .unwrap_or_else(|| "tif".into());
-    match ext.as_str() {
-        "tif" | "tiff" => {
-            if out.extension().is_none() {
-                out.set_extension("tif");
-            }
-            if !out.is_file() {
-                return save_image(out, image, dpi, None);
-            }
-            let mut frames = load_tiff_frames(&out)?;
-            let existing_rgb_bytes = frames.iter().try_fold(0usize, |total, frame| {
-                total.checked_add(frame.as_raw().len()).ok_or_else(|| {
-                    ScanError::Image(
-                        "TIFF decoded frame aggregate exceeds the image safety limit".into(),
-                    )
-                })
-            })?;
-            checked_tiff_frame_aggregate(existing_rgb_bytes, image.width, image.height)?;
-            frames.push(buffer_to_dynamic(image)?.to_rgb8());
-            write_multipage_tiff_rgb(&frames, &out, dpi)?;
-            Ok(out)
-        }
-        "pdf" => {
-            if out.extension().is_none() {
-                out.set_extension("pdf");
-            }
-            save_pdf_with_options(
-                out,
-                std::slice::from_ref(image),
-                &PdfOptions {
-                    dpi: dpi.unwrap_or(150),
-                    ..PdfOptions::default()
-                },
-            )
-        }
-        _ => Err(ScanError::Invalid(format!(
-            "append_page_to_multipage supports TIFF or PDF, not '{ext}'"
-        ))),
-    }
-}
-
-pub(super) fn load_tiff_frames(path: &Path) -> Result<Vec<image::RgbImage>> {
-    use tiff::decoder::{Decoder, DecodingResult};
-    use tiff::ColorType;
-
-    let file = std::fs::File::open(path)?;
-    let mut decoder = Decoder::new(std::io::BufReader::new(file))
-        .map_err(|e| ScanError::Image(format!("TIFF decode failed: {e}")))?;
-    let mut frames = Vec::new();
-    let mut aggregate_rgb_bytes = 0usize;
-    loop {
-        let (width, height) = decoder
-            .dimensions()
-            .map_err(|e| ScanError::Image(format!("TIFF dimensions failed: {e}")))?;
-        let color = decoder
-            .colortype()
-            .map_err(|e| ScanError::Image(format!("TIFF color type failed: {e}")))?;
-        if !matches!(color, ColorType::RGB(8) | ColorType::Gray(8)) {
-            return Err(ScanError::Image(
-                "TIFF append supports 8-bit grayscale or RGB pages".into(),
-            ));
-        }
-        aggregate_rgb_bytes = checked_tiff_frame_aggregate(aggregate_rgb_bytes, width, height)?;
-        let bytes = match decoder
-            .read_image()
-            .map_err(|e| ScanError::Image(format!("TIFF frame decode failed: {e}")))?
-        {
-            DecodingResult::U8(data) => data,
-            _ => {
-                return Err(ScanError::Image(
-                    "TIFF append supports 8-bit grayscale or RGB pages".into(),
-                ));
-            }
-        };
-        let rgb = match color {
-            ColorType::RGB(8) => image::RgbImage::from_raw(width, height, bytes),
-            ColorType::Gray(8) => {
-                let data = bytes
-                    .into_iter()
-                    .flat_map(|value| [value, value, value])
-                    .collect();
-                image::RgbImage::from_raw(width, height, data)
-            }
-            _ => None,
-        }
-        .ok_or_else(|| ScanError::Image("invalid TIFF frame buffer".into()))?;
-        frames.push(rgb);
-        if !decoder.more_images() {
-            break;
-        }
-        decoder
-            .next_image()
-            .map_err(|e| ScanError::Image(format!("TIFF next frame failed: {e}")))?;
-    }
-    Ok(frames)
 }

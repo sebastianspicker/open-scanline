@@ -4,7 +4,7 @@ use super::seams::{CommandOutput, ImageDecoder};
 use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
+use crate::operation::CancellationToken;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -85,28 +85,35 @@ impl CommandSession {
         if self.is_cancelled() {
             return Err(ScanError::Cancelled("scan cancelled".into()));
         }
-        if !output.success || !output_path.is_file() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(ScanError::Unsupported(format!(
-                "{failure_name}: {}",
-                error.trim()
-            )));
-        }
+        validate_materialized_output(output, output_path, failure_name)?;
         let mut image = decoder.decode(output_path)?;
-        let (target_width, target_height) = request
-            .region
-            .map(|region| (region.width, region.height))
-            .unwrap_or((request.width, request.height));
-        if target_width > 0
-            && target_height > 0
-            && (image.width != target_width || image.height != target_height)
-        {
-            image = crate::infrastructure::acquisition::FileDeviceSession::resize_nearest(
-                &image,
-                target_width,
-                target_height,
-            )?;
-        }
+        resize_materialized_output(&mut image, request)?;
         Ok(image)
     }
+}
+
+fn validate_materialized_output(
+    output: &CommandOutput,
+    output_path: &Path,
+    failure_name: &str,
+) -> Result<()> {
+    if output.success && output_path.is_file() {
+        return Ok(());
+    }
+    let error = String::from_utf8_lossy(&output.stderr);
+    Err(ScanError::Unsupported(format!(
+        "{failure_name}: {}",
+        error.trim()
+    )))
+}
+
+fn resize_materialized_output(image: &mut ImageBuffer, request: &ScanRequest) -> Result<()> {
+    let (width, height) = request
+        .region
+        .map(|region| (region.width, region.height))
+        .unwrap_or((request.width, request.height));
+    if width > 0 && height > 0 && (image.width != width || image.height != height) {
+        *image = crate::domain::processing::resize_nearest(image, width, height)?;
+    }
+    Ok(())
 }

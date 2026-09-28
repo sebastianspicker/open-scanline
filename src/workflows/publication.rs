@@ -1,50 +1,20 @@
 //! Additive export controls shared by scan, process, and batch entry points.
 
+use crate::domain::export::ExportOptions;
 use crate::domain::image::ImageBuffer;
+use crate::domain::settings::validate_ocr_language;
 use crate::error::{Result, ScanError};
-use crate::workflows::operation::CancellationToken;
-use crate::workflows::ports::media::MediaPort;
-use crate::workflows::settings::validate_ocr_language;
+use crate::infrastructure::media::icc::PreparedScannerProfile;
+use crate::infrastructure::media::ocr::ExportOcrJob;
+use crate::infrastructure::media::PdfPathPublication;
+use crate::operation::CancellationToken;
 use std::path::{Path, PathBuf};
-
-/// OCR implementation used when creating a searchable PDF.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OcrEngine {
-    /// Built-in OCR with no external executable dependency.
-    Offline,
-    /// The system `tesseract` executable.
-    Tesseract,
-}
-
-/// Runtime-only controls for a scan, process, or batch export.
-///
-/// `pdf_password` is used only while writing a PDF and is never persisted by
-/// this library. Existing argument structs intentionally do not embed these
-/// settings so their public struct-literal API remains compatible.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExportOptions {
-    pub pdf_password: Option<String>,
-    pub searchable_pdf: bool,
-    pub ocr_language: String,
-    pub ocr_engine: OcrEngine,
-    pub scanner_profile: Option<PathBuf>,
-}
-
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            pdf_password: None,
-            searchable_pdf: false,
-            ocr_language: "eng".into(),
-            ocr_engine: OcrEngine::Offline,
-            scanner_profile: None,
-        }
-    }
-}
+use std::sync::Arc;
 
 pub(crate) struct PreparedExportOptions {
     options: ExportOptions,
-    profile: Option<serde_json::Value>,
+    transform: Option<Arc<PreparedScannerProfile>>,
+    ocr_job: Option<Arc<ExportOcrJob>>,
 }
 
 impl PreparedExportOptions {
@@ -56,87 +26,178 @@ impl PreparedExportOptions {
         &self.options.ocr_language
     }
 
-    pub(crate) fn uses_offline_ocr(&self) -> bool {
-        matches!(self.options.ocr_engine, OcrEngine::Offline)
+    pub(crate) fn transform(&self) -> Option<&PreparedScannerProfile> {
+        self.transform.as_deref()
     }
 
-    pub(crate) fn profile(&self) -> Option<&serde_json::Value> {
-        self.profile.as_ref()
+    pub(crate) fn pdf_password(&self) -> Option<&str> {
+        self.options.pdf_password.as_deref()
+    }
+
+    /// Recognize page text when this export produces a searchable PDF.
+    /// The OCR job is prepared exactly when `searchable_pdf` is requested.
+    pub(crate) fn recognize(
+        &self,
+        image: &ImageBuffer,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<Option<String>> {
+        self.ocr_job
+            .as_deref()
+            .map(|job| job.recognize(image, self.ocr_language(), cancellation))
+            .transpose()
     }
 }
 
-pub(crate) fn prepare_export_options_with_media<M: MediaPort>(
+pub(crate) fn prepare_export_options(
     destination: &Path,
     options: &ExportOptions,
-    media: &M,
 ) -> Result<PreparedExportOptions> {
     let is_pdf = destination
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
-    prepare_export_options_for_pdf_with_media(is_pdf, options, media)
+    prepare_export_options_for_pdf(is_pdf, options)
 }
 
-pub(crate) fn prepare_export_options_for_pdf_with_media<M: MediaPort>(
+pub(crate) fn prepare_export_options_for_pdf(
     has_pdf_destination: bool,
     options: &ExportOptions,
-    media: &M,
 ) -> Result<PreparedExportOptions> {
+    validate_searchable_options(options)?;
+    validate_pdf_destination(has_pdf_destination, options)?;
+    validate_export_password(options)?;
+    let transform = load_export_transform(options)?;
+    let ocr_job = options
+        .searchable_pdf
+        .then(|| crate::infrastructure::media::ocr::prepare_job(options.ocr_engine))
+        .transpose()?;
+    Ok(PreparedExportOptions {
+        options: options.clone(),
+        transform,
+        ocr_job,
+    })
+}
+
+fn validate_searchable_options(options: &ExportOptions) -> Result<()> {
     if options.searchable_pdf {
         validate_ocr_language(&options.ocr_language)?;
     }
-    if !has_pdf_destination && (options.searchable_pdf || options.pdf_password.is_some()) {
+    Ok(())
+}
+
+fn validate_pdf_destination(has_pdf_destination: bool, options: &ExportOptions) -> Result<()> {
+    let has_pdf_only_option = options.searchable_pdf || options.pdf_password.is_some();
+    if !has_pdf_destination && has_pdf_only_option {
         return Err(ScanError::Invalid(
             "searchable PDF and PDF password options require a .pdf destination".into(),
         ));
     }
+    Ok(())
+}
+
+fn validate_export_password(options: &ExportOptions) -> Result<()> {
     if let Some(password) = options.pdf_password.as_deref() {
         if password.is_empty() {
             return Err(ScanError::Invalid(
                 "PDF password must not be empty when encryption is requested".into(),
             ));
         }
-        media.validate_pdf_password(password)?;
+        crate::infrastructure::media::validate_pdf_password(password)?;
     }
-    let profile = options
-        .scanner_profile
-        .as_deref()
-        .map(|path| media.load_scanner_profile(path))
-        .transpose()?;
-    Ok(PreparedExportOptions {
-        options: options.clone(),
-        profile,
-    })
+    Ok(())
 }
 
-pub(crate) fn apply_export_profile_with_media<M: MediaPort>(
+fn load_export_transform(options: &ExportOptions) -> Result<Option<Arc<PreparedScannerProfile>>> {
+    options
+        .scanner_profile
+        .as_deref()
+        .map(|path| {
+            let profile = crate::infrastructure::media::icc::load_scanner_profile(path)?;
+            let prepared = crate::infrastructure::media::icc::prepare_scanner_profile(&profile)?;
+            Ok(Arc::new(prepared))
+        })
+        .transpose()
+}
+
+/// Extract and lowercase an output path's extension, or reject when absent.
+pub(crate) fn output_extension(path: &Path, label: &str) -> Result<String> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| ScanError::Invalid(format!("{label} has no supported extension")))
+}
+
+/// Validate an output leaf name and its extension against the media adapter's
+/// supported set. Shared by single-shot scan, process, and batch page/
+/// contact-sheet destinations.
+pub(crate) fn validate_supported_output_path(path: &Path, label: &str) -> Result<()> {
+    crate::infrastructure::runtime::atomic_publish::validate_output_leaf(path, label)?;
+    let extension = output_extension(path, label)?;
+    if !crate::infrastructure::media::supported_extensions().contains(&extension.as_str()) {
+        return Err(ScanError::Invalid(format!(
+            "unsupported {label} extension '.{extension}'"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn apply_export_profile(
     image: &ImageBuffer,
     prepared: &PreparedExportOptions,
-    media: &M,
 ) -> Result<ImageBuffer> {
-    media.apply_scanner_profile(image, prepared.profile())
+    apply_export_profile_owned(image.clone(), prepared)
+}
+
+pub(crate) fn apply_export_profile_owned(
+    image: ImageBuffer,
+    prepared: &PreparedExportOptions,
+) -> Result<ImageBuffer> {
+    match prepared.transform() {
+        Some(transform) => transform.apply_owned(image),
+        None => Ok(image),
+    }
 }
 
 /// Token-aware searchable-text generation for scan and batch workflows.
-pub(crate) fn searchable_text_with_cancellation_with_media<M: MediaPort>(
+pub(crate) fn searchable_text_with_cancellation(
     image: &ImageBuffer,
     prepared: &PreparedExportOptions,
     cancellation: Option<&CancellationToken>,
-    media: &M,
 ) -> Result<Option<String>> {
-    if !prepared.options.searchable_pdf {
-        return Ok(None);
-    }
-    Ok(Some(media.recognize(
+    prepared.recognize(image, cancellation)
+}
+
+pub(crate) fn save_final_image(
+    destination: &Path,
+    image: &ImageBuffer,
+    dpi: Option<u32>,
+    quality: Option<u8>,
+    prepared: &PreparedExportOptions,
+) -> Result<PathBuf> {
+    save_final_image_with_cancellation(destination, image, dpi, quality, prepared, None)
+}
+
+pub(crate) fn save_final_image_with_cancellation(
+    destination: &Path,
+    image: &ImageBuffer,
+    dpi: Option<u32>,
+    quality: Option<u8>,
+    prepared: &PreparedExportOptions,
+    cancellation: Option<&CancellationToken>,
+) -> Result<PathBuf> {
+    save_final_image_with_searchable_text(
+        destination,
         image,
-        prepared.ocr_language(),
-        prepared.uses_offline_ocr(),
+        dpi,
+        quality,
+        prepared,
+        None,
         cancellation,
-    )?))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn save_final_image_with_searchable_text_with_media<M: MediaPort>(
+pub(crate) fn save_final_image_with_searchable_text(
     destination: &Path,
     image: &ImageBuffer,
     dpi: Option<u32>,
@@ -144,7 +205,6 @@ pub(crate) fn save_final_image_with_searchable_text_with_media<M: MediaPort>(
     prepared: &PreparedExportOptions,
     searchable_text: Option<&str>,
     cancellation: Option<&CancellationToken>,
-    media: &M,
 ) -> Result<PathBuf> {
     let is_pdf = destination
         .extension()
@@ -153,44 +213,49 @@ pub(crate) fn save_final_image_with_searchable_text_with_media<M: MediaPort>(
     if is_pdf {
         let text = match searchable_text {
             Some(text) => Some(text.to_owned()),
-            None => {
-                searchable_text_with_cancellation_with_media(image, prepared, cancellation, media)?
-            }
+            None => searchable_text_with_cancellation(image, prepared, cancellation)?,
         };
-        return media.publish_pdf(
+        return crate::infrastructure::media::save_pdf_with_options_and_cancellation(
             destination,
             std::slice::from_ref(image),
-            dpi.unwrap_or(150),
-            "open-scanline scan",
-            prepared.options.pdf_password.as_deref(),
-            text.map(|entry| vec![entry]),
+            &crate::infrastructure::media::PdfOptions {
+                dpi: dpi.unwrap_or(150),
+                title: "open-scanline scan".into(),
+                password: prepared.options.pdf_password.clone(),
+                searchable_pages: text.map(|entry| vec![entry]),
+            },
             cancellation,
         );
     }
-    media.publish_page(destination, image, dpi, quality, cancellation)
+    crate::infrastructure::media::save_image_with_cancellation(
+        destination,
+        image,
+        dpi,
+        quality,
+        cancellation,
+    )
 }
 
 /// Build a batch PDF while forwarding cancellation through its final writer.
-pub(crate) fn save_final_pdf_from_paths_with_cancellation_with_media<M: MediaPort>(
+pub(crate) fn save_final_pdf_from_paths_with_cancellation(
     destination: &Path,
     paths: &[PathBuf],
     dpi: u32,
     prepared: &PreparedExportOptions,
     searchable_pages: Vec<String>,
     cancellation: Option<&CancellationToken>,
-    media: &M,
 ) -> Result<PathBuf> {
     let searchable_pages = prepared.options.searchable_pdf.then_some(searchable_pages);
-    media.publish_pdf_from_paths(
+    crate::infrastructure::media::publish_pdf_from_paths(PdfPathPublication {
         paths,
         destination,
         dpi,
-        "open-scanline multipage",
-        prepared.options.pdf_password.as_deref(),
+        title: "open-scanline multipage",
+        password: prepared.options.pdf_password.as_deref(),
         searchable_pages,
-        None,
+        transform: None,
         cancellation,
-    )
+    })
 }
 
 /// Rebuild a multipage GUI destination from its ordered source images.
@@ -201,34 +266,32 @@ pub(crate) fn save_final_pdf_from_paths_with_cancellation_with_media<M: MediaPor
 /// Token-aware multipage export. OCR is interrupted promptly when a shared
 /// scan/batch/GUI cancellation token is cancelled.
 #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
-pub(crate) fn save_final_multipage_from_paths_with_cancellation_with_media<M: MediaPort>(
+pub(crate) fn save_final_multipage_from_paths_with_cancellation(
     destination: &Path,
     paths: &[PathBuf],
     dpi: u32,
     options: &ExportOptions,
     cancellation: Option<&CancellationToken>,
-    media: &M,
 ) -> Result<PathBuf> {
-    let prepared = prepare_export_options_with_media(destination, options, media)?;
+    let prepared = prepare_export_options(destination, options)?;
     let extension = destination
         .extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| ScanError::Invalid("multipage destination has no extension".into()))?;
     match extension.as_str() {
-        "pdf" => save_profiled_pdf_from_paths_with_cancellation_with_media(
+        "pdf" => save_profiled_pdf_from_paths_with_cancellation(
             destination,
             paths,
             dpi,
             &prepared,
             cancellation,
-            media,
         ),
-        "tif" | "tiff" => media.publish_tiff_from_paths(
+        "tif" | "tiff" => crate::infrastructure::media::publish_tiff_from_paths(
             paths,
             destination,
             Some(dpi),
-            prepared.profile(),
+            prepared.transform(),
             cancellation,
         ),
         _ => Err(ScanError::Invalid(format!(
@@ -237,51 +300,48 @@ pub(crate) fn save_final_multipage_from_paths_with_cancellation_with_media<M: Me
     }
 }
 
-fn save_profiled_pdf_from_paths_with_cancellation_with_media<M: MediaPort>(
+fn save_profiled_pdf_from_paths_with_cancellation(
     destination: &Path,
     paths: &[PathBuf],
     dpi: u32,
     prepared: &PreparedExportOptions,
     cancellation: Option<&CancellationToken>,
-    media: &M,
 ) -> Result<PathBuf> {
     let searchable_pages = if prepared.options.searchable_pdf {
-        collect_searchable_pages(
-            paths,
-            |path| {
-                let image = apply_export_profile_with_media(&media.load(path)?, prepared, media)?;
-                searchable_text_with_cancellation_with_media(&image, prepared, cancellation, media)?
-                    .ok_or_else(|| {
-                        ScanError::Other("searchable PDF did not produce OCR text".into())
-                    })
-            },
-            media,
-        )?
+        collect_searchable_pages(paths, |path| {
+            let image = apply_export_profile_owned(
+                crate::infrastructure::media::load_image(path)?,
+                prepared,
+            )?;
+            searchable_text_with_cancellation(&image, prepared, cancellation)?
+                .ok_or_else(|| ScanError::Other("searchable PDF did not produce OCR text".into()))
+        })?
     } else {
         Vec::new()
     };
-    media.publish_pdf_from_paths(
+    crate::infrastructure::media::publish_pdf_from_paths(PdfPathPublication {
         paths,
         destination,
         dpi,
-        "open-scanline multipage",
-        prepared.options.pdf_password.as_deref(),
-        prepared.options.searchable_pdf.then_some(searchable_pages),
-        prepared.profile(),
+        title: "open-scanline multipage",
+        password: prepared.options.pdf_password.as_deref(),
+        searchable_pages: prepared.options.searchable_pdf.then_some(searchable_pages),
+        transform: prepared.transform(),
         cancellation,
-    )
+    })
 }
 
-fn collect_searchable_pages<M: MediaPort>(
+fn collect_searchable_pages(
     paths: &[PathBuf],
     mut recognize: impl FnMut(&Path) -> Result<String>,
-    media: &M,
 ) -> Result<Vec<String>> {
     let mut pages = Vec::with_capacity(paths.len());
     let mut aggregate = 0_usize;
     for (index, path) in paths.iter().enumerate() {
         let text = recognize(path)?;
-        aggregate = media.checked_pdf_searchable_text_total(aggregate, &text, index)?;
+        aggregate = crate::infrastructure::media::checked_pdf_searchable_text_total(
+            aggregate, &text, index,
+        )?;
         pages.push(text);
     }
     Ok(pages)
