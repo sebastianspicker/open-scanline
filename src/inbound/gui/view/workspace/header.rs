@@ -70,6 +70,7 @@ fn tab(ui: &mut egui::Ui, label: &str, selected: bool, enabled: bool) -> egui::R
         enabled,
         egui::Button::new(text).frame(false).selected(false),
     );
+    focus_ring(ui, &response);
     if selected {
         let rect = response.rect;
         let y = ui.max_rect().bottom() - 1.0;
@@ -89,10 +90,7 @@ fn actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp, tools: &mut bool) {
     });
     if app.job_active() && (*tools || app.job_report().is_none()) {
         cancel(ui, app);
-    } else if ui
-        .add_enabled(!app.job_active(), quiet("Open image…"))
-        .clicked()
-    {
+    } else if quiet(ui, "Open image…", !app.job_active()).clicked() {
         open_file(app, tools);
     }
 }

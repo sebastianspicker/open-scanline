@@ -135,7 +135,6 @@ pub(super) fn primary(label: &str) -> egui::Button<'_> {
             .color(color::PAPER),
     )
     .fill(color::INK)
-    .stroke(Stroke::NONE)
     .min_size(egui::vec2(188.0, size::ACTION))
 }
 
@@ -143,9 +142,26 @@ pub(super) fn secondary(label: &str) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label)).min_size(egui::vec2(0.0, size::CONTROL))
 }
 
-/// Unframed text action for navigation-like commands.
-pub(super) fn quiet(label: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(label)).frame(false)
+/// Unframed text action for navigation-like commands. Frameless buttons draw
+/// no focus of their own, so the lamp ring is added here.
+pub(super) fn quiet(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    let response = ui.add_enabled(
+        enabled,
+        egui::Button::new(RichText::new(label)).frame(false),
+    );
+    focus_ring(ui, &response);
+    response
+}
+
+pub(super) fn focus_ring(ui: &egui::Ui, response: &egui::Response) {
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect.expand(2.0),
+            theme::RADIUS,
+            Stroke::new(theme::FOCUS, color::LAMP_INK),
+            egui::StrokeKind::Outside,
+        );
+    }
 }
 
 pub(super) fn field(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {

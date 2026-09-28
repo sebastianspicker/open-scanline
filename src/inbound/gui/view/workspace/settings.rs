@@ -10,7 +10,7 @@ pub(super) fn scan(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
     side_limit(ui, state, *batch);
     ui.add_space(space::L);
     scan_area(ui, state);
-    if ui.add(quiet("Image corrections…")).clicked() {
+    if quiet(ui, "Image corrections…", true).clicked() {
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(TOOLS), true));
         state.active_tab = 1;
@@ -96,7 +96,7 @@ fn scanner(ui: &mut egui::Ui, state: &mut GuiState) {
     }
     ui.horizontal_wrapped(|ui| {
         note(ui, scanner_note(state));
-        if ui.add(quiet("Refresh")).clicked() {
+        if quiet(ui, "Refresh", true).clicked() {
             state.refresh_devices();
         }
     });

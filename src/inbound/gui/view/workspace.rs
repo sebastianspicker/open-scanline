@@ -13,6 +13,7 @@ use components::*;
 
 const TOOLS: &str = "light-workspace-tools";
 const BATCH: &str = "light-workspace-batch";
+const BAR: &str = "workspace-action-bar-height";
 
 pub(super) use header::render_header;
 
@@ -20,6 +21,26 @@ pub(super) fn render(ctx: &egui::Context, app: &mut OpenScanlineApp) {
     let mut batch = ctx
         .data_mut(|data| data.get_temp::<bool>(egui::Id::new(BATCH)))
         .unwrap_or(app.state.multipage || app.state.batch_pages > 1 || app.state.duplex);
+    let bar = ctx
+        .data(|data| data.get_temp::<f32>(egui::Id::new(BAR)))
+        .unwrap_or(72.0);
+    let side = space::XL as i8;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(color::PAPER)
+                .inner_margin(egui::Margin {
+                    left: side,
+                    right: side,
+                    top: 0,
+                    bottom: bar.clamp(0.0, 127.0) as i8,
+                }),
+        )
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| sheet(ui, |ui| body(ui, app, &mut batch)));
+        });
     action_bar(ctx, |ui| {
         if app.job_report().is_some() {
             status::actions(ui, app);
@@ -27,17 +48,6 @@ pub(super) fn render(ctx: &egui::Context, app: &mut OpenScanlineApp) {
             prepare_actions(ui, app, batch);
         }
     });
-    egui::CentralPanel::default()
-        .frame(
-            egui::Frame::new()
-                .fill(color::PAPER)
-                .inner_margin(egui::Margin::symmetric(space::XL as i8, 0)),
-        )
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| sheet(ui, |ui| body(ui, app, &mut batch)));
-        });
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(BATCH), batch));
 }
 
@@ -73,15 +83,37 @@ fn top_space(ui: &egui::Ui) -> f32 {
 }
 
 /// The platen-colored strip that keeps the destination and primary action in
-/// view at every window height.
+/// view at every window height. It is drawn after the form, as an area pinned
+/// to the bottom edge, so keyboard focus reaches it after the settings.
 fn action_bar(ctx: &egui::Context, content: impl FnOnce(&mut egui::Ui)) {
-    egui::TopBottomPanel::bottom("workspace-actions")
-        .frame(
+    let screen = ctx.screen_rect();
+    let previous = ctx
+        .data(|data| data.get_temp::<f32>(egui::Id::new(BAR)))
+        .unwrap_or(72.0);
+    let response = egui::Area::new(egui::Id::new("workspace-actions"))
+        .order(egui::Order::Middle)
+        .fixed_pos(egui::pos2(screen.left(), screen.bottom() - previous))
+        .show(ctx, |ui| {
+            ui.set_width(screen.width());
             egui::Frame::new()
                 .fill(color::PLATEN)
-                .inner_margin(egui::Margin::symmetric(space::XL as i8, space::M as i8)),
-        )
-        .show(ctx, |ui| sheet(ui, content));
+                .inner_margin(egui::Margin::symmetric(space::XL as i8, space::M as i8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    sheet(ui, content);
+                });
+        })
+        .response;
+    let rect = response.rect;
+    ctx.layer_painter(response.layer_id).hline(
+        rect.x_range(),
+        rect.top(),
+        egui::Stroke::new(theme::HAIRLINE, color::RULE),
+    );
+    if (rect.height() - previous).abs() > 0.5 {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new(BAR), rect.height()));
+        ctx.request_repaint();
+    }
 }
 
 fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
@@ -99,7 +131,14 @@ fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
             }
         });
     });
-    if app.state.error_message.is_none() && !app.state.status.is_empty() {
+    let idle = [
+        app.state.translator.t("ready"),
+        app.state.translator.t("status.ready"),
+    ];
+    if app.state.error_message.is_none()
+        && !app.state.status.is_empty()
+        && !idle.contains(&app.state.status)
+    {
         ui.add_space(space::XL);
         note(ui, &app.state.status);
     }
