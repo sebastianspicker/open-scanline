@@ -27,7 +27,6 @@ impl eframe::App for OpenScanlineApp {
         }
         let tools = workspace::render_header(ctx, self);
         if tools {
-            render_menu(ctx, self);
             render_toolbar(ctx, self);
             render_status(ctx, &self.state);
             render_side_panel(ctx, self);
@@ -41,22 +40,6 @@ impl eframe::App for OpenScanlineApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.cancel_and_join_job();
     }
-}
-
-#[cfg(feature = "gui")]
-fn render_menu(ctx: &egui::Context, app: &mut OpenScanlineApp) {
-    egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.add_enabled_ui(!app.job_active(), |ui| {
-                render_file_menu(ui, ctx, app);
-                render_edit_menu(ui, app);
-                render_scan_menu(ui, app);
-                render_view_menu(ui, &mut app.state);
-                render_profile_menu(ui, &mut app.state);
-            });
-            render_help_menu(ui, &mut app.state);
-        });
-    });
 }
 
 #[cfg(feature = "gui")]
@@ -186,6 +169,10 @@ fn render_help_menu(ui: &mut egui::Ui, state: &mut super::state::GuiState) {
 #[cfg(feature = "gui")]
 fn render_toolbar(ctx: &egui::Context, app: &mut OpenScanlineApp) {
     egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        // Tool commands are secondary to the image, so they use compact controls.
+        ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
+        ui.spacing_mut().interact_size.y = 30.0;
+        ui.add_space(6.0);
         ui.add_enabled_ui(!app.job_active(), |ui| {
             render_toolbar_contents(ui, app);
         });
@@ -296,15 +283,17 @@ fn render_action_button(
 
 #[cfg(feature = "gui")]
 fn render_status(ctx: &egui::Context, state: &super::state::GuiState) {
-    egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(&state.status);
-            ui.separator();
-            ui.label(&state.hist_summary);
-            ui.separator();
-            ui.label(format!("×{:.2} · #{}", state.zoom, state.frame_index));
+    egui::TopBottomPanel::bottom("status")
+        .frame(egui::Frame::side_top_panel(&ctx.style()).fill(ctx.style().visuals.faint_bg_color))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(&state.status);
+                ui.separator();
+                ui.label(&state.hist_summary);
+                ui.separator();
+                ui.label(format!("×{:.2} · #{}", state.zoom, state.frame_index));
+            });
         });
-    });
 }
 
 #[cfg(feature = "gui")]
@@ -313,9 +302,13 @@ fn render_toolbar_contents(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
         render_action_button(ui, &mut app.state, "button.open", |state| {
             state.do_open_file(None)
         });
+        ui.separator();
         render_scan_toolbar_actions(ui, app);
+        ui.separator();
         render_save_toolbar_actions(ui, app);
+        ui.separator();
         render_transform_toolbar_actions(ui, &mut app.state);
+        ui.separator();
         render_postprocess_toolbar_actions(ui, app);
     });
     ui.horizontal(|ui| {
