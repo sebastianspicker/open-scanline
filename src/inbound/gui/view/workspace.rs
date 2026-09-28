@@ -24,17 +24,18 @@ pub(super) fn render(ctx: &egui::Context, app: &mut OpenScanlineApp) {
     let bar = ctx
         .data(|data| data.get_temp::<f32>(egui::Id::new(BAR)))
         .unwrap_or(72.0);
-    let side = space::XL as i8;
+    // Reserve the bar's measured height with an empty panel; the bar itself is
+    // drawn later (see `action_bar`) so it comes last in keyboard order.
+    egui::TopBottomPanel::bottom("workspace-actions-space")
+        .exact_height(bar)
+        .frame(egui::Frame::NONE)
+        .show_separator_line(false)
+        .show(ctx, |_| {});
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
                 .fill(color::PAPER)
-                .inner_margin(egui::Margin {
-                    left: side,
-                    right: side,
-                    top: 0,
-                    bottom: bar.clamp(0.0, 127.0) as i8,
-                }),
+                .inner_margin(egui::Margin::symmetric(space::XL as i8, 0)),
         )
         .show(ctx, |ui| {
             egui::ScrollArea::vertical()
