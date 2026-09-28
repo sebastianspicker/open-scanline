@@ -24,6 +24,32 @@ bundle does not identify dependencies in a binary built outside the locked
 workspace, so the distributor of such a binary remains responsible for its
 third-party notices.
 
+## Atkinson Hyperlegible Next and Mono fonts
+
+The desktop interface embeds three static font instances:
+
+| File | Source | SHA-256 |
+| --- | --- | --- |
+| `assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf` | `AtkinsonHyperlegibleNext[wght].ttf`, instanced at `wght=400` | `d8ebd46b368a6dad973a391ec526dfe73a72c81ac8c68fba3414ee84065fd7b3` |
+| `assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf` | `AtkinsonHyperlegibleNext[wght].ttf`, instanced at `wght=700` | `0d33da80febdefb7e57b7a3e19c164568c5bfaa7d8624f405ca9d240134bd092` |
+| `assets/fonts/AtkinsonHyperlegibleMono-Regular.ttf` | `AtkinsonHyperlegibleMono[wght].ttf`, instanced at `wght=400` | `28f2ed5f9f429a80fce625e90249dbcc588fc2349aa1470980cf05296cfa79bf` |
+
+The variable sources come from the `ofl/atkinsonhyperlegiblenext/` and
+`ofl/atkinsonhyperlegiblemono/` directories of the
+[google/fonts](https://github.com/google/fonts) repository. The static instances
+were produced with `fonttools varLib.instancer --static --update-name-table`;
+glyph outlines are otherwise unchanged. The GitHub Pages site serves WOFF2
+conversions of the same instances from `docs/assets/fonts/`.
+
+These fonts are licensed under the SIL Open Font License 1.1, whose full text is
+reproduced in the Cantarell section below. They are not covered by this project's
+[`LICENSE`](LICENSE).
+
+```text
+Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next)
+Copyright 2020-2024 The Atkinson Hyperlegible Mono Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next-mono)
+```
+
 ## Cantarell Regular font
 
 `assets/fonts/Cantarell-Regular.ttf` is copied unchanged from `sctk-adwaita`
