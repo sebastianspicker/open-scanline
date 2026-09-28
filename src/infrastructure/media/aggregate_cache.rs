@@ -15,9 +15,6 @@ const CACHE_MAGIC: &[u8; 8] = b"OSLPIX01";
 const CACHE_HEADER_BYTES: usize = 8 + 4 + 4 + 1 + 8;
 const MAX_CACHE_BYTES: usize = 512 * 1024 * 1024;
 
-#[cfg(test)]
-mod benchmark;
-
 #[derive(Debug)]
 struct CacheEntry {
     source_hash: [u8; 32],

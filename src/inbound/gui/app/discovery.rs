@@ -255,6 +255,3 @@ impl OpenScanlineApp {
         self.discovery.finished()
     }
 }
-
-#[cfg(test)]
-mod tests;

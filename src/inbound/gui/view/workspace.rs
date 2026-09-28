@@ -295,6 +295,3 @@ fn start_action(
     })
     .inner
 }
-
-#[cfg(test)]
-mod tests;

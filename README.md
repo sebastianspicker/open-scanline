@@ -73,8 +73,8 @@ reachable.
 
 ## Supported sources
 
-Open Scanline always includes mock and file sources, so you can build, test, and
-try the workflow without any hardware. Real scanners depend on the operating
+Open Scanline always includes mock and file sources, so you can build and try
+the workflow without any hardware. Real scanners depend on the operating
 system, installed software, device permissions, and network.
 
 | Source | Linux | macOS | Windows | Requirement |
@@ -116,7 +116,6 @@ Detailed commands and examples are in [the usage guide](docs/usage.md).
 | [Usage](docs/usage.md) | Commands, configuration, OCR, PDF export, and the desktop and plugin modes |
 | [Backends](docs/backends.md) | Platform and scanner requirements, discovery, and optional tools |
 | [Architecture](docs/architecture.md) | Layers, data flow, and compatibility boundaries |
-| [Performance](docs/performance.md) | Reproducible benchmark runner and measurement limits |
 | [Release notes](docs/release-notes.md) | Public API changes planned for the next release |
 
 ## Repository structure
@@ -132,7 +131,6 @@ Open Scanline is one Cargo package with an executable and a library target.
 | `src/workflows/` | Capture, batch, processing, publication, and maintenance use cases |
 | `src/inbound/` | CLI, GUI, diagnostics, plugin, and host entry adapters |
 | `assets/` | Fonts, UI translations, and license texts embedded in the binary |
-| `tests/` | CLI, public API, workflow, backend, packaging, and media contracts |
 
 Dependencies point from `inbound` to `workflows` to `infrastructure` to `domain`.
 Read [the architecture guide](docs/architecture.md) before moving code or
@@ -147,9 +145,6 @@ build from the repository root:
 ```bash
 cargo build --release --locked
 ```
-
-The full verification gate that CI runs is listed in
-[CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
 The release executable is `target/release/open-scanline` on Linux and macOS, or
 `target/release/open-scanline.exe` on Windows. Use `--no-default-features` for a
@@ -207,16 +202,14 @@ A few behaviors are deliberately narrower than they might first appear:
   Data Source and does not acquire through TWAIN.
 - **Hardware varies.** The adapters negotiate the capabilities they can observe,
   but no compatibility table can guarantee a particular scanner, feeder, driver,
-  firmware, or vendor extension. The automated suite uses simulated adapters and
-  local protocol servers, so validate production hardware on its target operating
-  system before relying on it.
+  firmware, or vendor extension. Validate production hardware on its target
+  operating system before relying on it.
 - **No proprietary components.** Open Scanline does not include proprietary
   scanner drivers, firmware, or third-party activation and licensing systems.
 
-## Contributing and security
+## Releases and security
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change. Public API
-changes planned for the next release are listed in the
+Public API changes planned for the next release are listed in the
 [release notes](docs/release-notes.md). For vulnerabilities, follow
 [SECURITY.md](SECURITY.md) rather than opening a public issue.
 

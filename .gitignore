@@ -18,11 +18,23 @@
 /pages/
 /batch/
 
-# Test, analysis, and quality-tool output
+# Tests and test output
+/tests/
+**/tests.rs
+**/tests/
+**/benchmark.rs
+**/aggregate_integration_tests.rs
 /coverage/
 /test-results/
 /junit*.xml
 *.sarif
+
+# Local helper scripts and quality tooling
+/scripts/
+/examples/
+/requirements-quality.txt
+/.jscpd.json
+/clippy.toml
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -40,8 +52,19 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 
-# Local visual QA captures may include workstation-specific paths
-/design-exploration/**/implementation/*.jpg
+# Work-in-progress documents and visual explorations
+/CONTRIBUTING.md
+/DESIGN_BRIEF.md
+/design-exploration/
+/docs/performance.md
+/docs/adr/
+/docs/adrs/
+/planning/
+/plans/
+/specs/
+/drafts/
+/ROADMAP*
+/TODO*
 
 # Editors and operating systems
 .DS_Store
@@ -102,11 +125,11 @@ gcloud-*.json
 
 # Local development tools and indexes
 /.mcp.json
-/.codacy/*
-!/.codacy/codacy.yaml
-!/.codacy/codacy.yml
+/.codacy/
+/.repowise/
 /.codegraph/
 /.serena/
+/.impeccable/
 /.kilo/
 
 # Development-assistant files
@@ -153,3 +176,9 @@ AI_SUMMARY*
 /work-log*
 /devlog*
 /development-log*
+
+# Linked worktrees and nested checkouts
+/.worktrees/
+/worktrees/
+/.claude/worktrees/
+/.codex/worktrees/

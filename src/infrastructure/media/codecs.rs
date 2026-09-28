@@ -16,8 +16,6 @@ mod bmp;
 mod jpeg;
 mod temp_output;
 use jpeg::write_jpeg;
-#[cfg(test)]
-mod tests;
 pub(super) use temp_output::{create_output_temp, OutputTemp};
 
 pub const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";

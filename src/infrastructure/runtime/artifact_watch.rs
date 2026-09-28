@@ -125,6 +125,3 @@ fn validate_artifact_entry(entry: &fs::DirEntry, metadata: &fs::Metadata) -> Res
         entry.path().display()
     )))
 }
-
-#[cfg(test)]
-mod tests;

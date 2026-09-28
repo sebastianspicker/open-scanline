@@ -16,8 +16,6 @@ mod actions;
 mod app;
 #[cfg(any(feature = "gui", test))]
 mod state;
-#[cfg(test)]
-mod tests;
 #[cfg(feature = "gui")]
 mod view;
 

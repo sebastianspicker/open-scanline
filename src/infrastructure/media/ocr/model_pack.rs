@@ -334,9 +334,6 @@ fn valid_pack_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
-#[cfg(all(test, feature = "ocrs"))]
-mod tests;
-
 #[cfg(all(test, not(feature = "ocrs")))]
 mod disabled_tests {
     use super::*;

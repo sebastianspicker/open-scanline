@@ -1,7 +1,7 @@
 # Backend and tool requirements
 
-Open Scanline always ships mock and file-image sources, so you can build, test,
-and try the workflow without a scanner. Real hardware depends on your operating
+Open Scanline always ships mock and file-image sources, so you can build and try
+the workflow without a scanner. Real hardware depends on your operating
 system, installed software, device permissions, and network. Check what the
 current machine sees with:
 
@@ -31,12 +31,10 @@ in order.
 
 Real WIA calibration and focus are reported as unsupported. The standard WIA
 scanner property surface exposes neither operation, and Open Scanline does not
-repurpose camera-focus properties to fake them. The test-only WIA simulation
-labels its synthetic calibration and point focus as simulated.
+repurpose camera-focus properties to fake them.
 
-The Windows COM path has deterministic command and adapter tests, but it is not
-exercised on macOS. WIA property availability and feeder-empty behavior vary by
-driver, so real Windows hardware remains the authority.
+WIA property availability and feeder-empty behavior vary by driver, so validate
+the workflow with real Windows hardware.
 
 ### SANE
 
@@ -141,6 +139,5 @@ returns an explicit unsupported error before any inference artifact or model
 install is created. Diagnostics report compiled support separately from installed
 models, and features never install external executables or download models.
 
-Automated tests use simulation, injected command runners, and local HTTP/TLS
-servers. They cannot prove physical WIA, SANE, feeder, film-unit, or vendor eSCL
-compatibility.
+Mock and file sources support hardware-free runs, but cannot prove physical WIA,
+SANE, feeder, film-unit, or vendor eSCL compatibility.

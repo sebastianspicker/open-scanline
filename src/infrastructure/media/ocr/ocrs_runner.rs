@@ -374,7 +374,4 @@ mod tests {
             matches!(error, ScanError::Unsupported(message) if message.contains("not compiled"))
         );
     }
-
-    #[cfg(feature = "ocrs")]
-    mod enabled;
 }

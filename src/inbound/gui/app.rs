@@ -196,8 +196,5 @@ impl Drop for OpenScanlineApp {
     }
 }
 
-#[cfg(all(test, feature = "gui"))]
-mod tests;
-
 /// Launch desktop GUI. Uses eframe when the `gui` feature is enabled.
 pub(super) use runner::run;

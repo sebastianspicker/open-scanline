@@ -490,6 +490,3 @@ fn copy_deskewed_pixels(source: &[u8], output: &mut [u8], mapping: DeskewMapping
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

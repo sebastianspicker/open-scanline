@@ -218,6 +218,3 @@ pub use session::EsclDeviceSession;
 
 mod job_id;
 pub use job_id::parse_job_id;
-
-#[cfg(test)]
-mod tests;

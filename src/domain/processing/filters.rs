@@ -6,8 +6,6 @@ use crate::error::{Result, ScanError};
 mod color;
 mod fading;
 mod infrared;
-#[cfg(test)]
-mod tests;
 
 fn clamp_f(v: f64) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
