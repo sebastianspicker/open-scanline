@@ -180,6 +180,21 @@ impl Default for StartupInfoW {
     }
 }
 
+impl StartupInfoW {
+    pub(super) fn with_standard_handles(
+        std_input: *mut c_void,
+        std_output: *mut c_void,
+        std_error: *mut c_void,
+    ) -> Self {
+        let mut startup = Self::default();
+        startup.flags = STARTF_USESTDHANDLES;
+        startup.std_input = std_input;
+        startup.std_output = std_output;
+        startup.std_error = std_error;
+        startup
+    }
+}
+
 #[repr(C)]
 #[derive(Default)]
 pub(super) struct ProcessInformation {

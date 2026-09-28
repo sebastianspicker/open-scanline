@@ -1,20 +1,6 @@
 #[cfg(feature = "gui")]
 use super::*;
 
-enum JobReceive {
-    Event(GuiJobEvent),
-    Empty,
-    Disconnected,
-}
-
-fn receive_job_event(job: &GuiJob) -> JobReceive {
-    match job.receiver.try_recv() {
-        Ok(event) => JobReceive::Event(event),
-        Err(mpsc::TryRecvError::Empty) => JobReceive::Empty,
-        Err(mpsc::TryRecvError::Disconnected) => JobReceive::Disconnected,
-    }
-}
-
 #[cfg(feature = "gui")]
 impl OpenScanlineApp {
     fn finish_job(&mut self, terminal: Option<GuiJobEvent>) {
@@ -45,27 +31,28 @@ impl OpenScanlineApp {
             let Some(job) = &self.job else {
                 return;
             };
-            match receive_job_event(job) {
-                JobReceive::Event(GuiJobEvent::Progress(progress)) => {
+            let received = job.receiver.try_recv();
+            match received {
+                Ok(GuiJobEvent::Progress(progress)) => {
                     received_event = true;
                     self.update_job_report(|report| report.apply_progress(&progress.phase));
                     progress_messages.push(progress.message);
                 }
-                JobReceive::Event(GuiJobEvent::BatchWorkflow(event)) => {
+                Ok(GuiJobEvent::BatchWorkflow(event)) => {
                     received_event = true;
                     self.update_job_report(|report| report.apply_batch_event(event));
                 }
-                JobReceive::Event(GuiJobEvent::ScanRawPublished(path)) => {
+                Ok(GuiJobEvent::ScanRawPublished(path)) => {
                     received_event = true;
                     self.update_job_report(|report| report.add_raw_output(path));
                 }
-                JobReceive::Event(event) => {
+                Ok(event) => {
                     received_event = true;
                     terminal = Some(event);
                     break;
                 }
-                JobReceive::Empty => break,
-                JobReceive::Disconnected => {
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
                     disconnected = true;
                     break;
                 }

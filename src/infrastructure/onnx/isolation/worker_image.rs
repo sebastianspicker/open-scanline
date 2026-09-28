@@ -125,9 +125,7 @@ impl StagedWorkerExecutable {
             .filter(|value| !value.is_empty())
             .unwrap_or("bin");
         let output = TemporaryOutput::new("onnx-worker-image", extension)?;
-        std::fs::copy(source, output.path())
-            .map_err(|error| unavailable(source, "stage", error))?;
-        set_staged_permissions(&output)?;
+        stage_worker_image(source, &output)?;
         if !WorkerIdentity::capture(output.path())?.has_same_content(source_identity) {
             return Err(worker_unavailable(format!(
                 "ONNX worker executable {} changed while its private execution image was created",
@@ -141,6 +139,26 @@ impl StagedWorkerExecutable {
     }
 }
 
+#[cfg(windows)]
+fn stage_worker_image(source: &Path, output: &TemporaryOutput) -> Result<()> {
+    // A fresh file avoids copying the source's read-only attribute,
+    // so the temporary directory can be removed on drop.
+    let mut source_file =
+        std::fs::File::open(source).map_err(|error| unavailable(source, "stage", error))?;
+    let mut staged_file = std::fs::File::create(output.path())
+        .map_err(|error| unavailable(source, "stage", error))?;
+    std::io::copy(&mut source_file, &mut staged_file)
+        .map_err(|error| unavailable(source, "stage", error))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn stage_worker_image(source: &Path, output: &TemporaryOutput) -> Result<()> {
+    std::fs::copy(source, output.path()).map_err(|error| unavailable(source, "stage", error))?;
+    set_staged_permissions(output)
+}
+
+#[cfg(not(windows))]
 fn set_staged_permissions(output: &TemporaryOutput) -> Result<()> {
     let mut permissions = std::fs::metadata(output.path())?.permissions();
     #[cfg(unix)]
@@ -159,22 +177,14 @@ fn set_staged_permissions(output: &TemporaryOutput) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 impl Drop for StagedWorkerExecutable {
     fn drop(&mut self) {
-        #[cfg(windows)]
-        if let Ok(metadata) = std::fs::metadata(self.output.path()) {
-            let mut permissions = metadata.permissions();
-            permissions.set_readonly(false);
-            let _ = std::fs::set_permissions(self.output.path(), permissions);
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                self.output.directory(),
-                std::fs::Permissions::from_mode(0o700),
-            );
-        }
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            self.output.directory(),
+            std::fs::Permissions::from_mode(0o700),
+        );
     }
 }
 
