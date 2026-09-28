@@ -88,4 +88,3 @@ def use_paths(items, prefix=()):
         elif token != "::":
             current.append(token)
     yield from completed_path(current, base)
-
