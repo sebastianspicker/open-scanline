@@ -1,6 +1,7 @@
 use lopdf::Document;
 use open_scanline::core::{ImageBuffer, PixelFormat};
 use open_scanline::imaging::{save_pdf_with_options, PdfOptions};
+#[cfg(not(windows))]
 use std::process::Command;
 
 fn sample(width: u32, height: u32, value: u8) -> ImageBuffer {
@@ -325,6 +326,10 @@ fn assert_unicode_pdf_contents(
         .as_str()
         .unwrap();
     assert_eq!(decode_utf16be_pdf_string(title), expected_title);
+    // The Windows runner's bundled pdftotext exits successfully but omits
+    // Type0 text. Lopdf verifies extraction above on every platform; external
+    // extractor compatibility remains covered on Unix when the tool exists.
+    #[cfg(not(windows))]
     assert_pdftotext_extracts(path, expected_text, password);
 }
 
@@ -339,6 +344,7 @@ fn decode_utf16be_pdf_string(bytes: &[u8]) -> String {
     .unwrap()
 }
 
+#[cfg(not(windows))]
 fn assert_pdftotext_extracts(path: &std::path::Path, expected_text: &str, password: Option<&str>) {
     let mut command = Command::new("pdftotext");
     if let Some(password) = password {
@@ -364,6 +370,7 @@ fn assert_pdftotext_extracts(path: &std::path::Path, expected_text: &str, passwo
     }
 }
 
+#[cfg(not(windows))]
 fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
