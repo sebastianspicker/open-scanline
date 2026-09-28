@@ -7,10 +7,10 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-// All-feature debug binaries can exceed 256 MiB on Linux because they retain
+// All-feature debug binaries can exceed 600 MiB on Linux because they retain
 // symbols for the GUI and inference stacks. Keep the staging operation bounded
 // while accepting those supported development builds.
-const MAX_ONNX_WORKER_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_ONNX_WORKER_BYTES: u64 = 768 * 1024 * 1024;
 
 /// A selected ONNX worker whose identity is pinned at construction.
 #[derive(Debug)]
