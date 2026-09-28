@@ -176,8 +176,9 @@ physical and self-contained.
   family was drawn by the Braille Institute to keep easily confused characters
   apart (I/l/1, O/0, rn/m), which is also what OCR has to do. That makes it the
   right voice for a tool that turns pages into text and names files `page_001`.
-  Scale (egui pt): display 34/28 Bold · heading 19 Bold · section label 12.5 Bold
-  caps +1.4 tracking · body 16 · label 14 Bold · small 13.5 · mono 15 / mono small 13.
+  Scale (egui pt): display 34 / 27 narrow Bold · lead 17 · heading 19 Bold ·
+  body 16 · label 14 Bold · small 13.5 · mono 14.5 · stage readout mono 12.5 caps
+  with +1.2 tracking.
 - **Color**: *paper* `#FAFAF7` (workspace), *platen* `#EFEEE9` (header and
   action bar, the bed's frame), *field* `#FFFFFF`, *ink* `#17191B` (text and
   primary action), *graphite* `#565B60` (secondary text), *rule* `#DCDBD5`,
@@ -187,7 +188,7 @@ physical and self-contained.
 - **Layout**: bounded 1120 pt sheet, two columns ("1 · Scanner and pages",
   "2 · Files") that stack below 760 pt. A persistent platen-colored action bar
   at the bottom holds destination + Start, so the primary action never scrolls
-  away. Density is moderate: 8-pt rhythm, 44-pt controls.
+  away. Density is moderate: 8-pt rhythm, 40-pt controls, 46-pt primary action.
 - **Motion**: only the scan line, sweeping the current sheet slot while a job is
   running (about 1.6 s per pass), with no easing flourish. No fades, springs or
   spinners. Everything else changes state instantly.
@@ -249,3 +250,29 @@ command, not a centered hero. The tour follows Prepare → Scanning → Saved as
 numbered steps, with capabilities as a spec table rather than icon cards. One
 lamp line crosses the hero screenshot once on load and does nothing under
 `prefers-reduced-motion`.
+
+## 9. Implementation notes
+
+- **Tokens** live in `src/inbound/gui/view/theme.rs` (`color`, `size`,
+  `space`, `motion`) and are mirrored as CSS custom properties in
+  `docs/assets/css/style.css`.
+- **Components** (`view/workspace/components.rs`): stage readout, title, lead,
+  numbered section, label, note, inline problem, job banner, primary /
+  secondary / quiet buttons, field, choice, segmented control (stacks when its
+  labels don't fit), drawn check mark, `~` path display.
+- **Action bar** is an `egui::Area` pinned to the bottom edge and drawn after
+  the form, so keyboard focus moves header → settings → destination → Start.
+  A bottom panel would have put it first in the tab order.
+- **Focus**: egui shares one visual state for pressed and focused widgets. The
+  theme gives that state a 2 pt deep-lamp ring, and frameless buttons get an
+  explicit ring, because egui draws none for them.
+- **Motion**: egui exposes no OS reduce-motion preference. The scan line is the
+  only continuous animation, runs only while a job is active, and duplicates
+  information already given in text. Everything else is instant
+  (`animation_time = 0`). The website honours `prefers-reduced-motion`.
+- **Image tools** was tidied (tokens, grouped compact toolbar, no duplicate
+  menu bar, named controls), not redesigned. It is the next candidate.
+- **Behaviour changes** (all presentation-level): "Done" and "New scan", which
+  called the same function, became one "Start another scan"; the tools-mode
+  menu bar, which duplicated the header's More menu, was removed; the pending
+  document is no longer labelled "Not saved by this scan" while capture runs.
