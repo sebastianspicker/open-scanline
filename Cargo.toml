@@ -56,7 +56,7 @@ tract-onnx = { version = "0.23.4", optional = true }
 eframe = { version = "0.32.3", optional = true, default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "web_screen_reader", "x11"] }
 mdns-sd = "0.13"
 ureq = { version = "3.1", default-features = false, features = ["rustls"] }
-quick-xml = "0.41"
+quick-xml = "0.42"
 egui = { version = "0.32.3", optional = true }
 lopdf = "0.44"
 stringprep = "0.1"
