@@ -8,13 +8,15 @@ use crate::domain::acquisition::{
 };
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
+use crate::infrastructure::acquisition::batch::batch_timeout;
 use crate::infrastructure::acquisition::{
-    simulate_backends, DeviceMaintenanceCapabilities, DeviceSession, ScanPagesResult,
+    opens_simulated_session, simulate_backends, DeviceMaintenanceCapabilities, DeviceSession,
+    ScanPagesResult,
 };
 use crate::infrastructure::media::NativeImageDecoder;
 use crate::infrastructure::runtime::{
-    artifact_quota_for_request, document_batch_timeout, validate_artifact_quota, CommandOutput,
-    CommandRunner, CommandSession, ImageDecoder, TemporaryOutput,
+    artifact_quota_for_request, validate_artifact_quota, CommandOutput, CommandRunner,
+    CommandSession, ImageDecoder, TemporaryOutput,
 };
 use crate::operation::CancellationToken;
 use std::sync::{Arc, Mutex};
@@ -84,7 +86,6 @@ impl WiaDeviceSession {
             &spec,
             &output_file,
             artifact_quota,
-            request,
             "WIA acquire failed",
         )
     }
@@ -96,11 +97,43 @@ impl WiaDeviceSession {
         emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
     ) -> Result<ScanPagesResult> {
         let (output, artifact_quota, command_output) = self.run_com_page_job(request, max_pages)?;
+        let command_output = match command_output {
+            Ok(command_output) => command_output,
+            Err(error @ ScanError::Cancelled(_)) => return Err(error),
+            // A timeout or quota stop still leaves the finished pages on disk.
+            Err(error) => {
+                let mut paths = numbered_page_outputs(output.directory()).unwrap_or_default();
+                paths.truncate(max_pages as usize);
+                self.salvage_materialized_pages(paths, emit);
+                return Err(error);
+            }
+        };
+        self.finish_com_pages(&output, artifact_quota, &command_output, max_pages, emit)
+    }
+
+    /// Emit the pages a finished WIA batch left in `output`. When the command
+    /// failed (jam, open cover, USB error) the pages already scanned are still
+    /// emitted, then the command's error is returned.
+    fn finish_com_pages(
+        &self,
+        output: &TemporaryOutput,
+        artifact_quota: crate::infrastructure::runtime::ArtifactQuota,
+        command_output: &CommandOutput,
+        max_pages: u32,
+        emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
+    ) -> Result<ScanPagesResult> {
         validate_artifact_quota(output.directory(), artifact_quota)?;
-        validate_batch_output(&self.session, &command_output)?;
-        let paths = numbered_page_outputs(output.directory())?;
+        let mut paths = numbered_page_outputs(output.directory())?;
+        if let Err(failure) = validate_batch_output(&self.session, command_output) {
+            if matches!(failure, ScanError::Cancelled(_)) {
+                return Err(failure);
+            }
+            paths.truncate(max_pages as usize);
+            self.salvage_materialized_pages(paths, emit);
+            return Err(failure);
+        }
         super::super::command_backend::validate_batch_page_count(paths.len(), max_pages, "WIA")?;
-        let emitted = self.emit_materialized_pages(paths, request, emit)?;
+        let emitted = self.emit_materialized_pages(paths, emit)?;
         Ok(super::super::command_backend::command_backed_pages_result(
             emitted, max_pages,
         ))
@@ -113,12 +146,12 @@ impl WiaDeviceSession {
     ) -> Result<(
         TemporaryOutput,
         crate::infrastructure::runtime::ArtifactQuota,
-        CommandOutput,
+        Result<CommandOutput>,
     )> {
         validate_scan_dpi(request.dpi_x, request.dpi_y)?;
         let output = TemporaryOutput::new("wia-pages", "png")?;
         let artifact_quota = artifact_quota_for_request(request, max_pages)?;
-        let command = self.run_pages_command(request, max_pages, &output, artifact_quota)?;
+        let command = self.run_pages_command(request, max_pages, &output, artifact_quota);
         Ok((output, artifact_quota, command))
     }
 
@@ -132,7 +165,7 @@ impl WiaDeviceSession {
         let spec = wia_transfer_pages_command(&self.raw_id, request, output.directory(), max_pages);
         self.runner.run_with_cancellation_and_artifact_quota(
             &spec,
-            document_batch_timeout(max_pages),
+            batch_timeout(max_pages),
             self.session.cancelled(),
             self.session.cancellation_token().as_ref(),
             output.directory(),
@@ -140,14 +173,29 @@ impl WiaDeviceSession {
         )
     }
 
+    /// Emit the pages of a failed batch in order, stopping at the first page
+    /// that cannot be decoded or published (typically the interrupted one).
+    /// The caller reports the batch failure itself, as the SANE adapter does.
+    fn salvage_materialized_pages(
+        &self,
+        paths: Vec<std::path::PathBuf>,
+        emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
+    ) {
+        for path in paths {
+            if self.emit_materialized_pages(vec![path], emit).is_err() {
+                break;
+            }
+        }
+    }
+
     fn emit_materialized_pages(
         &self,
         paths: Vec<std::path::PathBuf>,
-        request: &ScanRequest,
         emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
     ) -> Result<u32> {
         let successful_output = CommandOutput {
             success: true,
+            exit_code: Some(0),
             stdout: Vec::new(),
             stderr: Vec::new(),
         };
@@ -160,7 +208,6 @@ impl WiaDeviceSession {
                 &successful_output,
                 &path,
                 self.decoder.as_ref(),
-                request,
                 "WIA batch acquire failed",
             )?;
             emit(self.calibrated_image(image)?)?;
@@ -363,7 +410,7 @@ pub fn open_with_cancellation(
             "not a WIA device id: {id}"
         )));
     }
-    if id == "wia:sim" || (simulate_backends() && id.ends_with(":sim")) {
+    if opens_simulated_session(id, "wia:sim", simulate_backends()) {
         return Ok(WiaDeviceSession::new(id.into(), "sim".into(), true));
     }
     let listed = super::probing::list_devices_with_cancellation(cancellation);
@@ -374,4 +421,122 @@ pub fn open_with_cancellation(
     }
     let raw = id.strip_prefix("wia:").unwrap_or(id).to_string();
     Ok(WiaDeviceSession::new(id.into(), raw, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WiaDeviceSession;
+    use crate::domain::image::{ImageBuffer, PixelFormat};
+    use crate::error::{Result, ScanError};
+    use crate::infrastructure::runtime::{
+        ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder, TemporaryOutput,
+    };
+    use crate::operation::CancellationToken;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    struct UnusedRunner;
+
+    impl CommandRunner for UnusedRunner {
+        fn run(&self, _: &CommandSpec, _: Duration, _: &Mutex<bool>) -> Result<CommandOutput> {
+            unreachable!("page emission does not run commands")
+        }
+
+        fn run_with_cancellation(
+            &self,
+            _: &CommandSpec,
+            _: Duration,
+            _: &Mutex<bool>,
+            _: Option<&CancellationToken>,
+        ) -> Result<CommandOutput> {
+            unreachable!("page emission does not run commands")
+        }
+
+        fn run_with_cancellation_and_artifact_quota(
+            &self,
+            _: &CommandSpec,
+            _: Duration,
+            _: &Mutex<bool>,
+            _: Option<&CancellationToken>,
+            _: &Path,
+            _: ArtifactQuota,
+        ) -> Result<CommandOutput> {
+            unreachable!("page emission does not run commands")
+        }
+    }
+
+    struct PixelDecoder;
+
+    impl ImageDecoder for PixelDecoder {
+        fn decode(&self, _: &Path) -> Result<ImageBuffer> {
+            ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![0, 0, 0])
+        }
+    }
+
+    const QUOTA: ArtifactQuota = ArtifactQuota {
+        max_files: 100,
+        max_bytes: 1 << 20,
+    };
+
+    fn session() -> WiaDeviceSession {
+        WiaDeviceSession::new_with_adapters(
+            "wia:test".into(),
+            "test".into(),
+            false,
+            Arc::new(UnusedRunner),
+            Arc::new(PixelDecoder),
+        )
+    }
+
+    fn output_with_pages(count: u32) -> TemporaryOutput {
+        let output = TemporaryOutput::new("wia-test", "png").unwrap();
+        for number in 1..=count {
+            std::fs::write(
+                output.directory().join(format!("page_{number:06}.png")),
+                b"x",
+            )
+            .unwrap();
+        }
+        output
+    }
+
+    fn failed(stderr: &str) -> CommandOutput {
+        CommandOutput {
+            success: false,
+            exit_code: Some(1),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn failed_batch_still_emits_scanned_pages_then_returns_the_error() {
+        let output = output_with_pages(2);
+        let mut emitted = 0;
+        let result =
+            session().finish_com_pages(&output, QUOTA, &failed("paper jam"), 5, &mut |_| {
+                emitted += 1;
+                Ok(())
+            });
+        assert_eq!(emitted, 2);
+        assert!(
+            matches!(result, Err(ScanError::Unsupported(message)) if message.contains("paper jam"))
+        );
+    }
+
+    #[test]
+    fn emptied_feeder_batch_reports_exhaustion_after_its_pages() {
+        let output = output_with_pages(2);
+        let result = session()
+            .finish_com_pages(
+                &output,
+                QUOTA,
+                &failed("OSL_FEEDER_EXHAUSTED"),
+                5,
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(result.emitted, 2);
+    }
 }

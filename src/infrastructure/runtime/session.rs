@@ -1,7 +1,6 @@
 //! Shared lifecycle state and materialized-output decoding.
 
 use super::seams::{CommandOutput, ImageDecoder};
-use crate::domain::acquisition::ScanRequest;
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::operation::CancellationToken;
@@ -79,16 +78,15 @@ impl CommandSession {
         output: &CommandOutput,
         output_path: &Path,
         decoder: &dyn ImageDecoder,
-        request: &ScanRequest,
         failure_name: &str,
     ) -> Result<ImageBuffer> {
         if self.is_cancelled() {
             return Err(ScanError::Cancelled("scan cancelled".into()));
         }
         validate_materialized_output(output, output_path, failure_name)?;
-        let mut image = decoder.decode(output_path)?;
-        resize_materialized_output(&mut image, request)?;
-        Ok(image)
+        // Device output keeps its native pixel size; it is not resized to the
+        // request, which may leave the extent to the device.
+        decoder.decode(output_path)
     }
 }
 
@@ -105,15 +103,4 @@ fn validate_materialized_output(
         "{failure_name}: {}",
         error.trim()
     )))
-}
-
-fn resize_materialized_output(image: &mut ImageBuffer, request: &ScanRequest) -> Result<()> {
-    let (width, height) = request
-        .region
-        .map(|region| (region.width, region.height))
-        .unwrap_or((request.width, request.height));
-    if width > 0 && height > 0 && (image.width != width || image.height != height) {
-        *image = crate::domain::processing::resize_nearest(image, width, height)?;
-    }
-    Ok(())
 }

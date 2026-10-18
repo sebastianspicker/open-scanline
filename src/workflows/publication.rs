@@ -265,7 +265,7 @@ pub(crate) fn save_final_pdf_from_paths_with_cancellation(
 /// final write; OCR observes the same profile-adjusted pixels.
 /// Token-aware multipage export. OCR is interrupted promptly when a shared
 /// scan/batch/GUI cancellation token is cancelled.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub(crate) fn save_final_multipage_from_paths_with_cancellation(
     destination: &Path,
     paths: &[PathBuf],
@@ -300,6 +300,7 @@ pub(crate) fn save_final_multipage_from_paths_with_cancellation(
     }
 }
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 fn save_profiled_pdf_from_paths_with_cancellation(
     destination: &Path,
     paths: &[PathBuf],
@@ -331,6 +332,7 @@ fn save_profiled_pdf_from_paths_with_cancellation(
     })
 }
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 fn collect_searchable_pages(
     paths: &[PathBuf],
     mut recognize: impl FnMut(&Path) -> Result<String>,

@@ -1,5 +1,5 @@
 use super::{normalize_image_ext, parse_crop_string};
-use crate::domain::acquisition::{ScanMode, MIN_SCAN_DPI};
+use crate::domain::acquisition::{PaperSize, ScanMode, MIN_SCAN_DPI};
 use crate::domain::export::{ExportOptions, OcrEngine};
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
@@ -50,8 +50,12 @@ pub(super) struct GuiState {
     pub(super) device: String,
     pub(super) devices: Vec<String>,
     pub(super) maintenance_capabilities: DeviceMaintenanceCapabilities,
+    /// Custom scan extent in pixels at `dpi`; used only when `custom_area`.
     pub(super) width: u32,
     pub(super) height: u32,
+    /// Named scan area; `Auto` is the device maximum. Ignored when `custom_area`.
+    pub(super) paper: PaperSize,
+    pub(super) custom_area: bool,
     pub(super) dpi: u32,
     pub(super) rotate: i32,
     pub(super) flip_h: bool,
@@ -130,8 +134,10 @@ macro_rules! build_gui_state {
             device: $device,
             devices: $devices,
             maintenance_capabilities: $maintenance_capabilities,
-            width: $acquisition.width.max(16),
-            height: $acquisition.height.max(16),
+            width: $acquisition.width,
+            height: $acquisition.height,
+            paper: configured_paper(&$config),
+            custom_area: configured_custom_area(&$config),
             dpi: $acquisition.dpi_x.max(MIN_SCAN_DPI),
             rotate: $pipeline.rotate.degrees(),
             flip_h: $pipeline.flip_h,
@@ -257,6 +263,28 @@ fn load_config_and_translation(
     (path, config, language, translator, config_load_error)
 }
 
+pub(super) fn paper_label(paper: PaperSize) -> &'static str {
+    match paper {
+        PaperSize::Auto => "Device maximum",
+        PaperSize::A4 => "A4",
+        PaperSize::A5 => "A5",
+        PaperSize::A6 => "A6",
+        PaperSize::Letter => "Letter",
+        PaperSize::Legal => "Legal",
+    }
+}
+
+fn configured_paper(config: &AppConfig) -> PaperSize {
+    PaperSize::parse(&config.paper_size).unwrap_or_default()
+}
+
+/// Explicit pixel extents apply only when no paper size is configured.
+fn configured_custom_area(config: &AppConfig) -> bool {
+    configured_paper(config) == PaperSize::Auto
+        && config.default_width > 0
+        && config.default_height > 0
+}
+
 fn devices_and_selection(config: &AppConfig) -> (Vec<String>, String) {
     let device = nonempty_or(&config.last_device_id, "mock");
     let mut devices = vec!["mock".into()];
@@ -266,12 +294,28 @@ fn devices_and_selection(config: &AppConfig) -> (Vec<String>, String) {
     (devices, device)
 }
 
+/// The platform default output folder as shown in the GUI.
+pub(super) fn default_output_dir_text() -> String {
+    default_output_dir().display().to_string()
+}
+
 fn configured_output_dir(config: &AppConfig) -> String {
     if config.output_dir.is_empty() {
-        ".".into()
+        default_output_dir_text()
     } else {
         config.output_dir.clone()
     }
+}
+
+/// Pictures/Open Scanline, else Documents, else home. Writers create the
+/// directory on first save. The process cwd is not a sensible default for a
+/// Finder-launched app.
+fn default_output_dir() -> PathBuf {
+    dirs::picture_dir()
+        .map(|dir| dir.join("Open Scanline"))
+        .or_else(dirs::document_dir)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn nonempty_or(value: &str, fallback: &str) -> String {

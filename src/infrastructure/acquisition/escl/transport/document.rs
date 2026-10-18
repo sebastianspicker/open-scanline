@@ -1,4 +1,4 @@
-use super::{scanner_agent_with_phase_timeout, Endpoint};
+use super::{certificate_pin_mismatch, scanner_agent_with_phase_timeout, Endpoint};
 use crate::infrastructure::runtime::TemporaryOutput;
 use crate::operation::CancellationToken;
 use std::fs::File;
@@ -14,16 +14,28 @@ pub(crate) fn http_get_to_temporary_output_with_phase_timeout_and_cancellation(
     setup_timeout: Duration,
     response_limit: u64,
     cancellation: Option<&CancellationToken>,
-) -> std::result::Result<(u16, Option<TemporaryOutput>), FetchDocumentError> {
+) -> std::result::Result<(u16, Option<TemporaryOutput>, Option<Duration>), FetchDocumentError> {
     let response =
         fetch_next_document(endpoint, path, global_timeout, setup_timeout, cancellation)?;
     let (parts, body) = response.into_parts();
     let status = parts.status.as_u16();
     validate_next_document_response(&parts, status, response_limit)?;
     if status != 200 {
-        return Ok((status, None));
+        return Ok((status, None, retry_after(&parts)));
     }
-    write_next_document(body, status, response_limit)
+    write_next_document(body, status, response_limit).map(|(status, output)| (status, output, None))
+}
+
+/// `Retry-After` in delta-seconds form on a 503; HTTP-date values are ignored.
+fn retry_after(parts: &ureq::http::response::Parts) -> Option<Duration> {
+    if parts.status.as_u16() != 503 {
+        return None;
+    }
+    parse_retry_after(parts.headers.get("retry-after")?.to_str().ok()?)
+}
+
+pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
 fn fetch_next_document(
@@ -50,7 +62,10 @@ fn map_next_document_error(error: ureq::Error) -> FetchDocumentError {
             FetchDocumentError::Cancelled
         }
         ureq::Error::Timeout(_) => FetchDocumentError::RetryableTimeout,
-        _ => FetchDocumentError::Failed(format!("NextDocument no response: {error}")),
+        _ => FetchDocumentError::Failed(
+            certificate_pin_mismatch(&error)
+                .unwrap_or_else(|| format!("NextDocument no response: {error}")),
+        ),
     }
 }
 

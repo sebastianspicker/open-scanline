@@ -41,7 +41,7 @@ fn restore_luts() -> [[u8; 256]; 3] {
 
 pub(super) fn colorized(image: &ImageBuffer, mode: &str) -> Vec<u8> {
     let mut rgb = rgb_workspace(image);
-    for pixel in rgb.chunks_exact_mut(3) {
+    for pixel in rgb.as_chunks_mut::<3>().0 {
         tint(pixel, mode);
     }
     rgb
@@ -53,7 +53,9 @@ fn rgb_workspace(image: &ImageBuffer) -> Vec<u8> {
         PixelFormat::Gray8 => image.data.iter().flat_map(|value| [*value; 3]).collect(),
         PixelFormat::Rgba8 => image
             .data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|pixel| [pixel[0], pixel[1], pixel[2]])
             .collect(),
     }

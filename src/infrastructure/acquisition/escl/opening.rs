@@ -29,9 +29,37 @@ pub(crate) fn canonical_job_path(
     endpoint: &Endpoint,
 ) -> Option<String> {
     if let Some(location) = job_location(headers, body) {
-        return normalize_job_location(&location, endpoint);
+        if let Some(path) = normalize_job_location(&location, endpoint) {
+            return Some(path);
+        }
+        // A device found as `host.local` often answers with its IP address.
+        // Never follow another host, but keep a well-formed job path on the
+        // pinned endpoint.
+        if let Some(path) = cross_origin_job_path(&location, root) {
+            return Some(path);
+        }
     }
     parse_job_id(headers, body).map(|id| format!("/{root}/ScanJobs/{id}"))
+}
+
+/// Path of an absolute `http(s)` Location, accepted only as exactly
+/// `/<root>/ScanJobs/<id>`; the authority is ignored.
+pub(crate) fn cross_origin_job_path(location: &str, root: &str) -> Option<String> {
+    if invalid_location(location) {
+        return None;
+    }
+    let (_, authority_and_path) = absolute_location_parts(location)?;
+    let (_, path) = authority_and_path.split_once('/')?;
+    let path = path.trim_end_matches('/');
+    let mut segments = path.split('/');
+    let (location_root, jobs, id) = (segments.next()?, segments.next()?, segments.next()?);
+    let well_formed = segments.next().is_none()
+        && location_root.eq_ignore_ascii_case(root)
+        && jobs == "ScanJobs"
+        && !id.is_empty()
+        && !path.contains(['?', '#', '%', '\\'])
+        && !matches!(id, "." | "..");
+    well_formed.then(|| format!("/{location_root}/ScanJobs/{id}"))
 }
 
 pub(crate) fn job_location(headers: &str, body: &[u8]) -> Option<String> {
@@ -170,12 +198,14 @@ pub fn open_with_cancellation(
     }
     let id = device_id;
     validate_device_id(id)?;
-    if id == "escl:sim" {
+    // Simulated ids open only on request, so a real host named `sim` works.
+    let simulate = crate::infrastructure::acquisition::simulate_backends();
+    if crate::infrastructure::acquisition::opens_simulated_session(id, "escl:sim", simulate) {
         return Ok(simulated_session(id));
     }
     let endpoint =
         parse_escl_id(id).ok_or_else(|| ScanError::DeviceNotFound(format!("bad eSCL id: {id}")))?;
-    if endpoint.host == "sim" {
+    if simulate && endpoint.host == "sim" {
         return Ok(EsclDeviceSession::new(id.into(), endpoint, true));
     }
     authorize_listed_or_allowed(id, &endpoint, cancellation)?;
@@ -242,4 +272,70 @@ pub fn open_unlisted_endpoint(endpoint: &str) -> Result<EsclDeviceSession> {
         endpoint,
         false,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint() -> Endpoint {
+        parse_endpoint("http://printer.local:80").unwrap()
+    }
+
+    fn location(value: &str) -> String {
+        format!("HTTP/1.1 201 Created\r\nLocation: {value}")
+    }
+
+    #[test]
+    fn same_origin_location_is_used() {
+        let headers = location("http://printer.local/eSCL/ScanJobs/abc");
+        assert_eq!(
+            canonical_job_path(&headers, b"", "eSCL", &endpoint()).as_deref(),
+            Some("/eSCL/ScanJobs/abc")
+        );
+    }
+
+    #[test]
+    fn ip_location_for_a_hostname_endpoint_keeps_only_the_path() {
+        let headers = location("http://192.168.1.50:80/eSCL/ScanJobs/abc/");
+        assert_eq!(
+            canonical_job_path(&headers, b"", "eSCL", &endpoint()).as_deref(),
+            Some("/eSCL/ScanJobs/abc")
+        );
+    }
+
+    #[test]
+    fn foreign_host_is_never_followed() {
+        // Only the pinned endpoint is ever contacted, so the result is a bare path.
+        let headers = location("https://evil.example/eSCL/ScanJobs/abc");
+        assert_eq!(
+            canonical_job_path(&headers, b"", "eSCL", &endpoint()).as_deref(),
+            Some("/eSCL/ScanJobs/abc")
+        );
+        // Paths that are not a plain job path are not kept.
+        for bad in [
+            "http://evil.example/other/ScanJobs/abc",
+            "http://evil.example/eSCL/ScanJobs/abc/extra",
+            "http://evil.example/eSCL/ScanJobs/..",
+            "http://evil.example/eSCL/ScanJobs/%2e%2e",
+            "http://evil.example/eSCL/ScanJobs/abc?x=1",
+            "http://evil.example/",
+        ] {
+            assert_eq!(cross_origin_job_path(bad, "eSCL"), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn unusable_location_falls_back_to_body_job_id() {
+        let headers = location("http://evil.example/elsewhere");
+        let body = b"<scan:JobUri>/eSCL/ScanJobs/from-body</scan:JobUri>";
+        assert_eq!(
+            canonical_job_path(&headers, body, "eSCL", &endpoint()).as_deref(),
+            Some("/eSCL/ScanJobs/from-body")
+        );
+        assert_eq!(
+            canonical_job_path("HTTP/1.1 201 Created", body, "eSCL", &endpoint()).as_deref(),
+            Some("/eSCL/ScanJobs/from-body")
+        );
+    }
 }

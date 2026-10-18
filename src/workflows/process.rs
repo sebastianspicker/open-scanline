@@ -18,6 +18,9 @@ pub struct ProcessOptions {
     pub dst: PathBuf,
     pub pipeline: PipelinePrefs,
     pub quality: Option<u8>,
+    /// Replace an existing destination; when false it is rejected before
+    /// the source is loaded.
+    pub overwrite: bool,
 }
 
 /// Runtime controls for the canonical process entry.
@@ -34,6 +37,10 @@ pub(crate) fn process_image_file(
 ) -> Result<PathBuf> {
     // Validate destination semantics and profile before writing any output.
     validate_supported_output_path(&options.dst, "process output")?;
+    crate::infrastructure::runtime::atomic_publish::ensure_output_absent(
+        &options.dst,
+        options.overwrite,
+    )?;
     let export = prepare_export_options(&options.dst, &run.export)?;
     let image = crate::infrastructure::media::load_image(&options.src)?;
     process_and_publish_page(

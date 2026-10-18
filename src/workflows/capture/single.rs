@@ -9,6 +9,7 @@ use crate::domain::processing::PipelinePrefs;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::DeviceSession;
 use crate::infrastructure::config::AppConfig;
+use crate::infrastructure::runtime::atomic_publish::ensure_output_absent;
 use crate::operation::CancellationToken;
 use crate::workflows::process::{process_and_publish_page, PageWorkflowRequest};
 use crate::workflows::publication::{
@@ -35,6 +36,9 @@ pub struct ScanToFileArgs {
     pub cancel_check: Option<Box<dyn Fn() -> bool + Send>>,
     /// Optional pre-pipeline TIFF or image archive.
     pub raw_out: Option<PathBuf>,
+    /// Replace existing output files; when false an existing destination is
+    /// rejected before acquisition.
+    pub overwrite: bool,
 }
 
 impl Default for ScanToFileArgs {
@@ -42,8 +46,9 @@ impl Default for ScanToFileArgs {
         Self {
             device: Some("mock".into()),
             out: PathBuf::from("scan.png"),
-            width: 320,
-            height: 240,
+            // Zero is the device maximum; the mock renders it as 320x240.
+            width: 0,
+            height: 0,
             seed: 1,
             dpi: 150,
             mode: ScanMode::Reflective,
@@ -55,6 +60,7 @@ impl Default for ScanToFileArgs {
             on_progress: None,
             cancel_check: None,
             raw_out: None,
+            overwrite: false,
         }
     }
 }
@@ -140,6 +146,7 @@ fn validate_scan_args(args: &ScanToFileArgs, pipeline: &PipelinePrefs) -> Result
 
 fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
     validate_supported_output_path(&args.out, "scan output")?;
+    ensure_output_absent(&args.out, args.overwrite)?;
     let Some(raw_out) = args.raw_out.as_ref() else {
         return Ok(());
     };
@@ -148,6 +155,7 @@ fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
         effective_raw_out.set_extension("tif");
     }
     validate_supported_output_path(&effective_raw_out, "raw output")?;
+    ensure_output_absent(&effective_raw_out, args.overwrite)?;
     if crate::infrastructure::runtime::atomic_publish::output_paths_alias(
         &args.out,
         &effective_raw_out,
@@ -161,12 +169,12 @@ fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
 }
 
 fn validate_dimensions(args: &ScanToFileArgs) -> Result<()> {
-    if args.width == 0 || args.height == 0 {
-        return Err(ScanError::Invalid(
-            "width and height must be positive".into(),
-        ));
-    }
-    checked_image_len(args.width, args.height, PixelFormat::Rgb8.bpp())?;
+    // Zero means the device maximum; only explicit axes are bounded.
+    checked_image_len(
+        args.width.max(1),
+        args.height.max(1),
+        PixelFormat::Rgb8.bpp(),
+    )?;
     Ok(())
 }
 
@@ -190,7 +198,9 @@ fn crop_has_invalid_shape(crop: Rect) -> bool {
 }
 
 fn crop_exceeds_scan_size(args: &ScanToFileArgs, crop: Rect) -> bool {
-    crop.x as u32 + crop.width > args.width || crop.y as u32 + crop.height > args.height
+    // An axis left to the device has no known size to check against.
+    (args.width > 0 && crop.x as u32 + crop.width > args.width)
+        || (args.height > 0 && crop.y as u32 + crop.height > args.height)
 }
 
 fn report_progress(args: &ScanToFileArgs, phase: &str, percent: f64, message: &str) {
@@ -274,10 +284,31 @@ impl<'args> ScanContext<'args> {
     }
 
     fn acquire_from_session(&self, session: &(impl DeviceSession + ?Sized)) -> Result<ImageBuffer> {
-        if self.args.use_preview {
+        let acquired = if self.args.use_preview {
             session.preview(&self.request)
         } else {
             session.scan(&self.request)
+        };
+        self.check_region_fits(acquired)
+    }
+
+    /// `crop_exceeds_scan_size` cannot check an axis left to the device
+    /// maximum (0). The device applies the region itself, so name the crop and
+    /// the requested size when it rejects the region as out of bounds.
+    fn check_region_fits(&self, acquired: Result<ImageBuffer>) -> Result<ImageBuffer> {
+        let Some(region) = self.request.region else {
+            return acquired;
+        };
+        // A device rounds the region to its own geometry, so a slightly
+        // smaller image is not an error; only an explicit rejection is reworded.
+        match acquired {
+            Err(ScanError::Invalid(message)) if message == "crop region out of bounds" => {
+                Err(ScanError::Invalid(format!(
+                    "crop {},{},{},{} exceeds the scan size delivered by the device (requested {}x{}; 0 means the device maximum)",
+                    region.x, region.y, region.width, region.height, self.args.width, self.args.height
+                )))
+            }
+            other => other,
         }
     }
 

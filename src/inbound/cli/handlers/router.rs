@@ -42,6 +42,7 @@ fn dispatch_local(command: Commands, config_path: Option<&Path>) -> i32 {
             show,
             set_output_dir,
             set_dpi,
+            set_paper,
             set_device,
         } => commands::config(commands::ConfigRequest {
             config_path,
@@ -49,11 +50,17 @@ fn dispatch_local(command: Commands, config_path: Option<&Path>) -> i32 {
             show,
             set_output_dir,
             set_dpi,
+            set_paper,
             set_device,
         }),
         Commands::Gui => commands::gui(config_path),
         Commands::Plugin { out, device, quiet } => plugin(config_path, out, device, quiet),
-        Commands::Convert { inp, out, dpi } => convert(inp, out, dpi),
+        Commands::Convert {
+            inp,
+            out,
+            dpi,
+            overwrite,
+        } => convert(inp, out, dpi, overwrite),
         Commands::Ocr {
             inp,
             lang,
@@ -109,9 +116,9 @@ fn plugin(
     })
 }
 
-fn convert(inp: PathBuf, out: PathBuf, dpi: Option<u32>) -> i32 {
+fn convert(inp: PathBuf, out: PathBuf, dpi: Option<u32>, overwrite: bool) -> i32 {
     cancellation::with_registered_token(move |cancellation| {
-        commands::convert(inp, out, dpi, cancellation)
+        commands::convert(inp, out, dpi, overwrite, cancellation)
     })
 }
 

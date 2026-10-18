@@ -24,6 +24,23 @@ fn parse_hue(value: &str) -> Result<f64, String> {
     crate::domain::settings::validate_hue(value).map_err(|error| error.to_string())
 }
 
+fn parse_crop(value: &str) -> Result<[i32; 4], String> {
+    let crop = crate::domain::image::parse_crop_components(value).map_err(|error| match error {
+        crate::domain::image::CropParseError::ComponentCount => "crop must be x,y,w,h".to_string(),
+        crate::domain::image::CropParseError::InvalidInteger(_) => {
+            "crop must be x,y,w,h integers".to_string()
+        }
+    })?;
+    if crop[2] <= 0 || crop[3] <= 0 {
+        return Err("crop width and height must be positive".into());
+    }
+    Ok(crop)
+}
+
+fn parse_paper(value: &str) -> Result<crate::domain::acquisition::PaperSize, String> {
+    crate::domain::acquisition::PaperSize::parse(value).map_err(|error| error.to_string())
+}
+
 fn parse_curves(value: &str) -> Result<CurvePoints, String> {
     crate::domain::settings::parse_curve_points(value)
         .map_err(|error| error.to_string())?
@@ -89,8 +106,11 @@ pub(super) enum RunMode {
 /// OCR implementation for a searchable PDF export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(super) enum OcrEngineArg {
+    /// Built-in 5x7 uppercase template matcher; not suitable for real documents
     Offline,
+    /// Local OCRS model pack (printed Latin English)
     Ocrs,
+    /// System Tesseract executable
     Tesseract,
 }
 
@@ -138,6 +158,9 @@ pub(super) struct Cli {
     /// Run mode: normal (default) or plugin (headless host entry)
     #[arg(long, global = true, value_enum, default_value_t = RunMode::Normal)]
     pub(super) mode: RunMode,
+    /// Print backend diagnostics to stderr (also OPEN_SCANLINE_DEBUG=1)
+    #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
+    pub(super) verbose: bool,
     #[command(subcommand)]
     pub(super) cmd: Option<Commands>,
 }
@@ -171,6 +194,8 @@ pub(super) enum Commands {
         set_output_dir: Option<String>,
         #[arg(long = "set-dpi")]
         set_dpi: Option<u32>,
+        #[arg(long = "set-paper")]
+        set_paper: Option<String>,
         #[arg(long = "set-device")]
         set_device: Option<String>,
     },
@@ -193,6 +218,9 @@ pub(super) enum Commands {
         out: PathBuf,
         #[arg(long)]
         dpi: Option<u32>,
+        /// Replace an existing output file instead of failing
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        overwrite: bool,
     },
     /// OCR an image file
     Ocr {
@@ -364,5 +392,57 @@ mod ocr_contract_tests {
                 matches!(cli.cmd, Some(Commands::Scan { options }) if options.invert == Some(expected))
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod crop_and_overwrite_tests {
+    use super::*;
+
+    #[test]
+    fn crop_is_validated_by_the_parser() {
+        let cli = Cli::try_parse_from([
+            "open-scanline",
+            "scan",
+            "--out",
+            "a.png",
+            "--crop",
+            "1,2,3,4",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Commands::Scan { options }) if options.adjustments.crop == Some([1, 2, 3, 4])
+        ));
+        for bad in ["1,2,0,4", "1,2,3,0", "1,2,3", "a,b,c,d"] {
+            assert!(
+                Cli::try_parse_from(["open-scanline", "scan", "--out", "a.png", "--crop", bad])
+                    .is_err(),
+                "{bad} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn overwrite_defaults_to_false_and_is_opt_in() {
+        let cli = Cli::try_parse_from(["open-scanline", "scan", "--out", "a.png"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Commands::Scan { options }) if !options.overwrite));
+        let cli = Cli::try_parse_from([
+            "open-scanline",
+            "convert",
+            "--in",
+            "a",
+            "--out",
+            "b",
+            "--overwrite",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Some(Commands::Convert {
+                overwrite: true,
+                ..
+            })
+        ));
     }
 }

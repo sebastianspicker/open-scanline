@@ -2,6 +2,8 @@ use super::*;
 
 mod document;
 pub(crate) use document::*;
+mod pinning;
+pub(crate) use pinning::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Endpoint {
@@ -167,18 +169,23 @@ pub(crate) struct HttpExchangeOptions<'a> {
     pub(crate) cancellation: Option<CancellationToken>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HttpExchangeError {
     Cancelled,
     Failed,
+    CertificatePinMismatch(String),
 }
 
 pub(crate) fn map_http_exchange_error(error: &ureq::Error) -> HttpExchangeError {
+    crate::debug_log::debug_log!("escl", "HTTP exchange error: {error}");
     match error {
         ureq::Error::Io(error) if error.kind() == std::io::ErrorKind::Interrupted => {
             HttpExchangeError::Cancelled
         }
-        _ => HttpExchangeError::Failed,
+        _ => certificate_pin_mismatch(error).map_or(
+            HttpExchangeError::Failed,
+            HttpExchangeError::CertificatePinMismatch,
+        ),
     }
 }
 
@@ -204,8 +211,14 @@ pub(crate) fn http_exchange_with_cancellation_result(
         cancellation,
     );
     let url = endpoint.url(path);
-    let response = send_http_exchange(&agent, method, &url, body, content_type)?;
+    let response = send_http_exchange(&agent, method, &url, body, content_type)
+        .map_err(|error| {
+            log_presented_certificate(endpoint, &error, setup_timeout);
+            map_http_exchange_error(&error)
+        })
+        .inspect_err(|_| crate::debug_log::debug_log!("escl", "{method} {path} failed"))?;
     read_http_exchange_response(response, response_limit)
+        .inspect_err(|_| crate::debug_log::debug_log!("escl", "{method} {path} response failed"))
 }
 
 fn send_http_exchange(
@@ -214,26 +227,20 @@ fn send_http_exchange(
     url: &str,
     body: Option<&[u8]>,
     content_type: Option<&str>,
-) -> std::result::Result<ureq::http::Response<ureq::Body>, HttpExchangeError> {
+) -> std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error> {
     match (method, body) {
-        ("GET", None) => agent
-            .get(url)
-            .call()
-            .map_err(|error| map_http_exchange_error(&error)),
+        ("GET", None) => agent.get(url).call(),
         ("POST", Some(bytes)) => {
             let request = agent.post(url).header(
                 "Content-Type",
                 content_type.unwrap_or("application/octet-stream"),
             );
-            request
-                .send(bytes)
-                .map_err(|error| map_http_exchange_error(&error))
+            request.send(bytes)
         }
-        ("DELETE", None) => agent
-            .delete(url)
-            .call()
-            .map_err(|error| map_http_exchange_error(&error)),
-        _ => Err(HttpExchangeError::Failed),
+        ("DELETE", None) => agent.delete(url).call(),
+        _ => Err(ureq::Error::BadUri(format!(
+            "unsupported eSCL exchange {method}"
+        ))),
     }
 }
 
@@ -306,6 +313,22 @@ pub(crate) fn scanner_agent_with_phase_timeout(
     response_header_timeout: Duration,
     cancellation: Option<CancellationToken>,
 ) -> ureq::Agent {
+    scanner_agent_with_pins(
+        global_timeout,
+        setup_timeout,
+        response_header_timeout,
+        cancellation,
+        env_certificate_pins(),
+    )
+}
+
+pub(crate) fn scanner_agent_with_pins(
+    global_timeout: Duration,
+    setup_timeout: Duration,
+    response_header_timeout: Duration,
+    cancellation: Option<CancellationToken>,
+    pins: Vec<CertificatePin>,
+) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(global_timeout))
         .timeout_resolve(Some(setup_timeout))
@@ -325,10 +348,22 @@ pub(crate) fn scanner_agent_with_phase_timeout(
         .max_redirects(0)
         .proxy(None)
         .build();
+    if pins.is_empty() {
+        return ureq::Agent::with_parts(
+            config,
+            CancellationConnector {
+                inner: DefaultConnector::new(),
+                cancellation,
+                send_timeout: setup_timeout,
+                response_header_timeout,
+            },
+            MdnsLocalResolver::default(),
+        );
+    }
     ureq::Agent::with_parts(
         config,
         CancellationConnector {
-            inner: DefaultConnector::new(),
+            inner: PinningConnector::new(pins),
             cancellation,
             send_timeout: setup_timeout,
             response_header_timeout,
@@ -338,14 +373,14 @@ pub(crate) fn scanner_agent_with_phase_timeout(
 }
 
 #[derive(Debug)]
-pub(crate) struct CancellationConnector {
-    inner: DefaultConnector,
+pub(crate) struct CancellationConnector<C = DefaultConnector> {
+    inner: C,
     cancellation: Option<CancellationToken>,
     send_timeout: Duration,
     response_header_timeout: Duration,
 }
 
-impl Connector for CancellationConnector {
+impl<C: Connector<Out = Box<dyn Transport>>> Connector for CancellationConnector<C> {
     type Out = CancellableTransport;
 
     fn connect(

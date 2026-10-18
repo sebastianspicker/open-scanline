@@ -228,14 +228,14 @@ fn disabled_or(value: &str, extra_sentinels: &[&str]) -> Option<String> {
 /// removal, grain reduction) that also accept "false" as a synonym for
 /// "off". A mandatory settings string is always present, so this only folds
 /// the disable sentinel to `None`.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn disabled_tier_or(value: &str) -> Option<String> {
     disabled_or(value, &["false"])
 }
 
 /// GUI pipeline preference derivation for plain named-value controls
 /// (colorize mode) that only recognize "off"/"none" as the disable sentinel.
-#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn disabled_value_or(value: &str) -> Option<String> {
     disabled_or(value, &[])
 }

@@ -100,7 +100,7 @@ fn rotate180(image: &ImageBuffer) -> Result<ImageBuffer> {
 
 fn reverse_pixels<const BYTES_PER_PIXEL: usize>(source: &[u8]) -> Vec<u8> {
     let mut output: Vec<u8> = source.iter().rev().copied().collect();
-    for pixel in output.chunks_exact_mut(BYTES_PER_PIXEL) {
+    for pixel in output.as_chunks_mut::<BYTES_PER_PIXEL>().0 {
         pixel.reverse();
     }
     output

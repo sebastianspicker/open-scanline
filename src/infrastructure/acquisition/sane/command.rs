@@ -31,7 +31,7 @@ fn basic_scanimage_command(
         "--format=png".into(),
         format!("--output-file={}", output_path.display()),
     ];
-    append_geometry(&mut args, request);
+    append_geometry(&mut args, request, None);
     CommandSpec {
         program: binary.display().to_string(),
         args,
@@ -55,7 +55,7 @@ pub(super) fn build_scanimage_command(
         "--format=png".into(),
         format!("--output-file={}", output_path.display()),
     ]);
-    append_geometry(&mut args, request);
+    append_geometry(&mut args, request, capabilities);
     Ok(CommandSpec {
         program: binary.display().to_string(),
         args,
@@ -63,18 +63,8 @@ pub(super) fn build_scanimage_command(
 }
 
 fn validate_request(request: &ScanRequest) -> Result<()> {
-    validate_dimensions(request)?;
     validate_scan_dpi(request.dpi_x, request.dpi_y)?;
     validate_region(request)
-}
-
-fn validate_dimensions(request: &ScanRequest) -> Result<()> {
-    if request.width == 0 || request.height == 0 {
-        return Err(ScanError::Invalid(
-            "SANE dimensions must be positive".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn validate_region(request: &ScanRequest) -> Result<()> {
@@ -158,12 +148,65 @@ fn selected_source(
     if capabilities.source_values.is_empty() {
         return source_without_constraints(request);
     }
-    let selected = matching_value(&capabilities.source_values, source_keywords(request))
+    let selected = simplex_feeder_source(capabilities, request)
+        .or_else(|| matching_value(&capabilities.source_values, source_keywords(request)))
         .or_else(|| duplex_fallback_source(capabilities, request))
+        .or_else(|| feeder_only_source(capabilities, request))
         .map(str::to_string);
     selected
         .map(Some)
-        .ok_or_else(|| unsupported_source(request))
+        .ok_or_else(|| unsupported_source(request, &capabilities.source_values))
+}
+
+/// A single-sided feeder request must not pick "ADF Duplex" or "ADF Back"
+/// just because the device lists it first.
+fn simplex_feeder_source<'a>(
+    capabilities: &'a SaneCapabilities,
+    request: &ScanRequest,
+) -> Option<&'a str> {
+    if request.mode != ScanMode::Document || request.duplex {
+        return None;
+    }
+    capabilities
+        .source_values
+        .iter()
+        .filter(|value| {
+            matching_value(std::slice::from_ref(value), source_keywords(request)).is_some()
+        })
+        .find(|value| is_single_sided(value))
+        .map(String::as_str)
+}
+
+fn is_single_sided(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    !lower.contains("duplex") && !lower.contains("back")
+}
+
+/// True when the device advertises sources and every one is a feeder.
+pub(super) fn feeder_only(capabilities: &SaneCapabilities) -> bool {
+    let feeder = &["automatic document feeder", "adf", "feeder", "document"];
+    !capabilities.source_values.is_empty()
+        && capabilities
+            .source_values
+            .iter()
+            .all(|value| matching_value(std::slice::from_ref(value), feeder).is_some())
+}
+
+/// A sheet-fed device has no flatbed, so the flatbed default would always
+/// fail. When every advertised source is a feeder, use its single-sided one.
+fn feeder_only_source<'a>(
+    capabilities: &'a SaneCapabilities,
+    request: &ScanRequest,
+) -> Option<&'a str> {
+    if request.mode != ScanMode::Reflective || !feeder_only(capabilities) {
+        return None;
+    }
+    capabilities
+        .source_values
+        .iter()
+        .find(|value| is_single_sided(value))
+        .or_else(|| capabilities.source_values.first())
+        .map(String::as_str)
 }
 
 fn source_without_option(request: &ScanRequest) -> Result<Option<String>> {
@@ -217,10 +260,11 @@ fn fallback_source(mode: ScanMode) -> &'static str {
     }
 }
 
-fn unsupported_source(request: &ScanRequest) -> ScanError {
+fn unsupported_source(request: &ScanRequest, advertised: &[String]) -> ScanError {
     ScanError::Unsupported(format!(
-        "SANE device does not advertise a {} source",
-        source_name(request.mode)
+        "SANE device does not advertise a {} source; it offers: {}",
+        source_name(request.mode),
+        advertised.join(", ")
     ))
 }
 
@@ -329,7 +373,11 @@ fn append_duplex(
     Ok(())
 }
 
-fn append_geometry(args: &mut Vec<String>, request: &ScanRequest) {
+fn append_geometry(
+    args: &mut Vec<String>,
+    request: &ScanRequest,
+    capabilities: Option<&SaneCapabilities>,
+) {
     let (left, top, width, height) = request
         .region
         .map(|region| {
@@ -349,12 +397,126 @@ fn append_geometry(args: &mut Vec<String>, request: &ScanRequest) {
             format!("{:.2}", top as f64 / request.dpi_y.max(1) as f64 * 25.4),
         ]);
     }
-    if width > 0 && height > 0 {
-        args.extend([
-            "-x".into(),
-            format!("{:.2}", width as f64 / request.dpi_x.max(1) as f64 * 25.4),
-            "-y".into(),
-            format!("{:.2}", height as f64 / request.dpi_y.max(1) as f64 * 25.4),
-        ]);
+    // A zero axis keeps the device default, which is its maximum extent.
+    // Sheet-fed backends clamp -x/-y to the page size, and scanimage
+    // range-checks -x/-y while parsing, so the page size must come first.
+    if width > 0 {
+        let millimetres = format!("{:.2}", width as f64 / request.dpi_x.max(1) as f64 * 25.4);
+        if capabilities.is_some_and(|value| value.page_width_option) {
+            args.push(format!("--page-width={millimetres}"));
+        }
+        args.extend(["-x".into(), millimetres]);
+    }
+    if height > 0 {
+        let millimetres = format!("{:.2}", height as f64 / request.dpi_y.max(1) as f64 * 25.4);
+        if capabilities.is_some_and(|value| value.page_height_option) {
+            args.push(format!("--page-height={millimetres}"));
+        }
+        args.extend(["-y".into(), millimetres]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::acquisition::sane::capabilities::parse_scanimage_help;
+
+    fn command_args(request: &ScanRequest, capabilities: Option<&SaneCapabilities>) -> Vec<String> {
+        build_scanimage_command(
+            Path::new("scanimage"),
+            "dev",
+            request,
+            Path::new("out.png"),
+            capabilities,
+        )
+        .unwrap()
+        .args
+    }
+
+    #[test]
+    fn feeder_only_device_scans_from_its_front_feeder_by_default() {
+        let capabilities =
+            parse_scanimage_help("    --source ADF Front|ADF Back|ADF Duplex [ADF Front]\n");
+        let args = command_args(&ScanRequest::default(), Some(&capabilities));
+        assert!(args.contains(&"--source=ADF Front".to_string()));
+
+        let film = ScanRequest {
+            mode: ScanMode::Film,
+            ..ScanRequest::default()
+        };
+        let error = build_scanimage_command(
+            Path::new("scanimage"),
+            "dev",
+            &film,
+            Path::new("out.png"),
+            Some(&capabilities),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("offers: ADF Front, ADF Back, ADF Duplex"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn single_sided_feeder_requests_skip_duplex_and_back_sources() {
+        let capabilities =
+            parse_scanimage_help("    --source ADF Duplex|ADF Back|ADF Front [ADF Duplex]\n");
+        for mode in [ScanMode::Document, ScanMode::Reflective] {
+            let request = ScanRequest {
+                mode,
+                ..ScanRequest::default()
+            };
+            let args = command_args(&request, Some(&capabilities));
+            assert!(
+                args.contains(&"--source=ADF Front".to_string()),
+                "{mode:?}: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_options_are_not_advertised() {
+        let capabilities = parse_scanimage_help(
+            "    --source ADF Front|ADF Duplex [ADF Front]\n    --duplex[=(yes|no)] [inactive]\n    --page-width 0..215.9mm [215.9] [inactive]\n",
+        );
+        assert!(capabilities.duplex_option.is_none());
+        assert!(!capabilities.page_width_option);
+        assert!(capabilities.source_option);
+    }
+
+    #[test]
+    fn zero_extent_emits_no_geometry() {
+        let request = ScanRequest {
+            width: 0,
+            height: 0,
+            ..ScanRequest::default()
+        };
+        let args = command_args(&request, None);
+        assert!(!args.iter().any(|arg| arg == "-x" || arg == "-y"));
+    }
+
+    #[test]
+    fn page_size_options_follow_advertised_capabilities() {
+        let request = ScanRequest {
+            width: 1240,
+            height: 0,
+            dpi_x: 150,
+            dpi_y: 150,
+            ..ScanRequest::default()
+        };
+        let plain = command_args(&request, None);
+        assert!(plain.contains(&"-x".to_string()));
+        assert!(!plain.iter().any(|arg| arg.starts_with("--page-")));
+
+        let capabilities = parse_scanimage_help(
+            "    --page-width 0..215.9mm [210]\n    --page-height 0..355.6mm [297]\n",
+        );
+        let args = command_args(&request, Some(&capabilities));
+        let page = args.iter().position(|arg| arg == "--page-width=209.97");
+        let width = args.iter().position(|arg| arg == "-x");
+        assert!(page.is_some() && page < width, "page size must precede -x");
+        assert!(!args.iter().any(|arg| arg.starts_with("--page-height")));
     }
 }

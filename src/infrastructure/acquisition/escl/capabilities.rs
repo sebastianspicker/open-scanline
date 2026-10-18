@@ -134,11 +134,41 @@ pub(crate) fn push_unique(values: &mut Vec<String>, value: &str) {
     }
 }
 
+#[derive(Default)]
+struct RangeBuilder {
+    active: bool,
+    // [min, max, step] per axis.
+    x: [Option<u32>; 3],
+    y: [Option<u32>; 3],
+}
+
+impl RangeBuilder {
+    fn axis(values: [Option<u32>; 3]) -> Option<AxisRange> {
+        let [min, max, step] = values;
+        let (min, max) = (min?, max?);
+        (min > 0 && min <= max).then_some(AxisRange {
+            min,
+            max,
+            step: step.filter(|step| *step > 0).unwrap_or(1),
+        })
+    }
+
+    fn finish(&mut self) -> Option<ResolutionRange> {
+        let range = std::mem::take(self);
+        range.active.then_some(())?;
+        Some(ResolutionRange {
+            x: Self::axis(range.x)?,
+            y: Self::axis(range.y)?,
+        })
+    }
+}
+
 struct CapabilityParser {
     capabilities: ScannerCapabilities,
     path: Vec<String>,
     values: Vec<String>,
     current_resolution: Option<(Option<u32>, Option<u32>)>,
+    current_range: RangeBuilder,
     saw_capabilities: bool,
 }
 
@@ -152,14 +182,23 @@ impl CapabilityParser {
             path: Vec::new(),
             values: Vec::new(),
             current_resolution: None,
+            current_range: RangeBuilder::default(),
             saw_capabilities: false,
         }
     }
 
     fn start(&mut self, name: String) {
         self.saw_capabilities |= name == "scannercapabilities";
-        if name == "resolution" {
+        // `Resolution` is the legacy pair element; eSCL profiles list pairs as
+        // `DiscreteResolution` inside `DiscreteResolutions`.
+        if matches!(name.as_str(), "resolution" | "discreteresolution") {
             self.current_resolution = Some((None, None));
+        }
+        if name == "resolutionrange" {
+            self.current_range = RangeBuilder {
+                active: true,
+                ..RangeBuilder::default()
+            };
         }
         self.path.push(name);
         self.values.push(String::new());
@@ -203,7 +242,16 @@ impl CapabilityParser {
             }
             "xresolution" => self.set_resolution_axis(value, true),
             "yresolution" => self.set_resolution_axis(value, false),
-            "resolution" => self.finish_resolution(source),
+            "resolution" | "discreteresolution" => self.finish_resolution(source),
+            "resolutionrange" => {
+                if let Some(range) = self.current_range.finish() {
+                    let ranges = &mut self.source(source).resolution_ranges;
+                    if !ranges.contains(&range) {
+                        ranges.push(range);
+                    }
+                }
+            }
+            "min" | "max" | "step" => self.set_range_bound(name, value),
             _ => {}
         }
     }
@@ -224,6 +272,24 @@ impl CapabilityParser {
         } else {
             *y = value.trim().parse().ok();
         }
+    }
+
+    fn set_range_bound(&mut self, name: &str, value: &str) {
+        if !self.current_range.active {
+            return;
+        }
+        // The closing element is still on the path; its parent names the axis.
+        let axis = match self.path.iter().rev().nth(1).map(String::as_str) {
+            Some("xresolutionrange") => &mut self.current_range.x,
+            Some("yresolutionrange") => &mut self.current_range.y,
+            _ => return,
+        };
+        let index = match name {
+            "min" => 0,
+            "max" => 1,
+            _ => 2,
+        };
+        axis[index] = value.trim().parse().ok();
     }
 
     fn finish_resolution(&mut self, source: Option<CapabilitySource>) {
@@ -320,6 +386,7 @@ pub(crate) fn capabilities_for_endpoint_with_cancellation_result(
             Ok(response) => response,
             Err(HttpExchangeError::Cancelled) => return Err(HttpExchangeError::Cancelled),
             Err(HttpExchangeError::Failed) => continue,
+            Err(error @ HttpExchangeError::CertificatePinMismatch(_)) => return Err(error),
         };
         if status == 200 {
             if let Some(capabilities) = parse_escl_capabilities(&body, root) {
@@ -328,4 +395,139 @@ pub(crate) fn capabilities_for_endpoint_with_cancellation_result(
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::session::select_resolution;
+    use super::*;
+
+    const DISCRETE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScannerCapabilities xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
+  <pwg:Version>2.63</pwg:Version>
+  <pwg:MakeAndModel>Test Scanner</pwg:MakeAndModel>
+  <scan:Platen>
+    <scan:PlatenInputCaps>
+      <scan:MaxWidth>2550</scan:MaxWidth>
+      <scan:MaxHeight>3507</scan:MaxHeight>
+      <scan:SettingProfiles>
+        <scan:SettingProfile>
+          <scan:ColorModes>
+            <scan:ColorMode>RGB24</scan:ColorMode>
+          </scan:ColorModes>
+          <scan:DocumentFormats>
+            <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
+          </scan:DocumentFormats>
+          <scan:SupportedResolutions>
+            <scan:DiscreteResolutions>
+              <scan:DiscreteResolution>
+                <scan:XResolution>200</scan:XResolution>
+                <scan:YResolution>200</scan:YResolution>
+              </scan:DiscreteResolution>
+              <scan:DiscreteResolution>
+                <scan:XResolution>600</scan:XResolution>
+                <scan:YResolution>600</scan:YResolution>
+              </scan:DiscreteResolution>
+            </scan:DiscreteResolutions>
+          </scan:SupportedResolutions>
+        </scan:SettingProfile>
+      </scan:SettingProfiles>
+    </scan:PlatenInputCaps>
+  </scan:Platen>
+</scan:ScannerCapabilities>"#;
+
+    const RANGE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<scan:ScannerCapabilities xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
+  <scan:Platen>
+    <scan:PlatenInputCaps>
+      <scan:SettingProfiles>
+        <scan:SettingProfile>
+          <scan:SupportedResolutions>
+            <scan:ResolutionRange>
+              <scan:XResolutionRange>
+                <scan:Min>75</scan:Min>
+                <scan:Max>1200</scan:Max>
+                <scan:Normal>300</scan:Normal>
+                <scan:Step>25</scan:Step>
+              </scan:XResolutionRange>
+              <scan:YResolutionRange>
+                <scan:Min>100</scan:Min>
+                <scan:Max>600</scan:Max>
+                <scan:Normal>300</scan:Normal>
+                <scan:Step>50</scan:Step>
+              </scan:YResolutionRange>
+            </scan:ResolutionRange>
+          </scan:SupportedResolutions>
+        </scan:SettingProfile>
+      </scan:SettingProfiles>
+    </scan:PlatenInputCaps>
+  </scan:Platen>
+</scan:ScannerCapabilities>"#;
+
+    fn platen(xml: &str) -> SourceCapabilities {
+        parse_escl_capabilities(xml.as_bytes(), "eSCL")
+            .unwrap()
+            .source(CapabilitySource::Platen)
+            .unwrap()
+            .clone()
+    }
+
+    fn request(dpi: u32) -> ScanRequest {
+        ScanRequest {
+            dpi_x: dpi,
+            dpi_y: dpi,
+            ..ScanRequest::default()
+        }
+    }
+
+    #[test]
+    fn parses_discrete_resolutions() {
+        let source = platen(DISCRETE);
+        assert_eq!(source.resolutions, vec![(200, 200), (600, 600)]);
+        assert!(source.resolution_ranges.is_empty());
+    }
+
+    #[test]
+    fn parses_resolution_range() {
+        let source = platen(RANGE);
+        assert!(source.resolutions.is_empty());
+        assert_eq!(
+            source.resolution_ranges,
+            vec![ResolutionRange {
+                x: AxisRange {
+                    min: 75,
+                    max: 1200,
+                    step: 25
+                },
+                y: AxisRange {
+                    min: 100,
+                    max: 600,
+                    step: 50
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn discrete_selection_picks_nearest_advertised_pair() {
+        let source = platen(DISCRETE);
+        assert_eq!(select_resolution(&request(300), &source), (200, 200));
+        assert_eq!(select_resolution(&request(450), &source), (600, 600));
+        assert_eq!(select_resolution(&request(1200), &source), (600, 600));
+    }
+
+    #[test]
+    fn range_selection_clamps_and_snaps_to_step() {
+        let source = platen(RANGE);
+        assert_eq!(select_resolution(&request(300), &source), (300, 300));
+        assert_eq!(select_resolution(&request(310), &source), (300, 300));
+        assert_eq!(select_resolution(&request(10), &source), (75, 100));
+        assert_eq!(select_resolution(&request(2400), &source), (1200, 600));
+    }
+
+    #[test]
+    fn missing_resolutions_keep_the_requested_value() {
+        let source = SourceCapabilities::default();
+        assert_eq!(select_resolution(&request(300), &source), (300, 300));
+    }
 }

@@ -129,8 +129,16 @@ fn preview_exposure_result(
 ) -> serde_json::Value {
     use serde_json::json;
     let mut preview_request = request.clone();
-    preview_request.width = preview_request.width.clamp(16, 256);
-    preview_request.height = preview_request.height.clamp(16, 256);
+    // Zero keeps the device's full extent on that axis.
+    let bounded = |extent: u32| {
+        if extent == 0 {
+            0
+        } else {
+            extent.clamp(16, 256)
+        }
+    };
+    preview_request.width = bounded(preview_request.width);
+    preview_request.height = bounded(preview_request.height);
     let preview = session.preview(&preview_request);
     session.close();
 

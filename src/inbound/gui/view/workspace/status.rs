@@ -100,7 +100,19 @@ fn capture(ui: &mut egui::Ui, report: &JobReport) {
         &format!("{} dpi requested", report.dpi),
         false,
     );
-    let area = format!("{} × {} px requested", report.width, report.height);
+    let area = match (report.width, report.height) {
+        (0, 0) => "Device maximum".to_string(),
+        (width, height) => {
+            let axis = |pixels: u32| {
+                if pixels == 0 {
+                    "max".to_string()
+                } else {
+                    pixels.to_string()
+                }
+            };
+            format!("{} × {} px requested", axis(width), axis(height))
+        }
+    };
     detail(ui, "Scan area", &area, false);
 }
 

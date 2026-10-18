@@ -47,7 +47,13 @@ fn parse(argv: &[String]) -> Result<Cli, clap::Error> {
 
 fn dispatch_parse_result(result: Result<Cli, clap::Error>) -> i32 {
     match result {
-        Ok(cli) => handlers::dispatch(cli),
+        Ok(cli) => {
+            crate::debug_log::init_from_env();
+            if cli.verbose {
+                crate::debug_log::enable();
+            }
+            handlers::dispatch(cli)
+        }
         Err(e) => {
             // clap handles --version / --help via print
             let _ = e.print();

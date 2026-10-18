@@ -108,10 +108,32 @@ impl FileDeviceSession {
 }
 
 fn resize_for_request(image: ImageBuffer, request: &ScanRequest) -> Result<ImageBuffer> {
-    if request.width > 0 && request.height > 0 {
-        return crate::domain::processing::resize_nearest(&image, request.width, request.height);
+    let (width, height) = fit_extent(image.width, image.height, request.width, request.height);
+    if (width, height) == (image.width, image.height) {
+        return Ok(image);
     }
-    Ok(image)
+    crate::domain::processing::resize_nearest(&image, width, height)
+}
+
+/// Size of a `source` image scaled to fit the requested extent while keeping
+/// its aspect ratio. Both axes set form a bounding box; one axis set scales to
+/// that axis; neither set keeps the source size. Zero means unconstrained.
+fn fit_extent(source_width: u32, source_height: u32, width: u32, height: u32) -> (u32, u32) {
+    if source_width == 0 || source_height == 0 {
+        return (source_width, source_height);
+    }
+    let scaled = |value: u64, numerator: u64, denominator: u64| {
+        ((value * numerator + denominator / 2) / denominator).clamp(1, u64::from(u32::MAX)) as u32
+    };
+    let (sw, sh) = (u64::from(source_width), u64::from(source_height));
+    let (rw, rh) = (u64::from(width), u64::from(height));
+    match (width, height) {
+        (0, 0) => (source_width, source_height),
+        (_, 0) => (width, scaled(sh, rw, sw)),
+        (0, _) => (scaled(sw, rh, sh), height),
+        _ if rw * sh <= rh * sw => (width, scaled(sh, rw, sw)),
+        _ => (scaled(sw, rh, sh), height),
+    }
 }
 
 pub(super) fn parse_file_device_id(device_id: &str) -> PathBuf {
@@ -123,4 +145,29 @@ pub(super) fn parse_file_device_id(device_id: &str) -> PathBuf {
         device_id
     };
     PathBuf::from(raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_extent;
+
+    #[test]
+    fn extent_is_a_bounding_box_that_keeps_the_aspect_ratio() {
+        // 4:3 source into a portrait A4-like box is width-limited.
+        assert_eq!(fit_extent(400, 300, 200, 400), (200, 150));
+        // Height-limited.
+        assert_eq!(fit_extent(400, 300, 800, 150), (200, 150));
+        // Upscaling fits the box too.
+        assert_eq!(fit_extent(100, 50, 400, 400), (400, 200));
+        // Exact aspect keeps the box.
+        assert_eq!(fit_extent(400, 300, 320, 240), (320, 240));
+    }
+
+    #[test]
+    fn single_axis_scales_to_that_axis_and_none_keeps_the_source() {
+        assert_eq!(fit_extent(400, 300, 200, 0), (200, 150));
+        assert_eq!(fit_extent(400, 300, 0, 150), (200, 150));
+        assert_eq!(fit_extent(400, 300, 0, 0), (400, 300));
+        assert_eq!(fit_extent(1000, 1, 10, 0), (10, 1));
+    }
 }

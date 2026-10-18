@@ -1,12 +1,8 @@
 #[cfg(feature = "gui")]
 use super::super::normalize_image_ext;
 use super::super::open_image_file;
-#[cfg(any(test, not(feature = "gui")))]
-use super::super::save_image_to_with_export_options;
 use super::super::state::GuiState;
 use crate::workflows::process::ProcessOptions;
-#[cfg(any(test, not(feature = "gui")))]
-use crate::workflows::publication::save_final_multipage_from_paths_with_cancellation;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -145,6 +141,7 @@ impl GuiState {
                 dst: out,
                 pipeline,
                 quality: None,
+                overwrite: true,
             },
             export,
             dpi: self.dpi,
@@ -230,60 +227,5 @@ impl GuiState {
             advance_frame,
             pending_pdf_password,
         })
-    }
-
-    /// Synchronous test/non-GUI compatibility path. The desktop UI always
-    /// uses `prepare_save_plus` and runs this through the cancellable app
-    /// worker.
-    #[cfg(any(test, not(feature = "gui")))]
-    pub(in super::super) fn do_save_plus(&mut self) {
-        let Some(action) = self.prepare_save_plus() else {
-            return;
-        };
-        self.run_save_action(action);
-    }
-
-    #[cfg(any(test, not(feature = "gui")))]
-    fn run_save_action(&mut self, action: SaveAction) {
-        let result = match action.candidate.as_ref() {
-            Some(candidate) => save_final_multipage_from_paths_with_cancellation(
-                &action.dest,
-                &candidate.sources,
-                action.dpi,
-                &action.export,
-                None,
-            ),
-            None => save_image_to_with_export_options(
-                &action.src,
-                &action.dest,
-                action.dpi,
-                &action.export,
-            ),
-        };
-        match result {
-            Ok(path) => {
-                if let Some(candidate) = action.candidate {
-                    self.commit_multipage_save(candidate);
-                } else {
-                    self.last_image = Some(path.clone());
-                }
-                if action.advance_frame {
-                    self.frame_index += 1;
-                    self.status = format!(
-                        "{} {} ({})",
-                        self.translator.t("status.done"),
-                        path.display(),
-                        self.frame_index
-                    );
-                } else {
-                    self.status =
-                        format!("{} {}", self.translator.t("status.done"), path.display());
-                }
-            }
-            Err(error) => {
-                self.restore_export_password(action.pending_pdf_password);
-                self.set_error(error);
-            }
-        }
     }
 }

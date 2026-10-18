@@ -29,6 +29,14 @@ fn probe_worker(
         })
         .ok()
         .flatten();
+        if device.is_none() {
+            crate::debug_log::debug_log!(
+                "escl",
+                "no eSCL scanner at {}:{}",
+                endpoint.host,
+                endpoint.port
+            );
+        }
         if let Some(device) = device {
             found
                 .lock()
@@ -273,6 +281,7 @@ pub(crate) fn discover_devices_locked_with_cancellation(
     }
     endpoints.extend(subnet_endpoints(cap.saturating_sub(endpoints.len())));
     endpoints.truncate(cap);
+    crate::debug_log::debug_log!("escl", "probing {} candidate endpoint(s)", endpoints.len());
     let mut devices =
         probe_endpoints_with_cancellation(&endpoints, DISCOVERY_PROBE_BUDGET, cancellation);
     if crate::operation::is_cancelled(cancellation) {

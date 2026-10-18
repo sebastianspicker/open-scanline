@@ -1,10 +1,11 @@
 use super::super::manual::user_manual_text;
-use super::common::print_wrote;
-use crate::domain::acquisition::DeviceOpenPolicy;
+use super::common::{print_verbose_hint, print_wrote};
+use crate::domain::acquisition::{DeviceOpenPolicy, PaperSize};
 use crate::domain::manufacturers::{
     format_manufacturers_text, list_manufacturers, manufacturer_support_summary,
     resolve_manufacturer,
 };
+use crate::domain::settings::strip_banned;
 use crate::inbound::cli::args::{OnnxLayout, OnnxNormalization, ScanSource};
 use crate::inbound::cli::handlers::scan;
 use crate::inbound::gui::run_gui;
@@ -18,10 +19,12 @@ use crate::infrastructure::media::ocr::{model_pack, ocr_file_with_engine_with_ca
 use crate::infrastructure::onnx::{
     run_isolated_onnx_with_executable, run_onnx_worker, OnnxInferenceOptions,
 };
+use crate::infrastructure::runtime::atomic_publish::ensure_output_absent;
 use crate::operation::CancellationToken;
 use crate::workflows::capture::batch::{
     self, plan_batch_outputs, BatchCaptureOptions, BatchOutputRequest, BatchScanArgs,
 };
+use crate::workflows::settings::resolve_scan_extent;
 use std::path::{Path, PathBuf};
 
 pub(super) fn devices() -> i32 {
@@ -63,6 +66,7 @@ pub(super) struct ConfigRequest<'a> {
     pub(super) show: bool,
     pub(super) set_output_dir: Option<String>,
     pub(super) set_dpi: Option<u32>,
+    pub(super) set_paper: Option<String>,
     pub(super) set_device: Option<String>,
 }
 
@@ -72,10 +76,16 @@ pub(super) fn config(request: ConfigRequest<'_>) -> i32 {
         .map(Path::to_path_buf)
         .unwrap_or_else(default_config_path);
     if request.should_write() {
-        return write_config(&path, request);
+        let show = request.show;
+        let code = write_config(&path, request);
+        return if code == 0 && show {
+            show_config(&path)
+        } else {
+            code
+        };
     }
-    show_config(&path, request.show);
-    0
+    // With no flags, `config` behaves like `config --show`.
+    show_config(&path)
 }
 
 impl ConfigRequest<'_> {
@@ -83,6 +93,7 @@ impl ConfigRequest<'_> {
         self.init
             || self.set_output_dir.is_some()
             || self.set_dpi.is_some()
+            || self.set_paper.is_some()
             || self.set_device.is_some()
     }
 }
@@ -115,24 +126,43 @@ fn apply_config_updates(config: &mut AppConfig, request: ConfigRequest<'_>) {
     if let Some(dpi) = request.set_dpi {
         config.default_dpi = dpi;
     }
+    // Validated by `save_config`, which rejects unknown paper names.
+    if let Some(paper) = request.set_paper {
+        config.paper_size = paper.trim().to_ascii_lowercase();
+    }
     if let Some(device) = request.set_device {
         config.last_device_id = device;
     }
 }
 
-fn show_config(path: &Path, show: bool) {
-    println!("config_path={}", path.display());
-    if path.is_file() {
-        match std::fs::read_to_string(path) {
-            Ok(text) => print!("{text}"),
-            Err(error) => eprintln!("{error}"),
-        }
-    } else {
-        println!("(file not found; defaults in use)");
-        let config = load_config(Some(path)).unwrap_or_default();
-        println!("{config:?}");
+/// Print the effective config as JSON on stdout. The path and any note go to
+/// stderr so stdout stays parseable. The file is loaded through `load_config`,
+/// so it is migrated and validated; banned keys are stripped as on save.
+fn show_config(path: &Path) -> i32 {
+    eprintln!("config_path={}", path.display());
+    if !path.exists() {
+        eprintln!("(file not found; showing defaults)");
     }
-    let _ = show;
+    let config = match load_config(Some(path)) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("config error: {error}");
+            return 1;
+        }
+    };
+    let rendered = serde_json::to_value(&config)
+        .map(|value| strip_banned(&value))
+        .and_then(|value| serde_json::to_string_pretty(&value));
+    match rendered {
+        Ok(text) => {
+            println!("{text}");
+            0
+        }
+        Err(error) => {
+            eprintln!("config error: {error}");
+            1
+        }
+    }
 }
 
 pub(super) fn gui(config_path: Option<&Path>) -> i32 {
@@ -159,8 +189,13 @@ pub(super) fn convert(
     inp: PathBuf,
     out: PathBuf,
     dpi: Option<u32>,
+    overwrite: bool,
     cancellation: CancellationToken,
 ) -> i32 {
+    if let Err(e) = ensure_output_absent(&out, overwrite) {
+        eprintln!("convert error: {e}");
+        return 1;
+    }
     match convert_image_with_cancellation(&inp, &out, dpi, cancellation) {
         Ok(path) => {
             print_wrote(&path);
@@ -291,6 +326,7 @@ pub(super) struct BatchRequest {
     pub(super) pages: Option<u32>,
     pub(super) width: Option<u32>,
     pub(super) height: Option<u32>,
+    pub(super) paper: Option<PaperSize>,
     pub(super) seed: u32,
     pub(super) dpi: Option<u32>,
     pub(super) source: Option<ScanSource>,
@@ -305,6 +341,7 @@ pub(super) struct BatchRequest {
     pub(super) multipage_out: Option<PathBuf>,
     pub(super) export: crate::ExportOptions,
     pub(super) contact_sheet: Option<PathBuf>,
+    pub(super) overwrite: bool,
 }
 
 pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) -> i32 {
@@ -334,6 +371,7 @@ pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) 
         }
         Err(error) => {
             eprintln!("batch error: {error}");
+            print_verbose_hint();
             1
         }
     }
@@ -347,6 +385,8 @@ impl BatchRequest {
         scan::apply_explicit_bool(&mut pipeline.auto_orient, self.auto_orient);
         scan::apply_explicit_bool(&mut pipeline.invert, self.invert);
         let outputs = self.output_targets(config);
+        let dpi = self.dpi.unwrap_or(config.default_dpi);
+        let (width, height) = resolve_scan_extent(config, self.paper, self.width, self.height, dpi);
         BatchScanArgs {
             device: self
                 .device
@@ -354,10 +394,10 @@ impl BatchRequest {
                 .unwrap_or_else(|| config.last_device_id.clone()),
             out_dir: self.out_dir.clone(),
             pages: self.pages.unwrap_or(config.batch_pages.max(1)),
-            width: self.width.unwrap_or(config.default_width),
-            height: self.height.unwrap_or(config.default_height),
+            width,
+            height,
             seed: self.seed,
-            dpi: self.dpi.unwrap_or(config.default_dpi),
+            dpi,
             mode: self
                 .source
                 .map(ScanSource::mode)
@@ -370,6 +410,7 @@ impl BatchRequest {
             contact_sheet: outputs.contact_sheet,
             pipeline,
             on_progress: None,
+            overwrite: self.overwrite,
         }
     }
 

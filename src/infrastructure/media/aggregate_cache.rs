@@ -198,11 +198,6 @@ impl SharedPageLoader {
     fn directory(&self) -> Option<&Path> {
         self.storage.as_ref().map(TemporaryOutput::directory)
     }
-
-    #[cfg(test)]
-    pub(crate) fn decode_count(&self) -> usize {
-        self.decode_count
-    }
 }
 
 fn hash_source(path: &Path, cancellation: Option<&CancellationToken>) -> Result<[u8; 32]> {

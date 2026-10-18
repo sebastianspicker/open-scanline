@@ -86,20 +86,6 @@ pub fn recognize_with_runner(
     finish_result(text, cancellation)
 }
 
-#[cfg(all(test, feature = "ocrs"))]
-fn recognize_pack_with_runner(
-    image: &ImageBuffer,
-    cancellation: Option<&CancellationToken>,
-    pack: &model_pack::InstalledModelPack,
-    runner: &dyn OcrsRunner,
-) -> Result<crate::infrastructure::media::ocr::OcrResult> {
-    require_compiled()?;
-    check_cancellation(cancellation)?;
-    let (detection, recognition) = model_pack::verified_model_bytes(pack)?;
-    let text = runner.recognize(image, &detection, &recognition)?;
-    finish_result(text, cancellation)
-}
-
 pub fn recognize(
     image: &ImageBuffer,
     language: &str,
@@ -123,7 +109,7 @@ fn finish_result(
 
 fn normalized_text(text: String) -> String {
     if text.trim().is_empty() {
-        "[no text recognized]".into()
+        super::NO_TEXT_PLACEHOLDER.into()
     } else {
         text.trim().into()
     }
@@ -351,7 +337,7 @@ impl ModelLoader for ProductionLoader {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "ocrs")))]
 mod tests {
     use super::*;
     use crate::domain::image::PixelFormat;
@@ -360,7 +346,6 @@ mod tests {
         ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![255; 3]).unwrap()
     }
 
-    #[cfg(not(feature = "ocrs"))]
     #[test]
     fn disabled_runner_rejects_before_paths_or_inference() {
         struct PanicRunner;

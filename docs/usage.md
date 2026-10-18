@@ -26,11 +26,46 @@ cargo run -- scan --device mock --out scan.png --width 320 --height 240 --dpi 15
 cargo run -- process --in scan.png --out processed.png --rotate 90 --auto-levels
 ```
 
+### Scan area
+
+By default a physical scanner scans its full area. `--paper` limits the scan to
+`a4`, `a5`, `a6`, `letter`, or `legal` (portrait). `--paper auto` ignores a
+configured `paper_size` and uses the configured `default_width`/`default_height`,
+which are `0` (the device maximum) unless you changed them. `--width` and `--height` are pixels at `--dpi` and override
+`--paper` per axis, so `--width 1240 --dpi 150` is about 210 mm wide. The mock
+source uses 320 x 240 pixels when no size is given.
+
+```bash
+cargo run -- scan --device 'sane:...' --out page.png --paper a4 --dpi 300
+cargo run -- config --set-paper a4
+```
+
+The configuration stores the named area as `paper_size` (`auto` by default).
+`default_width` and `default_height` are pixels, and `0` means the device
+maximum. Configs written before `config_version` existed lose the old 320 x 240
+default on load.
+
 To scan from a local image instead, pass a `file:` device identifier:
 
 ```bash
 cargo run -- scan --device file:/absolute/path/to/source.png --out copy.png
 ```
+
+For a `file:` source, `--width`/`--height` (or `--paper`) form a bounding box: the
+image is scaled to fit inside it and keeps its aspect ratio. With one axis the
+image is scaled to that axis; with neither it keeps its size.
+
+### Existing files and permissions
+
+`scan`, `batch`, `process`, and `convert` never replace an existing output file
+by default. They stop before scanning with
+`output exists: <path>; pass --overwrite to replace it` (exit 1); pass
+`--overwrite` to replace files. The desktop app and plugin mode manage their own
+file names and still replace files. New files get your normal permissions (for
+example `0644` with umask `022`); a replaced file keeps its mode.
+
+`--crop x,y,w,h` needs a positive width and height (exit 2 otherwise). A crop
+outside the scan area is an error that names the crop and the scan size.
 
 Run `devices` to see the sources and backends available before you pick WIA, SANE,
 or eSCL hardware:
@@ -78,7 +113,11 @@ cargo run -- batch --device 'escl:https@scanner.local:443' --out-dir sides \
 requires `--source adf` and an even limit, so two sides represent one sheet. The
 adapter keeps one native feeder session or job open and emits sides in device
 order. If the feeder empties after at least one complete simplex page or duplex
-pair, the batch succeeds with fewer pages; an empty feeder or an incomplete
+pair, the batch succeeds with fewer pages. If a SANE or WIA batch fails for
+another reason, such as a jam, the pages already scanned are kept and the error
+says how many were saved. On a scanner that only has a feeder, a batch without
+`--source` already runs as one feeder job; duplex still needs `--source adf`. An
+empty feeder or an incomplete
 duplex pair is an error.
 
 Use `--format` for individual page files. `--multipage-out` chooses PDF or TIFF
@@ -120,7 +159,8 @@ Searchable and password options require a PDF destination. Scanner-profile JSON
 is validated before acquisition or output changes, and is applied to the final
 processed pixels before OCR. `offline` uses the built-in 5x7 compatibility
 engine, `ocrs` uses an installed local model pack, and `tesseract` invokes the
-optional system executable.
+optional system executable. A page on which the engine finds no text gets no
+text layer rather than a placeholder.
 
 For `scan`, `process`, and `batch`, omitted `--ocr-engine` and `--ocr-lang` values
 inherit `ocr_engine` and `ocr_language` from `config.json` (defaulting to
@@ -157,7 +197,11 @@ logged.
 
 ## OCR
 
-Offline OCR is always available and uses the built-in 5x7 template recognizer:
+Offline OCR is always available and uses the built-in 5x7 template recognizer.
+It reads only clean, upright, uppercase block glyphs similar to its templates;
+on ordinary scanned documents it returns little or garbled text. Use `tesseract`
+(for example `brew install tesseract` on macOS) or an OCRS model pack for real
+documents:
 
 ```bash
 cargo run -- ocr --in processed.png --engine offline
@@ -266,6 +310,27 @@ cargo run -- --config ./config.json config --init
 cargo run -- info --module all
 ```
 
+`config` and `config --show` print the effective, validated configuration as
+JSON on standard output and the file path (or a "file not found; showing
+defaults" note) on standard error. An invalid file exits 1 with the reason.
+
+For a bug report, add the global `--verbose` flag (before the subcommand), or set
+`OPEN_SCANLINE_DEBUG=1`, to print backend diagnostics on standard error: which
+tools were found, each external command with its exit code and error output, and
+network errors. Timeouts can be raised with environment variables, in whole
+seconds:
+
+| Variable | Default | Range | Applies to |
+| --- | --- | --- | --- |
+| `OPEN_SCANLINE_SCAN_TIMEOUT_SECS` | 90 (single scan), 45 per batch side | 1–3600 | SANE and WIA acquisition |
+| `OPEN_SCANLINE_PROBE_TIMEOUT_SECS` | 2–10 (availability), 8 (listing, option inspection) | 1–3600 | SANE and WIA discovery |
+| `OPEN_SCANLINE_ESCL_PAGE_TIMEOUT_SECS` | 60 | 1–600 | each eSCL page |
+| `OPEN_SCANLINE_ESCL_HEADER_TIMEOUT_SECS` | 5 | 1–600 | each eSCL response header |
+
+Invalid or out-of-range values are ignored. `OPEN_SCANLINE_SIMULATE_BACKENDS=1`
+lists and opens the simulated `sane:sim`, `wia:sim`, and `escl:sim` devices for
+testing; without it, those ids refer to real devices.
+
 The `info` command reports compiled and currently available capabilities.
 Availability can change with the operating system, scanner drivers, network
 state, and optional executables.
@@ -285,6 +350,11 @@ window; if Start is unavailable, the bar says which setting to fix. The
 progress and result views list published page files as they are written,
 distinguish them from pending document outputs, and state why capture stopped.
 Cancelling a batch can leave completed page files without a final PDF or TIFF.
+
+Without a configured `output_dir`, the desktop app saves to
+`Pictures/Open Scanline` in your home folder (Documents, then the home folder,
+if Pictures does not exist). The Scan area setting offers the device maximum,
+named paper sizes, or a custom pixel size.
 
 File names keep the existing naming rules: a scan uses
 `<name>_scan_<frame>.<format>`, and batch page images are written under

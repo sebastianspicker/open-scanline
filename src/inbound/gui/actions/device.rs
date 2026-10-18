@@ -34,12 +34,14 @@ impl GuiState {
     }
 
     pub(in super::super) fn do_exposure(&mut self) {
+        // Meter the same physical area as the scan preview.
+        let (width, height, dpi) = self.scan_geometry(true);
         let request = ScanRequest {
             device_id: self.device.clone(),
-            width: self.width.min(160),
-            height: self.height.min(120),
-            dpi_x: self.dpi,
-            dpi_y: self.dpi,
+            width: width.min(160),
+            height: height.min(120),
+            dpi_x: dpi,
+            dpi_y: dpi,
             seed: 1,
             pixel_format: PixelFormat::Rgb8,
             ..Default::default()

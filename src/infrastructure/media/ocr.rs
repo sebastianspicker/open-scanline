@@ -16,6 +16,10 @@ pub mod tesseract;
 
 pub const OFFLINE_OCR_ENGINE: &str = "offline-template";
 
+/// Text every engine reports for an image without recognizable text. It is a
+/// message for direct OCR output, never page content.
+pub(crate) const NO_TEXT_PLACEHOLDER: &str = "[no text recognized]";
+
 /// One export-scoped OCR executor. Implementations may lazily prepare native
 /// engine state and reuse it across all pages in the export.
 pub(crate) enum ExportOcrJob {
@@ -31,11 +35,17 @@ impl ExportOcrJob {
         language: &str,
         cancellation: Option<&CancellationToken>,
     ) -> Result<String> {
-        match self {
-            Self::Offline => Ok(template::recognize(image)?.text),
-            Self::Ocrs(job) => job.recognize(image, language, cancellation),
-            Self::Tesseract => Ok(tesseract::recognize(image, language, cancellation)?.text),
-        }
+        let text = match self {
+            Self::Offline => template::recognize(image)?.text,
+            Self::Ocrs(job) => job.recognize(image, language, cancellation)?,
+            Self::Tesseract => tesseract::recognize(image, language, cancellation)?.text,
+        };
+        // A searchable PDF must not make the placeholder findable as page text.
+        Ok(if text == NO_TEXT_PLACEHOLDER {
+            String::new()
+        } else {
+            text
+        })
     }
 }
 

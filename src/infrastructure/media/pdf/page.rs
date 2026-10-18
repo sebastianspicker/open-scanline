@@ -1,5 +1,7 @@
 use super::check_pdf_cancellation;
-use super::searchable::{encode_searchable_text, SearchableFont};
+use super::searchable::{
+    encode_searchable_text, searchable_line_width, SearchableFont, SEARCHABLE_FONT_SIZE,
+};
 use crate::domain::image::{ImageBuffer, MAX_IMAGE_BYTES};
 use crate::error::{Result, ScanError};
 use crate::infrastructure::media::to_rgb_bytes;
@@ -198,24 +200,72 @@ fn page_operations(
         })?;
         operations.extend([
             Operation::new("BT", vec![]),
-            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 10.into()]),
+            Operation::new(
+                "Tf",
+                vec![Object::Name(b"F1".to_vec()), SEARCHABLE_FONT_SIZE.into()],
+            ),
             // A transparent fill keeps text searchable in readers that omit
             // render-mode-3 glyphs from extraction, while preserving the scan
             // image as the only visible page content.
             Operation::new("gs", vec![Object::Name(b"GS1".to_vec())]),
             Operation::new("Tr", vec![0.into()]),
-            // Keep the invisible text inside even very small PDF pages so extractors do not
-            // discard it as clipped content.
-            Operation::new("Td", vec![1.into(), 1.into()]),
-            Operation::new(
+        ]);
+        operations.extend(searchable_line_operations(text, font, dimensions)?);
+        operations.push(Operation::new("ET", vec![]));
+    }
+    Ok(operations)
+}
+
+/// Lay OCR text out as one positioned run per line, from the top of the page
+/// downwards. Glyph advances come from the font's width table, and a line
+/// wider than the page is squeezed with `Tz` so it stays on the page. That
+/// keeps words and spaces on one text line for extractors such as `pdftotext`.
+fn searchable_line_operations(
+    text: &str,
+    font: &SearchableFont,
+    dimensions: PdfPageDimensions,
+) -> Result<Vec<Operation>> {
+    // Keep the invisible text inside even very small PDF pages so extractors
+    // do not discard it as clipped content.
+    const MARGIN: f32 = 1.0;
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let available_height = (dimensions.height - 2.0 * MARGIN).max(1.0);
+    let leading = (SEARCHABLE_FONT_SIZE as f32 * 1.2).min(available_height / lines.len() as f32);
+    let available_width = (dimensions.width - 2.0 * MARGIN).max(1.0);
+    let mut operations = Vec::new();
+    let mut previous_scale = 100.0_f32;
+    let mut y_step = (dimensions.height - MARGIN - leading).max(MARGIN);
+    let mut x_step = MARGIN;
+    for line in lines {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if !line.is_empty() {
+            let natural_width = searchable_line_width(line, f32::from(SEARCHABLE_FONT_SIZE));
+            let scale = if natural_width > available_width {
+                available_width / natural_width * 100.0
+            } else {
+                100.0
+            };
+            if scale != previous_scale {
+                operations.push(Operation::new("Tz", vec![Object::Real(scale)]));
+                previous_scale = scale;
+            }
+            operations.push(Operation::new(
+                "Td",
+                vec![Object::Real(x_step), Object::Real(y_step)],
+            ));
+            operations.push(Operation::new(
                 "Tj",
                 vec![Object::String(
-                    encode_searchable_text(text, font)?,
+                    encode_searchable_text(line, font)?,
                     StringFormat::Hexadecimal,
                 )],
-            ),
-            Operation::new("ET", vec![]),
-        ]);
+            ));
+            // `Td` is relative to the start of the previous line.
+            x_step = 0.0;
+            y_step = -leading;
+        } else {
+            y_step -= leading;
+        }
     }
     Ok(operations)
 }
@@ -242,4 +292,77 @@ fn page_resources(
         );
     }
     resources
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn font_for(text: &str) -> SearchableFont {
+        let mut characters = text.chars().collect::<Vec<_>>();
+        characters.sort_unstable();
+        characters.dedup();
+        SearchableFont {
+            object_id: (1, 0),
+            character_codes: characters
+                .into_iter()
+                .enumerate()
+                .map(|(index, character)| (character, (index + 1) as u16))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
+
+    fn text_operations(text: &str, width: f32, height: f32) -> Vec<Operation> {
+        let font = font_for(text);
+        let dimensions = PdfPageDimensions { width, height };
+        page_operations("Im0", dimensions, Some(text), Some(&font)).unwrap()
+    }
+
+    #[test]
+    fn each_line_is_one_positioned_run_inside_the_page() {
+        let operations = text_operations("HELLO WORLD\nSECOND LINE\n\nLAST", 612.0, 792.0);
+        let runs = operations.iter().filter(|op| op.operator == "Tj").count();
+        assert_eq!(runs, 3);
+        let moves = operations
+            .iter()
+            .filter(|op| op.operator == "Td")
+            .map(|op| {
+                op.operands
+                    .iter()
+                    .map(|value| value.as_float().unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(moves.len(), 3);
+        // The first line starts near the top; later lines step down, with the
+        // blank line consuming one extra step.
+        assert!(moves[0][1] > 700.0 && moves[0][1] < 792.0);
+        assert_eq!(moves[1], vec![0.0, -12.0]);
+        assert_eq!(moves[2], vec![0.0, -24.0]);
+        assert!(operations.iter().all(|op| op.operator != "Tz"));
+    }
+
+    #[test]
+    fn long_lines_are_squeezed_to_the_page_width() {
+        let text = "WORD ".repeat(40);
+        let line = text.trim_end();
+        let operations = text_operations(line, 200.0, 100.0);
+        let scale = operations
+            .iter()
+            .find(|op| op.operator == "Tz")
+            .and_then(|op| op.operands[0].as_float().ok())
+            .expect("long line sets a horizontal scale");
+        let natural = searchable_line_width(line, f32::from(SEARCHABLE_FONT_SIZE));
+        assert!(natural > 198.0);
+        let squeezed = natural * scale / 100.0;
+        assert!((squeezed - 198.0).abs() < 0.01, "{squeezed}");
+    }
+
+    #[test]
+    fn spaces_are_narrower_than_other_glyphs() {
+        let size = f32::from(SEARCHABLE_FONT_SIZE);
+        assert!(searchable_line_width(" ", size) < searchable_line_width("A", size));
+        assert_eq!(searchable_line_width("AB", size), 10.0);
+    }
 }

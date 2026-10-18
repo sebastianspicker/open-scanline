@@ -25,6 +25,74 @@ pub enum ScanMode {
     Document,
 }
 
+/// Physical scan area. `Auto` means the device's maximum area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum PaperSize {
+    #[default]
+    Auto,
+    A4,
+    A5,
+    A6,
+    Letter,
+    Legal,
+}
+
+impl PaperSize {
+    pub const NAMES: [&'static str; 6] = ["auto", "a4", "a5", "a6", "letter", "legal"];
+    pub const ALL: [PaperSize; 6] = [
+        Self::Auto,
+        Self::A4,
+        Self::A5,
+        Self::A6,
+        Self::Letter,
+        Self::Legal,
+    ];
+
+    pub fn parse(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|paper| value.trim().eq_ignore_ascii_case(paper.name()))
+            .ok_or_else(|| {
+                ScanError::Invalid(format!(
+                    "paper size must be one of: {}",
+                    Self::NAMES.join(", ")
+                ))
+            })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::A4 => "a4",
+            Self::A5 => "a5",
+            Self::A6 => "a6",
+            Self::Letter => "letter",
+            Self::Legal => "legal",
+        }
+    }
+
+    /// Portrait width and height in millimetres; `None` for `Auto`.
+    pub fn dimensions_mm(self) -> Option<(f64, f64)> {
+        match self {
+            Self::Auto => None,
+            Self::A4 => Some((210.0, 297.0)),
+            Self::A5 => Some((148.0, 210.0)),
+            Self::A6 => Some((105.0, 148.0)),
+            Self::Letter => Some((215.9, 279.4)),
+            Self::Legal => Some((215.9, 355.6)),
+        }
+    }
+
+    /// Pixel extent at the given resolutions; `None` for `Auto`.
+    pub fn to_pixels(self, dpi_x: u32, dpi_y: u32) -> Option<(u32, u32)> {
+        let (width_mm, height_mm) = self.dimensions_mm()?;
+        let pixels = |mm: f64, dpi: u32| (mm / 25.4 * f64::from(dpi)).round().max(1.0) as u32;
+        Some((pixels(width_mm, dpi_x), pixels(height_mm, dpi_y)))
+    }
+}
+
+/// Acquisition request. `width`/`height` are pixels at `dpi_x`/`dpi_y`; zero
+/// means the device's default (maximum) extent on that axis.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScanRequest {
@@ -50,8 +118,9 @@ impl Default for ScanRequest {
             duplex: false,
             dpi_x: 150,
             dpi_y: 150,
-            width: 320,
-            height: 240,
+            // Zero is the device maximum; the mock renders it as 320x240.
+            width: 0,
+            height: 0,
             pixel_format: PixelFormat::Rgb8,
             region: None,
             seed: 1,

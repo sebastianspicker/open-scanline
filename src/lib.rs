@@ -6,6 +6,7 @@ pub mod batch;
 pub mod cli;
 pub mod config;
 pub mod core;
+mod debug_log;
 pub mod device;
 mod domain;
 mod error;
@@ -34,7 +35,10 @@ pub mod twain;
 pub mod wia;
 mod workflows;
 
+#[cfg(test)]
+mod architecture_rules;
+
 pub use export::{ExportOptions, OcrEngine};
 
-pub const VERSION: &str = "1.0.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const APP_NAME: &str = "open-scanline";

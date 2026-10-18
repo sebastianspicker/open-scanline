@@ -29,13 +29,20 @@ pub(crate) fn artifact_quota_for_request(
     let (width, height) = request
         .region
         .map(|region| (region.width.max(1), region.height.max(1)))
-        .unwrap_or((request.width.max(1), request.height.max(1)));
-    let image_bytes = u64::try_from(checked_image_len(
-        width,
-        height,
-        request.pixel_format.bpp(),
-    )?)
-    .map_err(|_| ScanError::Invalid("image size does not fit the artifact quota".into()))?;
+        .unwrap_or((request.width, request.height));
+    // A zero axis is sized by the device, so budget for the product-wide
+    // decoded-image ceiling instead of a smaller requested area.
+    let image_bytes = if width == 0 || height == 0 {
+        u64::try_from(MAX_IMAGE_BYTES)
+            .map_err(|_| ScanError::Invalid("image size does not fit the artifact quota".into()))?
+    } else {
+        u64::try_from(checked_image_len(
+            width,
+            height,
+            request.pixel_format.bpp(),
+        )?)
+        .map_err(|_| ScanError::Invalid("image size does not fit the artifact quota".into()))?
+    };
     let per_image = image_bytes
         .checked_add(ARTIFACT_PER_IMAGE_OVERHEAD)
         .ok_or_else(|| ScanError::Invalid("artifact quota overflow".into()))?;

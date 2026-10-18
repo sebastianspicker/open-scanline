@@ -71,6 +71,11 @@ cargo run -- gui
 does not guarantee that a particular scanner is installed, connected, or
 reachable.
 
+Physical scanners scan their full area by default. Use `--paper
+a4|a5|a6|letter|legal` to scan a named area, or `--width` and `--height` for a
+size in pixels at `--dpi`. The mock source defaults to 320 x 240 pixels. See
+[Scan area](docs/usage.md#scan-area).
+
 ## Supported sources
 
 Open Scanline always includes mock and file sources, so you can build and try
@@ -80,7 +85,7 @@ system, installed software, device permissions, and network.
 | Source | Linux | macOS | Windows | Requirement |
 | --- | --- | --- | --- | --- |
 | Mock and file | Yes | Yes | Yes | None beyond readable input for file sources |
-| SANE | Yes | When SANE is installed | When SANE is installed | A working `scanimage` and a configured device |
+| SANE | Yes | With Homebrew `sane-backends` ([setup](docs/backends.md#sane-on-macos)) | When SANE is installed | A working `scanimage` and a configured device |
 | WIA | No | No | Yes | Windows PowerShell, WIA, and a usable scanner |
 | eSCL | Yes | Yes | Yes | A reachable AirScan/eSCL scanner over HTTP or HTTPS |
 | TWAIN host integration | Host-dependent | Host-dependent | Host-dependent | A separate host or bridge; this is not an acquisition backend |
@@ -100,8 +105,9 @@ platform qualifications, and optional Tesseract and JPEG XL support.
   sharpen, clean up documents, and apply film-oriented controls.
 - **Export.** PNG, JPEG, TIFF, WebP, BMP, GIF, PDF, multipage TIFF, and multipage
   PDF, including searchable and password-protected PDFs.
-- **Read text.** Built-in offline template OCR, optional local OCRS model packs
-  for printed Latin English documents, and optional Tesseract integration.
+- **Read text.** Optional Tesseract integration, optional local OCRS model packs
+  for printed Latin English documents, and a built-in offline template engine
+  that reads only clean uppercase block glyphs (not suitable for real documents).
 - **Run models.** Local inference for user-supplied ONNX image models through an
   explicitly selected, version-matched Open Scanline worker.
 - **Configure.** JSON settings in the platform-specific `open-scanline`

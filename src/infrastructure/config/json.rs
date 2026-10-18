@@ -133,10 +133,16 @@ fn validate_config_formats(config: &AppConfig) -> Result<()> {
 
 fn validate_config_image(config: &AppConfig) -> Result<()> {
     crate::domain::acquisition::validate_scan_dpi(config.default_dpi, config.default_dpi)?;
+    // Zero extents mean the device maximum; only explicit axes are bounded.
     crate::domain::image::checked_image_len(
-        config.default_width,
-        config.default_height,
+        config.default_width.max(1),
+        config.default_height.max(1),
         crate::domain::image::PixelFormat::Rgb8.bpp(),
+    )?;
+    validate_config_choice(
+        "paper size",
+        &config.paper_size,
+        &crate::domain::acquisition::PaperSize::NAMES,
     )?;
     if !(1..=crate::domain::acquisition::MAX_SCAN_PAGES).contains(&config.batch_pages) {
         return Err(ScanError::Invalid(format!(
@@ -209,7 +215,21 @@ pub fn load_config(path: Option<&Path>) -> Result<AppConfig> {
         Err(error) => return Err(error),
     };
     let raw: Value = serde_json::from_str(&text)?;
-    config_from_value(raw)
+    let mut cfg = config_from_value(raw)?;
+    migrate_config(&mut cfg);
+    Ok(cfg)
+}
+
+/// Upgrade configs written before versioning. The legacy 320x240 default was a
+/// pixel size that capped physical scans; 0 now means the device maximum.
+fn migrate_config(cfg: &mut AppConfig) {
+    if cfg.config_version < 1 {
+        if cfg.default_width == 320 && cfg.default_height == 240 {
+            cfg.default_width = 0;
+            cfg.default_height = 0;
+        }
+        cfg.config_version = 1;
+    }
 }
 
 /// Save config; banned keys are never written.
@@ -243,4 +263,52 @@ fn serializable_config(cfg: &AppConfig) -> Result<Value> {
         map.retain(|k, _| !is_banned_key(k));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_config_version_deserializes_as_legacy() {
+        let cfg = config_from_value(json!({"default_width": 320, "default_height": 240})).unwrap();
+        assert_eq!(cfg.config_version, 0);
+        assert_eq!(cfg.paper_size, "auto");
+    }
+
+    #[test]
+    fn migration_clears_legacy_default_extent() {
+        let mut cfg =
+            config_from_value(json!({"default_width": 320, "default_height": 240})).unwrap();
+        migrate_config(&mut cfg);
+        assert_eq!((cfg.default_width, cfg.default_height), (0, 0));
+        assert_eq!(cfg.config_version, 1);
+    }
+
+    #[test]
+    fn migration_keeps_custom_and_versioned_extents() {
+        let mut custom =
+            config_from_value(json!({"default_width": 640, "default_height": 480})).unwrap();
+        migrate_config(&mut custom);
+        assert_eq!((custom.default_width, custom.default_height), (640, 480));
+        let mut explicit = config_from_value(
+            json!({"default_width": 320, "default_height": 240, "config_version": 1}),
+        )
+        .unwrap();
+        migrate_config(&mut explicit);
+        assert_eq!(
+            (explicit.default_width, explicit.default_height),
+            (320, 240)
+        );
+    }
+
+    #[test]
+    fn config_validates_paper_size_and_accepts_zero_extent() {
+        assert!(config_from_value(json!({"paper_size": "a4"})).is_ok());
+        assert!(config_from_value(json!({"paper_size": "tabloid"})).is_err());
+        let defaults = AppConfig::default();
+        assert_eq!((defaults.default_width, defaults.default_height), (0, 0));
+        assert!(validate_app_config(&defaults).is_ok());
+    }
 }

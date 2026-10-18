@@ -32,12 +32,14 @@ fn scan_request(
             out: options.out,
             width: options.acquisition.width,
             height: options.acquisition.height,
+            paper: options.acquisition.paper,
             seed: options.acquisition.seed,
             dpi: options.acquisition.dpi,
             source: options.acquisition.source,
             duplex: options.duplex,
             invert: options.invert,
             raw_out: options.raw_out,
+            overwrite: options.overwrite,
         },
         overrides: pipeline_overrides(
             options.adjustments,
@@ -67,6 +69,7 @@ pub(super) fn process(options: ProcessOptions, config_path: Option<&Path>) -> i3
         white_balance,
         filters,
         quality,
+        overwrite,
     } = options;
     let (config, export) = match configured_export(config_path, export_options) {
         Ok(value) => value,
@@ -91,6 +94,7 @@ pub(super) fn process(options: ProcessOptions, config_path: Option<&Path>) -> i3
                 auto_crop,
                 auto_orient,
                 quality,
+                overwrite,
             },
             cancellation,
         )
@@ -121,6 +125,7 @@ fn batch_request(
         pages: options.pages,
         width: options.acquisition.width,
         height: options.acquisition.height,
+        paper: options.acquisition.paper,
         seed: options.acquisition.seed,
         dpi: options.acquisition.dpi,
         source: options.acquisition.source,
@@ -142,6 +147,7 @@ fn batch_request(
         multipage_out: options.multipage_out,
         export,
         contact_sheet: options.contact_sheet,
+        overwrite: options.overwrite,
     }
 }
 

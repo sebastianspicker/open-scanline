@@ -1,6 +1,6 @@
 //! Pure resolution from durable settings into typed workflow defaults.
 
-use crate::domain::acquisition::ScanMode;
+use crate::domain::acquisition::{PaperSize, ScanMode};
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
 use crate::infrastructure::config::AppConfig;
@@ -37,15 +37,43 @@ pub fn resolve_defaults(config: &AppConfig) -> ResolvedSettings {
     }
 }
 
+/// Resolve the requested scan extent in pixels; 0 on an axis means the device
+/// maximum. Per axis: explicit pixels, then explicit paper, then configured
+/// paper, then configured pixels. An explicit `Auto` paper skips the
+/// configured paper.
+pub fn resolve_scan_extent(
+    config: &AppConfig,
+    paper: Option<PaperSize>,
+    width: Option<u32>,
+    height: Option<u32>,
+    dpi: u32,
+) -> (u32, u32) {
+    let paper_pixels = match paper {
+        Some(paper) => paper.to_pixels(dpi, dpi),
+        None => PaperSize::parse(&config.paper_size)
+            .ok()
+            .and_then(|paper| paper.to_pixels(dpi, dpi)),
+    };
+    (
+        width
+            .or(paper_pixels.map(|extent| extent.0))
+            .unwrap_or(config.default_width),
+        height
+            .or(paper_pixels.map(|extent| extent.1))
+            .unwrap_or(config.default_height),
+    )
+}
+
 fn resolve_acquisition_defaults(config: &AppConfig) -> AcquisitionDefaults {
+    let (width, height) = resolve_scan_extent(config, None, None, None, config.default_dpi);
     AcquisitionDefaults {
         device_id: config.last_device_id.clone(),
         mode: config.scan_mode,
         duplex: config.duplex,
         dpi_x: config.default_dpi,
         dpi_y: config.default_dpi,
-        width: config.default_width,
-        height: config.default_height,
+        width,
+        height,
     }
 }
 
@@ -95,4 +123,46 @@ fn resolve_crop(crop: Option<[i32; 4]>) -> Option<Rect> {
             value[3].max(0) as u32,
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paper_pixels_follow_dpi() {
+        assert_eq!(PaperSize::A4.to_pixels(300, 300), Some((2480, 3508)));
+        assert_eq!(PaperSize::Auto.to_pixels(300, 300), None);
+        assert_eq!(PaperSize::parse("Letter").unwrap(), PaperSize::Letter);
+        assert!(PaperSize::parse("tabloid").is_err());
+    }
+
+    #[test]
+    fn extent_precedence_is_per_axis() {
+        let mut config = AppConfig::default();
+        assert_eq!(resolve_scan_extent(&config, None, None, None, 300), (0, 0));
+        config.default_width = 100;
+        config.default_height = 200;
+        assert_eq!(
+            resolve_scan_extent(&config, None, None, None, 300),
+            (100, 200)
+        );
+        config.paper_size = "a5".into();
+        assert_eq!(
+            resolve_scan_extent(&config, None, None, None, 300),
+            (1748, 2480)
+        );
+        assert_eq!(
+            resolve_scan_extent(&config, Some(PaperSize::A4), None, None, 300),
+            (2480, 3508)
+        );
+        assert_eq!(
+            resolve_scan_extent(&config, Some(PaperSize::A4), Some(50), None, 300),
+            (50, 3508)
+        );
+        assert_eq!(
+            resolve_scan_extent(&config, Some(PaperSize::Auto), None, None, 300),
+            (100, 200)
+        );
+    }
 }

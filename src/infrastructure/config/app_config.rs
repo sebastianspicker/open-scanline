@@ -3,6 +3,9 @@
 use crate::domain::acquisition::ScanMode;
 use serde::{Deserialize, Serialize};
 
+/// Current on-disk config schema version.
+pub const CONFIG_VERSION: u32 = 1;
+
 /// Durable application settings. JSON adapters serialize this exact value type.
 ///
 /// Unknown JSON fields are ignored through Serde's default behavior, while
@@ -14,6 +17,11 @@ pub struct AppConfig {
     pub default_dpi: u32,
     pub default_width: u32,
     pub default_height: u32,
+    /// Named physical scan area (`auto` = device maximum).
+    pub paper_size: String,
+    /// On-disk schema version; absent in files written before versioning.
+    #[serde(default)]
+    pub config_version: u32,
     pub scan_mode: ScanMode,
     pub duplex: bool,
     pub output_dir: String,
@@ -72,8 +80,10 @@ macro_rules! default_app_config {
         AppConfig {
             last_device_id: "mock".into(),
             default_dpi: 150,
-            default_width: 320,
-            default_height: 240,
+            default_width: 0,
+            default_height: 0,
+            paper_size: "auto".into(),
+            config_version: CONFIG_VERSION,
             scan_mode: ScanMode::Reflective,
             duplex: false,
             output_dir: String::new(),

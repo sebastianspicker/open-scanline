@@ -1,4 +1,8 @@
-use super::{parse_curves, parse_hue, parse_saturation, CurvePoints, OcrEngineArg, ScanSource};
+use super::{
+    parse_crop, parse_curves, parse_hue, parse_paper, parse_saturation, CurvePoints, OcrEngineArg,
+    ScanSource,
+};
+use crate::domain::acquisition::PaperSize;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -33,35 +37,35 @@ pub(in crate::inbound::cli) struct ExportOptions {
 
 #[derive(Debug, Args)]
 pub(in crate::inbound::cli) struct Adjustments {
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) rotate: Option<i32>,
     #[arg(long = "flip-h", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) flip_h: Option<bool>,
     #[arg(long = "flip-v", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) flip_v: Option<bool>,
     /// Crop as x,y,w,h in source pixels before rotate
-    #[arg(long)]
-    pub(in crate::inbound::cli) crop: Option<String>,
-    #[arg(long)]
+    #[arg(long, value_parser = parse_crop, allow_negative_numbers = true)]
+    pub(in crate::inbound::cli) crop: Option<[i32; 4]>,
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) brightness: Option<i32>,
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) contrast: Option<i32>,
     /// Saturation delta from -100 to 100
-    #[arg(long, value_parser = parse_saturation)]
+    #[arg(long, value_parser = parse_saturation, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) saturation: Option<f64>,
     /// Hue shift in degrees from -180 to 180
-    #[arg(long, value_parser = parse_hue)]
+    #[arg(long, value_parser = parse_hue, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) hue: Option<f64>,
     /// Tone curve as x:y,x:y (0..255 values; x values strictly increasing)
     #[arg(long, value_parser = parse_curves)]
     pub(in crate::inbound::cli) curves: Option<CurvePoints>,
     #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) desaturate: Option<bool>,
-    #[arg(long = "levels-black")]
+    #[arg(long = "levels-black", allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_black: Option<i32>,
-    #[arg(long = "levels-white")]
+    #[arg(long = "levels-white", allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_white: Option<i32>,
-    #[arg(long = "levels-gamma")]
+    #[arg(long = "levels-gamma", allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_gamma: Option<f64>,
 }
 
@@ -99,10 +103,15 @@ pub(in crate::inbound::cli) struct AcquisitionOptions {
     /// Trust a strict direct eSCL endpoint that was not discovered or allow-listed
     #[arg(long = "allow-unlisted-escl", action = clap::ArgAction::SetTrue)]
     pub(in crate::inbound::cli) allow_unlisted_escl: bool,
+    /// Scan width in pixels at --dpi; overrides --paper. Omit for the paper size or the device maximum
     #[arg(long)]
     pub(in crate::inbound::cli) width: Option<u32>,
+    /// Scan height in pixels at --dpi; overrides --paper. Omit for the paper size or the device maximum
     #[arg(long)]
     pub(in crate::inbound::cli) height: Option<u32>,
+    /// Physical scan area (auto, a4, a5, a6, letter, legal); auto uses the device's maximum area
+    #[arg(long, value_parser = parse_paper)]
+    pub(in crate::inbound::cli) paper: Option<PaperSize>,
     #[arg(long, default_value_t = 1)]
     pub(in crate::inbound::cli) seed: u32,
     #[arg(long)]
@@ -127,7 +136,7 @@ pub(in crate::inbound::cli) struct ScanOptions {
     pub(in crate::inbound::cli) adjustments: Adjustments,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) white_balance: Option<bool>,
@@ -144,6 +153,9 @@ pub(in crate::inbound::cli) struct ScanOptions {
     /// Save the pre-processing acquisition buffer (TIFF when extension is omitted)
     #[arg(long = "raw-out")]
     pub(in crate::inbound::cli) raw_out: Option<PathBuf>,
+    /// Replace existing output files instead of failing
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub(in crate::inbound::cli) overwrite: bool,
 }
 
 #[derive(Debug, Args)]
@@ -166,7 +178,7 @@ pub(in crate::inbound::cli) struct ProcessOptions {
     pub(in crate::inbound::cli) auto_orient: Option<bool>,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) white_balance: Option<bool>,
@@ -174,6 +186,9 @@ pub(in crate::inbound::cli) struct ProcessOptions {
     pub(in crate::inbound::cli) filters: FilterOptions,
     #[arg(long)]
     pub(in crate::inbound::cli) quality: Option<u8>,
+    /// Replace existing output files instead of failing
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub(in crate::inbound::cli) overwrite: bool,
 }
 
 #[derive(Debug, Args)]
@@ -195,7 +210,7 @@ pub(in crate::inbound::cli) struct BatchOptions {
     pub(in crate::inbound::cli) adjustments: Adjustments,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long)]
+    #[arg(long, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "auto-crop", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_crop: Option<bool>,
@@ -221,4 +236,7 @@ pub(in crate::inbound::cli) struct BatchOptions {
     pub(in crate::inbound::cli) export: ExportOptions,
     #[arg(long = "contact-sheet")]
     pub(in crate::inbound::cli) contact_sheet: Option<PathBuf>,
+    /// Replace existing output files instead of failing
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub(in crate::inbound::cli) overwrite: bool,
 }

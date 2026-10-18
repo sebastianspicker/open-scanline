@@ -10,23 +10,6 @@ use crate::workflows::publication::{
 };
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-pub(crate) fn write_requested_outputs(
-    args: &BatchScanArgs,
-    paths: &[PathBuf],
-    export: &PreparedExportOptions,
-    searchable_pages: Vec<String>,
-    cancel_check: Option<&BatchCancelCheck>,
-    token: Option<&CancellationToken>,
-) -> Result<()> {
-    let hooks = BatchRunHooks {
-        cancel_check,
-        token,
-        observer: None,
-    };
-    write_requested_outputs_with_observer(args, paths, export, searchable_pages, hooks)
-}
-
 pub(super) fn write_requested_outputs_with_observer(
     args: &BatchScanArgs,
     paths: &[PathBuf],

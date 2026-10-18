@@ -97,8 +97,12 @@ fn render_source_controls(ui: &mut egui::Ui, state: &mut super::super::state::Gu
 
 #[cfg(feature = "gui")]
 fn render_scan_dimensions(ui: &mut egui::Ui, state: &mut super::super::state::GuiState) {
-    ui.add(egui::Slider::new(&mut state.width, 16..=4096).text("W"));
-    ui.add(egui::Slider::new(&mut state.height, 16..=4096).text("H"));
+    if state.custom_area {
+        ui.add(egui::Slider::new(&mut state.width, 1..=16384).text("W"));
+        ui.add(egui::Slider::new(&mut state.height, 1..=16384).text("H"));
+    } else {
+        ui.label(format!("Scan area  {}", state.scan_area_summary()));
+    }
     ui.add(egui::Slider::new(&mut state.dpi, 50..=1200).text(state.translator.t("input.dpi")));
     ui.add(
         egui::Slider::new(&mut state.batch_pages, 1..=99).text(state.translator.t("batch.pages")),

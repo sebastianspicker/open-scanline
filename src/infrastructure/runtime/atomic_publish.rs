@@ -72,6 +72,26 @@ pub fn validate_output_leaf(path: &Path, label: &str) -> Result<()> {
     }
 }
 
+/// Reject an output destination that already exists unless `overwrite` is set.
+///
+/// This is an up-front check made before acquisition. It does not close the
+/// window between the check and the final rename: the codec layer publishes
+/// with a replacing rename, so a file created by another process in that
+/// window is still replaced.
+pub fn ensure_output_absent(path: &Path, overwrite: bool) -> Result<()> {
+    if overwrite {
+        return Ok(());
+    }
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(ScanError::Invalid(format!(
+            "output exists: {}; pass --overwrite to replace it",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn existing_metadata(path: &Path) -> std::io::Result<Option<fs::Metadata>> {
     match fs::metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
@@ -300,3 +320,24 @@ fn sync_parent(parent: &Path) {
 
 #[cfg(not(unix))]
 fn sync_parent(_parent: &Path) {}
+
+#[cfg(test)]
+mod output_absent_tests {
+    use super::*;
+
+    #[test]
+    fn existing_output_is_rejected_unless_overwrite_is_set() {
+        let dir = std::env::temp_dir().join(format!("osl-absent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let existing = dir.join("existing.png");
+        std::fs::write(&existing, b"x").unwrap();
+
+        let error = ensure_output_absent(&existing, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("output exists"), "{error}");
+        assert!(error.contains("--overwrite"), "{error}");
+        ensure_output_absent(&existing, true).unwrap();
+        ensure_output_absent(&dir.join("missing.png"), false).unwrap();
+    }
+}

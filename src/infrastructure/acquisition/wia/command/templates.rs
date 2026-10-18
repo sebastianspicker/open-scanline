@@ -113,10 +113,15 @@ if ($wantMode -eq 'document') {
 $item.Properties.Item(6146).Value = __OSL_INTENT__
 $item.Properties.Item(6147).Value = __OSL_DPI_X__
 $item.Properties.Item(6148).Value = __OSL_DPI_Y__
-$item.Properties.Item(6149).Value = __OSL_X__
-$item.Properties.Item(6150).Value = __OSL_Y__
-$item.Properties.Item(6151).Value = __OSL_WIDTH__
-$item.Properties.Item(6152).Value = __OSL_HEIGHT__
+# A zero extent keeps the device default (its maximum) on that axis.
+if (__OSL_WIDTH__ -gt 0) {
+  $item.Properties.Item(6149).Value = __OSL_X__
+  $item.Properties.Item(6151).Value = __OSL_WIDTH__
+}
+if (__OSL_HEIGHT__ -gt 0) {
+  $item.Properties.Item(6150).Value = __OSL_Y__
+  $item.Properties.Item(6152).Value = __OSL_HEIGHT__
+}
 $img = $item.Transfer()
 $img.SaveFile($out)
 "#
@@ -158,6 +163,12 @@ function Find-WiaFeeder($items) {
 }
 
 function Test-WiaFeederExhausted($errorRecord) {
+  # WIA_ERROR_PAPER_EMPTY (0x80210003); COM message text is localized.
+  $exception = $errorRecord.Exception
+  while ($null -ne $exception) {
+    if ($exception.HResult -eq -2145320957) { return $true }
+    $exception = $exception.InnerException
+  }
   $text = [string]$errorRecord
   return $text -match '(?i)(paper|document|feeder).{0,40}(empty|emptying|out|none|no more)|no.{0,40}(paper|document|feeder)|wia_error_paper_empty'
 }
@@ -198,10 +209,15 @@ if ($null -ne $pagesProperty) { $pagesProperty.Value = $wantSides }
 $item.Properties.Item(6146).Value = __OSL_INTENT__
 $item.Properties.Item(6147).Value = __OSL_DPI_X__
 $item.Properties.Item(6148).Value = __OSL_DPI_Y__
-$item.Properties.Item(6149).Value = __OSL_X__
-$item.Properties.Item(6150).Value = __OSL_Y__
-$item.Properties.Item(6151).Value = __OSL_WIDTH__
-$item.Properties.Item(6152).Value = __OSL_HEIGHT__
+# A zero extent keeps the device default (its maximum) on that axis.
+if (__OSL_WIDTH__ -gt 0) {
+  $item.Properties.Item(6149).Value = __OSL_X__
+  $item.Properties.Item(6151).Value = __OSL_WIDTH__
+}
+if (__OSL_HEIGHT__ -gt 0) {
+  $item.Properties.Item(6150).Value = __OSL_Y__
+  $item.Properties.Item(6152).Value = __OSL_HEIGHT__
+}
 
 for ($side = 1; $side -le $wantSides; $side++) {
   try {

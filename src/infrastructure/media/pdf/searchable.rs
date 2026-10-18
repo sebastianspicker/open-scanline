@@ -19,9 +19,31 @@ pub(crate) const MAX_PDF_SEARCHABLE_PAGE_UTF8_BYTES: usize = 1024 * 1024;
 /// The aggregate searchable layer stays well below the retained 256 MiB image
 /// stream budget, including for long feeder batches.
 pub(crate) const MAX_PDF_SEARCHABLE_TEXT_UTF8_BYTES: usize = 16 * 1024 * 1024;
+/// Font size of the invisible text layer, in points.
+pub(super) const SEARCHABLE_FONT_SIZE: u8 = 10;
+/// Advance of an ordinary glyph, in 1/1000 em. The glyphs are never drawn, so
+/// the width table only has to match how lines are positioned.
+const GLYPH_WIDTH: i64 = 500;
+/// Advance of the real space glyph, in 1/1000 em.
+const SPACE_WIDTH: i64 = 250;
+
 pub(super) struct SearchableFont {
     pub(super) object_id: ObjectId,
     pub(super) character_codes: BTreeMap<char, u16>,
+}
+
+/// Width of `text` in points at `font_size`, as the font's width table
+/// declares it.
+pub(super) fn searchable_line_width(text: &str, font_size: f32) -> f32 {
+    text.chars().map(glyph_width).sum::<i64>() as f32 * font_size / 1000.0
+}
+
+fn glyph_width(character: char) -> i64 {
+    if character == ' ' {
+        SPACE_WIDTH
+    } else {
+        GLYPH_WIDTH
+    }
 }
 
 pub(super) fn validate_pdf_searchable_pages(searchable_pages: &[String]) -> Result<()> {
@@ -95,7 +117,7 @@ pub(super) fn add_searchable_font(
         .map(|(index, character)| (character, (index + 1) as u16))
         .collect::<BTreeMap<_, _>>();
     let references = create_font_references(document, &character_codes, cancellation)?;
-    let object_id = create_type0_font(document, references, cancellation)?;
+    let object_id = create_type0_font(document, references, &character_codes, cancellation)?;
     Ok(Some(SearchableFont {
         object_id,
         character_codes,
@@ -123,8 +145,6 @@ fn create_font_references(
         document,
         dictionary! {
             "Length1" => SEARCHABLE_FONT_BYTES.len() as i64,
-            "Filter" => "Crypt",
-            "DecodeParms" => dictionary! { "Name" => "Identity" },
         },
         SEARCHABLE_FONT_BYTES.to_vec(),
         cancellation,
@@ -155,20 +175,27 @@ fn create_font_references(
 fn create_type0_font(
     document: &mut Document,
     references: SearchableFontReferences,
+    character_codes: &BTreeMap<char, u16>,
     cancellation: Option<&CancellationToken>,
 ) -> Result<ObjectId> {
-    let cid_font_id = add_font_dictionary(
-        document,
-        dictionary! {
-            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "Cantarell-Regular",
-            "CIDSystemInfo" => dictionary! {
-                "Registry" => Object::string_literal("Adobe"), "Ordering" => Object::string_literal("Identity"), "Supplement" => 0,
-            },
-            "FontDescriptor" => references.descriptor_id, "DW" => 1000,
-            "CIDToGIDMap" => references.cid_to_gid_id,
+    let mut cid_font = dictionary! {
+        "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "Cantarell-Regular",
+        "CIDSystemInfo" => dictionary! {
+            "Registry" => Object::string_literal("Adobe"), "Ordering" => Object::string_literal("Identity"), "Supplement" => 0,
         },
-        cancellation,
-    )?;
+        "FontDescriptor" => references.descriptor_id, "DW" => GLYPH_WIDTH,
+        "CIDToGIDMap" => references.cid_to_gid_id,
+    };
+    if let Some(space_code) = character_codes.get(&' ') {
+        cid_font.set(
+            "W",
+            vec![
+                Object::Integer(i64::from(*space_code)),
+                vec![Object::Integer(SPACE_WIDTH)].into(),
+            ],
+        );
+    }
+    let cid_font_id = add_font_dictionary(document, cid_font, cancellation)?;
     add_font_dictionary(
         document,
         dictionary! {

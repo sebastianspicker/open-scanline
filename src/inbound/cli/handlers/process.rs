@@ -1,4 +1,7 @@
-use super::{common::print_wrote, scan};
+use super::{
+    common::{print_verbose_hint, print_wrote},
+    scan,
+};
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
 use crate::workflows::process::{self, ProcessOptions, ProcessRunOptions};
@@ -14,6 +17,7 @@ pub(super) struct Request {
     pub(super) auto_crop: Option<bool>,
     pub(super) auto_orient: Option<bool>,
     pub(super) quality: Option<u8>,
+    pub(super) overwrite: bool,
 }
 
 pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 {
@@ -28,6 +32,7 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
             dst: request.out,
             pipeline,
             quality: request.quality,
+            overwrite: request.overwrite,
         },
         ProcessRunOptions {
             export: request.export.clone(),
@@ -48,5 +53,6 @@ fn finish_processing(path: PathBuf) -> i32 {
 
 fn report_process_error(error: crate::error::ScanError) -> i32 {
     eprintln!("process error: {error}");
+    print_verbose_hint();
     1
 }

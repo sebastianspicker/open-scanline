@@ -13,6 +13,11 @@ pub(in crate::infrastructure::runtime::supervision) fn spawn_contained_command(
     let mut command = Command::new(&spec.program);
     command
         .args(&spec.args)
+        // Driver frontends such as scanimage translate their diagnostics.
+        // Callers match English status text, so children run in the C locale.
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env_remove("LANGUAGE")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_process_containment(&mut command);

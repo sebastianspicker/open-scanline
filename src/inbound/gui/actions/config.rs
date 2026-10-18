@@ -1,5 +1,6 @@
 use super::super::parse_crop_string;
 use super::super::state::GuiState;
+use crate::domain::acquisition::PaperSize;
 use crate::domain::settings::parse_curve_points;
 use crate::infrastructure::config::json::save_config;
 
@@ -9,11 +10,25 @@ macro_rules! apply_gui_config_fields {
     ($config:ident, $state:ident, $crop:ident, $curves:ident) => {{
         $config.last_device_id = $state.device.clone();
         $config.default_dpi = $state.dpi;
-        $config.default_width = $state.width;
-        $config.default_height = $state.height;
+        // Named paper sizes and the device maximum persist as zero pixels;
+        // only a custom area stores explicit extents.
+        $config.paper_size = if $state.custom_area {
+            PaperSize::Auto.name().into()
+        } else {
+            $state.paper.name().into()
+        };
+        $config.default_width = if $state.custom_area { $state.width } else { 0 };
+        $config.default_height = if $state.custom_area { $state.height } else { 0 };
         $config.scan_mode = $state.scan_mode();
         $config.duplex = $state.duplex;
-        $config.output_dir = $state.output_dir.clone();
+        // Keep "unset" when the folder is still the platform default, so the
+        // default follows the user's Pictures folder instead of being frozen.
+        $config.output_dir = if $state.output_dir == super::super::state::default_output_dir_text()
+        {
+            String::new()
+        } else {
+            $state.output_dir.clone()
+        };
         $config.language = $state.language.clone();
         $config.rotate = $state.rotate;
         $config.flip_h = $state.flip_h;

@@ -57,6 +57,7 @@ impl EsclDeviceSession {
                 "no response from {}:{}",
                 self.endpoint.host, self.endpoint.port
             )),
+            HttpExchangeError::CertificatePinMismatch(message) => ScanError::Unsupported(message),
         })?;
         if status >= 400 {
             return Err(ScanError::Unsupported(format!(
@@ -74,8 +75,10 @@ impl EsclDeviceSession {
         response_limit: u64,
     ) -> std::result::Result<TemporaryOutput, FetchDocumentError> {
         let next = next_document_path(job);
-        let deadline = Instant::now() + NEXT_DOCUMENT_DEADLINE;
+        let deadline = Instant::now() + next_document_deadline();
+        let header_timeout = next_document_setup_timeout();
         let cancellation = self.cancellation_token();
+        let mut backoff = NEXT_DOCUMENT_RETRY_DELAY;
         loop {
             if self.is_cancelled() {
                 return Err(FetchDocumentError::Cancelled);
@@ -83,22 +86,25 @@ impl EsclDeviceSession {
             let Some(timeout) = deadline.checked_duration_since(Instant::now()) else {
                 return Err(FetchDocumentError::TimedOut);
             };
-            let setup_timeout = timeout.min(NEXT_DOCUMENT_SETUP_TIMEOUT);
-            match self.fetch_document_once(
+            let setup_timeout = timeout.min(header_timeout);
+            let retry_after = match self.fetch_document_once(
                 &next,
                 timeout,
                 setup_timeout,
                 response_limit,
                 &cancellation,
             ) {
-                Ok(Some(output)) => return Ok(output),
-                Ok(None) => {}
-                Err(FetchDocumentError::RetryableTimeout) => continue,
+                Ok(DocumentAttempt::Ready(output)) => return Ok(output),
+                Ok(DocumentAttempt::Retry { after }) => after,
+                Err(FetchDocumentError::RetryableTimeout) => None,
                 Err(error) => return Err(error),
-            }
+            };
+            // A device-supplied Retry-After replaces the back-off step; the
+            // page deadline still bounds both.
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let pause = NEXT_DOCUMENT_RETRY_DELAY.min(remaining);
+            let pause = retry_after.unwrap_or(backoff).min(remaining);
             wait_for_document_retry(self, pause)?;
+            backoff = next_retry_delay(backoff);
         }
     }
 
@@ -109,23 +115,24 @@ impl EsclDeviceSession {
         setup_timeout: Duration,
         response_limit: u64,
         cancellation: &CancellationToken,
-    ) -> std::result::Result<Option<TemporaryOutput>, FetchDocumentError> {
-        let (status, output) = http_get_to_temporary_output_with_phase_timeout_and_cancellation(
-            &self.endpoint,
-            next,
-            timeout,
-            setup_timeout,
-            response_limit,
-            Some(cancellation),
-        )?;
+    ) -> std::result::Result<DocumentAttempt, FetchDocumentError> {
+        let (status, output, retry_after) =
+            http_get_to_temporary_output_with_phase_timeout_and_cancellation(
+                &self.endpoint,
+                next,
+                timeout,
+                setup_timeout,
+                response_limit,
+                Some(cancellation),
+            )?;
         if let Some(output) = output {
-            return Ok(Some(output));
+            return Ok(DocumentAttempt::Ready(output));
         }
         if matches!(status, 204 | 404 | 410) {
             return Err(FetchDocumentError::Exhausted);
         }
         if matches!(status, 202 | 409 | 423 | 425 | 429 | 503) {
-            return Ok(None);
+            return Ok(DocumentAttempt::Retry { after: retry_after });
         }
         Err(FetchDocumentError::Failed(format!(
             "NextDocument failed HTTP {status}"
@@ -206,9 +213,11 @@ impl EsclDeviceSession {
             return Err(ScanError::Cancelled("scan cancelled".into()));
         }
         let capabilities = self.scanner_capabilities()?;
-        let (settings, representation) = build_settings(request, &capabilities)?;
+        let sized = request_with_filled_extent(request, &capabilities)?;
+        let (settings, representation) = build_settings(&sized, &capabilities)?;
         // Validate the negotiated source representation before creating a job.
-        let document_limits = DocumentLimits::for_request(request, representation)?;
+        // `request` stays unfilled so a device-maximum scan keeps native size.
+        let document_limits = DocumentLimits::for_request(&sized, representation)?;
         let job = self.create_job_with_fallback(&capabilities.root, &settings)?;
         self.stream_job_pages(request, max_pages, emit, &job, document_limits)
     }
@@ -319,6 +328,16 @@ impl EsclDeviceSession {
     }
 }
 
+enum DocumentAttempt {
+    Ready(TemporaryOutput),
+    Retry { after: Option<Duration> },
+}
+
+/// Double the retry pause, capped at `NEXT_DOCUMENT_MAX_RETRY_DELAY`.
+fn next_retry_delay(current: Duration) -> Duration {
+    current.saturating_mul(2).min(NEXT_DOCUMENT_MAX_RETRY_DELAY)
+}
+
 fn wait_for_document_retry(
     session: &EsclDeviceSession,
     pause: Duration,
@@ -341,6 +360,7 @@ fn map_capabilities_error(error: HttpExchangeError) -> ScanError {
         HttpExchangeError::Failed => {
             ScanError::Unsupported("eSCL ScannerCapabilities unavailable".into())
         }
+        HttpExchangeError::CertificatePinMismatch(message) => ScanError::Unsupported(message),
     }
 }
 
@@ -462,12 +482,34 @@ pub(crate) fn select_document_format(source: &SourceCapabilities) -> Result<Stri
 
 pub(crate) fn select_resolution(request: &ScanRequest, source: &SourceCapabilities) -> (u32, u32) {
     let wanted = (request.dpi_x, request.dpi_y);
+    // Discrete pairs come first so a tie prefers an advertised pair.
+    let ranged = source.resolution_ranges.iter().map(|range| {
+        (
+            snap_to_axis(wanted.0, range.x),
+            snap_to_axis(wanted.1, range.y),
+        )
+    });
     source
         .resolutions
         .iter()
         .copied()
+        .chain(ranged)
         .min_by_key(|(x, y)| x.abs_diff(wanted.0) as u64 + y.abs_diff(wanted.1) as u64)
         .unwrap_or(wanted)
+}
+
+/// Nearest value to `wanted` on the grid `min + n * step` within `min..=max`.
+fn snap_to_axis(wanted: u32, axis: AxisRange) -> u32 {
+    let step = u64::from(axis.step.max(1));
+    let offset = u64::from(wanted.clamp(axis.min, axis.max) - axis.min);
+    let snapped = u64::from(axis.min) + (offset + step / 2) / step * step;
+    // Rounding up can pass a maximum that is not on the grid.
+    let snapped = if snapped > u64::from(axis.max) {
+        snapped - step
+    } else {
+        snapped
+    };
+    snapped as u32
 }
 
 pub(crate) fn pixels_to_three_hundredths(pixels: u32, dpi: u32) -> u32 {
@@ -485,6 +527,47 @@ pub(crate) fn offset_to_three_hundredths(pixels: u32, dpi: u32) -> u32 {
     } else {
         pixels_to_three_hundredths(pixels, dpi)
     }
+}
+
+/// Letter paper in 1/300 inch, used when a source advertises no maximum.
+const FALLBACK_MAX_WIDTH: u32 = 2550;
+const FALLBACK_MAX_HEIGHT: u32 = 3300;
+
+/// Replace a zero extent axis by the selected source's advertised maximum (or
+/// Letter) in pixels at the requested resolution, so settings and the decode
+/// budget describe the area that will actually be scanned.
+pub(crate) fn request_with_filled_extent(
+    request: &ScanRequest,
+    capabilities: &ScannerCapabilities,
+) -> Result<ScanRequest> {
+    let mut filled = request.clone();
+    if request.region.is_some() || (request.width != 0 && request.height != 0) {
+        return Ok(filled);
+    }
+    let source = select_source(request, capabilities)?;
+    let to_pixels = |three_hundredths: u32, dpi: u32| {
+        (u64::from(three_hundredths) * u64::from(dpi) + 150) / 300
+    };
+    let fill = |value: u32, maximum: Option<u32>, fallback: u32, dpi: u32| {
+        if value != 0 {
+            return value;
+        }
+        let pixels = to_pixels(maximum.unwrap_or(fallback).max(1), dpi);
+        pixels.clamp(1, u64::from(u32::MAX)) as u32
+    };
+    filled.width = fill(
+        request.width,
+        source.max_width,
+        FALLBACK_MAX_WIDTH,
+        request.dpi_x,
+    );
+    filled.height = fill(
+        request.height,
+        source.max_height,
+        FALLBACK_MAX_HEIGHT,
+        request.dpi_y,
+    );
+    Ok(filled)
 }
 
 pub(crate) fn region_in_three_hundredths(
@@ -510,4 +593,71 @@ pub(crate) fn region_in_three_hundredths(
     let height = pixels_to_three_hundredths(region.height.max(1), requested_dpi_y)
         .min(max_height.saturating_sub(y).max(1));
     (x, y, width, height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_doubles_from_250ms_and_caps_at_2s() {
+        let mut delay = NEXT_DOCUMENT_RETRY_DELAY;
+        let mut seen = vec![delay];
+        for _ in 0..5 {
+            delay = next_retry_delay(delay);
+            seen.push(delay);
+        }
+        let millis: Vec<u128> = seen.iter().map(Duration::as_millis).collect();
+        assert_eq!(millis, vec![250, 500, 1000, 2000, 2000, 2000]);
+    }
+
+    #[test]
+    fn retry_after_accepts_delta_seconds_only() {
+        use super::super::transport::parse_retry_after;
+        assert_eq!(parse_retry_after(" 3 "), Some(Duration::from_secs(3)));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("-1"), None);
+    }
+
+    fn capabilities(max_width: Option<u32>, max_height: Option<u32>) -> ScannerCapabilities {
+        ScannerCapabilities {
+            root: "eSCL".into(),
+            sources: vec![SourceCapabilities {
+                source: Some(CapabilitySource::Platen),
+                max_width,
+                max_height,
+                ..SourceCapabilities::default()
+            }],
+            ..ScannerCapabilities::default()
+        }
+    }
+
+    fn zero_request(dpi: u32) -> ScanRequest {
+        ScanRequest {
+            width: 0,
+            height: 0,
+            dpi_x: dpi,
+            dpi_y: dpi,
+            ..ScanRequest::default()
+        }
+    }
+
+    #[test]
+    fn zero_extent_uses_advertised_source_maximum() {
+        let filled =
+            request_with_filled_extent(&zero_request(150), &capabilities(Some(2480), Some(3508)))
+                .unwrap();
+        assert_eq!((filled.width, filled.height), (1240, 1754));
+    }
+
+    #[test]
+    fn zero_extent_falls_back_to_letter_and_keeps_explicit_axis() {
+        let mut request = zero_request(300);
+        request.width = 100;
+        let filled = request_with_filled_extent(&request, &capabilities(None, None)).unwrap();
+        assert_eq!((filled.width, filled.height), (100, 3300));
+        let filled =
+            request_with_filled_extent(&zero_request(300), &capabilities(None, None)).unwrap();
+        assert_eq!((filled.width, filled.height), (2550, 3300));
+    }
 }

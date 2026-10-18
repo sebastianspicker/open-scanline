@@ -11,10 +11,10 @@ use crate::workflows::publication::{
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-#[cfg(any(feature = "gui", test))]
+#[cfg(feature = "gui")]
 mod actions;
 mod app;
-#[cfg(any(feature = "gui", test))]
+#[cfg(feature = "gui")]
 mod state;
 #[cfg(feature = "gui")]
 mod view;

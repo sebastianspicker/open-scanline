@@ -68,8 +68,9 @@ pub const MAX_BATCH_PAGES: u32 = MAX_SCAN_PAGES;
 
 /// Cooperative cancellation hook for batch acquisition.
 ///
-/// This remains separate from [`BatchScanArgs`] so existing public struct
-/// literals stay source-compatible.
+/// This remains separate from [`BatchScanArgs`]; construct the args with
+/// `..BatchScanArgs::default()` so new fields (such as `overwrite`) keep
+/// struct literals compiling.
 pub type BatchCancelCheck = dyn Fn() -> bool + Send + Sync;
 
 pub struct BatchScanArgs {
@@ -89,6 +90,9 @@ pub struct BatchScanArgs {
     pub contact_sheet: Option<PathBuf>,
     pub pipeline: PipelinePrefs,
     pub on_progress: Option<Box<dyn Fn(ScanProgress) + Send>>,
+    /// Replace existing page and aggregate outputs; when false an existing
+    /// destination is rejected before acquisition.
+    pub overwrite: bool,
 }
 
 impl Default for BatchScanArgs {
@@ -97,8 +101,9 @@ impl Default for BatchScanArgs {
             device: "mock".into(),
             out_dir: PathBuf::from("batch_out"),
             pages: 2,
-            width: 320,
-            height: 240,
+            // Zero is the device maximum; the mock renders it as 320x240.
+            width: 0,
+            height: 0,
             seed: 1,
             dpi: 150,
             mode: ScanMode::Reflective,
@@ -110,6 +115,7 @@ impl Default for BatchScanArgs {
             contact_sheet: None,
             pipeline: PipelinePrefs::default(),
             on_progress: None,
+            overwrite: false,
         }
     }
 }
@@ -208,7 +214,12 @@ fn pdf_destinations(args: &BatchScanArgs) -> Vec<&PathBuf> {
 
 fn validate_batch_args(args: &BatchScanArgs) -> Result<()> {
     validate_batch_page_count(args.pages)?;
-    checked_image_len(args.width, args.height, PixelFormat::Rgb8.bpp())?;
+    // Zero means the device maximum; only explicit axes are bounded.
+    checked_image_len(
+        args.width.max(1),
+        args.height.max(1),
+        PixelFormat::Rgb8.bpp(),
+    )?;
     validate_scan_dpi(args.dpi, args.dpi)?;
     validate_batch_duplex(args)
 }
@@ -292,8 +303,35 @@ fn scan_batch_pages_with_session_export(
     cancel_batch_if_requested(session, hooks.cancel_check, hooks.token)?;
     session.set_params(&request)?;
     let mut collector = BatchPageCollector::new(args, file_ext, session, export, pipeline, hooks);
-    let summary = session.scan_pages(&request, args.pages, &mut |image| collector.add(image))?;
+    let summary = match session.scan_pages(&request, args.pages, &mut |image| collector.add(image))
+    {
+        Ok(summary) => summary,
+        Err(error) => return Err(note_saved_pages(error, &collector.paths, &args.out_dir)),
+    };
     collector.finish(summary)
+}
+
+/// Published pages stay on disk when a later page fails; say so in the error.
+fn note_saved_pages(error: ScanError, saved: &[PathBuf], out_dir: &std::path::Path) -> ScanError {
+    if saved.is_empty() {
+        return error;
+    }
+    let note = |message: String| {
+        format!(
+            "{message}; {} page(s) already scanned were saved in {}",
+            saved.len(),
+            out_dir.display()
+        )
+    };
+    match error {
+        ScanError::Cancelled(_) => error,
+        ScanError::Unsupported(message) => ScanError::Unsupported(note(message)),
+        ScanError::Invalid(message) => ScanError::Invalid(note(message)),
+        ScanError::Image(message) => ScanError::Image(note(message)),
+        ScanError::DeviceNotFound(message) => ScanError::DeviceNotFound(note(message)),
+        ScanError::Other(message) => ScanError::Other(note(message)),
+        ScanError::Io(error) => ScanError::Other(note(format!("io: {error}"))),
+    }
 }
 
 fn batch_scan_request(args: &BatchScanArgs, device_id: &str) -> (ScanRequest, PipelinePrefs) {

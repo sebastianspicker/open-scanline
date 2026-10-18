@@ -20,5 +20,5 @@ pub use contract::{
     BackendInfo, DeviceInfo, DeviceMaintenanceCapabilities, DeviceSession, FocusCapability,
     MaintenanceAvailability, ScanPagesEnd, ScanPagesResult,
 };
-pub(crate) use device_listing::{parse_pipe_devices, simulate_backends};
+pub(crate) use device_listing::{opens_simulated_session, parse_pipe_devices, simulate_backends};
 pub use registry::*;

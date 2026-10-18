@@ -15,6 +15,9 @@ pub(in crate::infrastructure::media) struct OutputTemp {
     path: PathBuf,
     destination: PathBuf,
     published: bool,
+    /// Final permission bits, applied to the temporary just before publication.
+    #[cfg(unix)]
+    mode: u32,
 }
 
 impl OutputTemp {
@@ -23,6 +26,8 @@ impl OutputTemp {
     }
 
     pub(in crate::infrastructure::media) fn publish(mut self) -> Result<()> {
+        #[cfg(unix)]
+        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(self.mode))?;
         crate::infrastructure::runtime::atomic_publish::replace_file_atomic(
             &self.path,
             &self.destination,
@@ -46,7 +51,7 @@ pub(in crate::infrastructure::media) fn create_output_temp(
     create_output_parent(destination)?;
     let naming = OutputTempNaming::for_destination(destination)?;
     #[cfg(unix)]
-    let output_mode = existing_output_mode_or_private(destination)?;
+    let output_mode = existing_output_mode_or_default(destination)?;
 
     for _ in 0..TEMP_CREATE_ATTEMPTS {
         let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -60,20 +65,14 @@ pub(in crate::infrastructure::media) fn create_output_temp(
         }
         match options.open(&path) {
             Ok(file) => {
-                #[cfg(unix)]
-                if let Err(error) =
-                    file.set_permissions(std::fs::Permissions::from_mode(output_mode))
-                {
-                    drop(file);
-                    let _ = std::fs::remove_file(&path);
-                    return Err(error.into());
-                }
-                #[cfg(not(unix))]
+                // The temporary stays 0600 until `publish` applies the final mode.
                 drop(file);
                 return Ok(OutputTemp {
                     path,
                     destination: destination.to_path_buf(),
                     published: false,
+                    #[cfg(unix)]
+                    mode: output_mode,
                 });
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -139,11 +138,51 @@ impl OutputTempNaming {
     }
 }
 
+/// Mode for the published file: an existing destination keeps its mode; a
+/// new file gets what a normally created file would (`0o666 & !umask`).
 #[cfg(unix)]
-fn existing_output_mode_or_private(destination: &Path) -> Result<u32> {
+fn existing_output_mode_or_default(destination: &Path) -> Result<u32> {
     match std::fs::metadata(destination) {
         Ok(metadata) => Ok(metadata.permissions().mode() & 0o7777),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0o600),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(new_file_mode(process_umask()))
+        }
         Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(unix)]
+fn new_file_mode(umask: u32) -> u32 {
+    0o666 & !umask
+}
+
+/// The process umask, read once and cached.
+///
+/// POSIX offers no read-only query, so this sets the umask to 0 and restores
+/// the previous value immediately. A file created by another thread in that
+/// brief window would get an unmasked mode; caching keeps the window to a
+/// single instant per process.
+#[cfg(unix)]
+fn process_umask() -> u32 {
+    static UMASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *UMASK.get_or_init(|| {
+        // SAFETY: `umask` has no memory-safety preconditions; the previous
+        // value is restored immediately.
+        let previous = unsafe { libc::umask(0) };
+        unsafe { libc::umask(previous) };
+        u32::from(previous)
+    })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_file_mode_applies_the_umask_to_0666() {
+        assert_eq!(new_file_mode(0o022), 0o644);
+        assert_eq!(new_file_mode(0o077), 0o600);
+        assert_eq!(new_file_mode(0o002), 0o664);
+        assert_eq!(new_file_mode(0), 0o666);
     }
 }

@@ -16,6 +16,8 @@ pub struct CommandSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub success: bool,
+    /// Process exit code; `None` when the child was ended by a signal.
+    pub exit_code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }

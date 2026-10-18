@@ -52,12 +52,13 @@ impl GuiState {
             multipage_format: &self.multipage_format,
             want_contact_sheet: self.contact_sheet,
         });
+        let (width, height) = self.requested_extent(self.dpi);
         Ok(BatchScanArgs {
             device: self.device.clone(),
             out_dir: out_dir.clone(),
             pages,
-            width: self.width,
-            height: self.height,
+            width,
+            height,
             seed: 1,
             dpi: self.dpi,
             mode: self.scan_mode(),
@@ -69,6 +70,7 @@ impl GuiState {
             contact_sheet: plan.contact_sheet,
             pipeline: self.pipeline_prefs(),
             on_progress: None,
+            overwrite: true,
         })
     }
 

@@ -207,6 +207,7 @@ fn plugin_scan_args(
         mode: defaults.acquisition.mode,
         duplex: defaults.acquisition.duplex,
         pipeline: defaults.processing,
+        overwrite: true,
         ..ScanToFileArgs::default()
     }
 }

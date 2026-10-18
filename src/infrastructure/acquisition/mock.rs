@@ -127,7 +127,24 @@ fn validate_gradient_request(request: &ScanRequest) -> Result<()> {
             "MockDevice only supports Rgb8".into(),
         ));
     }
-    validate_gradient_dimensions(request.width, request.height)
+    let (width, height) = gradient_extent(request);
+    validate_gradient_dimensions(width, height)
+}
+
+/// A zero axis means "device default", which the mock defines as 320x240.
+fn gradient_extent(request: &ScanRequest) -> (u32, u32) {
+    (
+        if request.width == 0 {
+            320
+        } else {
+            request.width
+        },
+        if request.height == 0 {
+            240
+        } else {
+            request.height
+        },
+    )
 }
 
 fn validate_gradient_dimensions(width: u32, height: u32) -> Result<()> {
@@ -143,10 +160,10 @@ fn validate_gradient_dimensions(width: u32, height: u32) -> Result<()> {
 }
 
 fn gradient_image(request: &ScanRequest) -> Result<ImageBuffer> {
-    let (width, height) = (request.width, request.height);
+    let (width, height) = gradient_extent(request);
     let mut buffer = vec![0_u8; (width as usize) * (height as usize) * 3];
     let seed = (request.seed & 0xFF) as u8;
-    for (index, pixel) in buffer.chunks_exact_mut(3).enumerate() {
+    for (index, pixel) in buffer.as_chunks_mut::<3>().0.iter_mut().enumerate() {
         let x = index as u32 % width;
         let y = index as u32 / width;
         pixel.copy_from_slice(&gradient_pixel(x, y, width, height, seed));

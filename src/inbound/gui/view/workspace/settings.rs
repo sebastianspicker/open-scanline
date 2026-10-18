@@ -1,4 +1,6 @@
 use super::*;
+use crate::domain::acquisition::PaperSize;
+use crate::inbound::gui::state::paper_label;
 
 pub(super) fn scan(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
     section(ui, "1", "Scanner and pages");
@@ -224,31 +226,82 @@ fn side_limit_note(state: &GuiState) -> String {
 
 fn scan_area(ui: &mut egui::Ui, state: &mut GuiState) {
     ui.collapsing(
-        RichText::new(format!("Scan area  {} × {} px", state.width, state.height)),
+        RichText::new(format!("Scan area  {}", state.scan_area_summary())),
         |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let width_label = ui.label(label_text("Width"));
-                ui.add(
-                    egui::DragValue::new(&mut state.width)
-                        .range(16..=4096)
-                        .suffix(" px"),
-                )
-                .labelled_by(width_label.id);
-                ui.add_space(space::S);
-                let height_label = ui.label(label_text("Height"));
-                ui.add(
-                    egui::DragValue::new(&mut state.height)
-                        .range(16..=4096)
-                        .suffix(" px"),
-                )
-                .labelled_by(height_label.id);
-            });
+            paper_choice(ui, state);
+            if state.custom_area {
+                ui.horizontal_wrapped(|ui| {
+                    let width_label = ui.label(label_text("Width"));
+                    ui.add(
+                        egui::DragValue::new(&mut state.width)
+                            .range(1..=16384)
+                            .suffix(" px"),
+                    )
+                    .labelled_by(width_label.id);
+                    ui.add_space(space::S);
+                    let height_label = ui.label(label_text("Height"));
+                    ui.add(
+                        egui::DragValue::new(&mut state.height)
+                            .range(1..=16384)
+                            .suffix(" px"),
+                    )
+                    .labelled_by(height_label.id);
+                });
+            }
             note(
                 ui,
-                "Requested size. The scanner may negotiate a supported area.",
+                "Device maximum scans the full glass or page. Custom sizes are pixels at the selected resolution.",
             );
         },
     );
+}
+
+fn paper_choice(ui: &mut egui::Ui, state: &mut GuiState) {
+    let label_response = ui.label(label_text("Paper size"));
+    let selected = if state.custom_area {
+        "Custom"
+    } else {
+        paper_label(state.paper)
+    };
+    let mut choice = None;
+    egui::ComboBox::from_id_salt("workspace-paper")
+        .width(ui.available_width())
+        .height(size::CONTROL * 8.0)
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            for paper in PaperSize::ALL {
+                let current = !state.custom_area && state.paper == paper;
+                if ui.selectable_label(current, paper_label(paper)).clicked() {
+                    choice = Some(Some(paper));
+                }
+            }
+            if ui.selectable_label(state.custom_area, "Custom").clicked() {
+                choice = Some(None);
+            }
+        })
+        .response
+        .labelled_by(label_response.id);
+    match choice {
+        Some(Some(paper)) => {
+            state.paper = paper;
+            state.custom_area = false;
+        }
+        Some(None) if !state.custom_area => {
+            // Start the custom area from the size that was just selected.
+            let (width, height) = state.requested_extent(state.dpi);
+            let (width, height) = if width == 0 || height == 0 {
+                PaperSize::A4
+                    .to_pixels(state.dpi, state.dpi)
+                    .unwrap_or((state.width.max(1), state.height.max(1)))
+            } else {
+                (width, height)
+            };
+            state.width = width;
+            state.height = height;
+            state.custom_area = true;
+        }
+        _ => {}
+    }
 }
 
 fn pdf_controls(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {

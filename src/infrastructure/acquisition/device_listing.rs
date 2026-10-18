@@ -16,6 +16,12 @@ pub(crate) fn simulate_backends() -> bool {
     )
 }
 
+/// Whether `id` must open the simulated session `sim_id`. Simulation is opt-in
+/// so a real device that happens to be named `sim` stays openable.
+pub(crate) fn opens_simulated_session(id: &str, sim_id: &str, simulation_enabled: bool) -> bool {
+    simulation_enabled && id == sim_id
+}
+
 pub(crate) fn parse_pipe_devices(
     text: &str,
     id_prefix: &str,
@@ -41,4 +47,17 @@ pub(crate) fn parse_pipe_devices(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opens_simulated_session;
+
+    #[test]
+    fn simulated_session_requires_the_opt_in() {
+        assert!(opens_simulated_session("sane:sim", "sane:sim", true));
+        assert!(!opens_simulated_session("sane:sim", "sane:sim", false));
+        assert!(!opens_simulated_session("sane:other", "sane:sim", true));
+        assert!(!opens_simulated_session("wia:sim", "wia:sim", false));
+    }
 }

@@ -19,6 +19,10 @@ fn generated_page_paths(args: &BatchScanArgs, file_ext: &str) -> Result<Vec<Path
                 &path,
                 &format!("generated page {page}"),
             )?;
+            crate::infrastructure::runtime::atomic_publish::ensure_output_absent(
+                &path,
+                args.overwrite,
+            )?;
             Ok(path)
         })
         .collect()
@@ -31,12 +35,14 @@ fn requested_destinations(args: &BatchScanArgs) -> Result<Vec<(&'static str, Pat
         args.multipage_tiff.as_deref(),
         "multipage TIFF",
         &["tif", "tiff"],
+        args.overwrite,
         &mut destinations,
     )?;
     add_named_output(
         args.multipage_pdf.as_deref(),
         "multipage PDF",
         &["pdf"],
+        args.overwrite,
         &mut destinations,
     )?;
     add_contact_sheet(args, &mut destinations)?;
@@ -60,6 +66,10 @@ fn add_multipage_output(
         &effective,
         "multipage output",
     )?;
+    crate::infrastructure::runtime::atomic_publish::ensure_output_absent(
+        &effective,
+        args.overwrite,
+    )?;
     destinations.push(("multipage output", effective));
     Ok(())
 }
@@ -68,12 +78,14 @@ fn add_named_output(
     path: Option<&Path>,
     label: &'static str,
     allowed: &[&str],
+    overwrite: bool,
     destinations: &mut Vec<(&'static str, PathBuf)>,
 ) -> Result<()> {
     let Some(path) = path else {
         return Ok(());
     };
     validate_named_container_path(path, label, allowed)?;
+    crate::infrastructure::runtime::atomic_publish::ensure_output_absent(path, overwrite)?;
     destinations.push((label, path.to_path_buf()));
     Ok(())
 }
@@ -91,6 +103,10 @@ fn add_contact_sheet(
         path.to_path_buf()
     };
     validate_supported_output_path(&effective, "contact sheet")?;
+    crate::infrastructure::runtime::atomic_publish::ensure_output_absent(
+        &effective,
+        args.overwrite,
+    )?;
     destinations.push(("contact sheet", effective));
     Ok(())
 }

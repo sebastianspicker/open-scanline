@@ -1,11 +1,12 @@
-use super::common::{parse_crop, print_wrote};
-use crate::domain::acquisition::DeviceOpenPolicy;
+use super::common::{print_verbose_hint, print_wrote};
+use crate::domain::acquisition::{DeviceOpenPolicy, PaperSize};
 use crate::domain::image::{Rect, Rotate};
 use crate::domain::processing::PipelinePrefs;
 use crate::inbound::cli::args::ScanSource;
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
 use crate::workflows::capture::single::{self, CaptureOptions, ScanToFileArgs};
+use crate::workflows::settings::resolve_scan_extent;
 use std::path::PathBuf;
 
 pub(super) struct Request {
@@ -23,12 +24,14 @@ pub(super) struct Acquisition {
     pub(super) out: PathBuf,
     pub(super) width: Option<u32>,
     pub(super) height: Option<u32>,
+    pub(super) paper: Option<PaperSize>,
     pub(super) seed: u32,
     pub(super) dpi: Option<u32>,
     pub(super) source: Option<ScanSource>,
     pub(super) duplex: Option<bool>,
     pub(super) invert: Option<bool>,
     pub(super) raw_out: Option<PathBuf>,
+    pub(super) overwrite: bool,
 }
 
 #[derive(Default)]
@@ -43,7 +46,7 @@ pub(super) struct GeometryOverrides {
     pub(super) rotate: Option<i32>,
     pub(super) flip_h: Option<bool>,
     pub(super) flip_v: Option<bool>,
-    pub(super) crop: Option<String>,
+    pub(super) crop: Option<[i32; 4]>,
     pub(super) auto_deskew: Option<bool>,
     pub(super) deskew: Option<f64>,
 }
@@ -107,6 +110,14 @@ fn scan_args(
     config: AppConfig,
     pipeline: PipelinePrefs,
 ) -> ScanToFileArgs {
+    let dpi = acquisition.dpi.unwrap_or(config.default_dpi);
+    let (width, height) = resolve_scan_extent(
+        &config,
+        acquisition.paper,
+        acquisition.width,
+        acquisition.height,
+        dpi,
+    );
     ScanToFileArgs {
         device: Some(
             acquisition
@@ -115,10 +126,10 @@ fn scan_args(
                 .unwrap_or_else(|| config.last_device_id.clone()),
         ),
         out: acquisition.out.clone(),
-        width: acquisition.width.unwrap_or(config.default_width),
-        height: acquisition.height.unwrap_or(config.default_height),
+        width,
+        height,
         seed: acquisition.seed,
-        dpi: acquisition.dpi.unwrap_or(config.default_dpi),
+        dpi,
         mode: acquisition
             .source
             .map(ScanSource::mode)
@@ -134,6 +145,7 @@ fn scan_args(
         on_progress: None,
         cancel_check: None,
         raw_out: acquisition.raw_out,
+        overwrite: acquisition.overwrite,
     }
 }
 
@@ -154,18 +166,16 @@ fn apply_geometry_overrides(pipeline: &mut PipelinePrefs, overrides: &GeometryOv
     }
     apply_explicit_bool(&mut pipeline.flip_h, overrides.flip_h);
     apply_explicit_bool(&mut pipeline.flip_v, overrides.flip_v);
-    apply_crop(pipeline, overrides.crop.as_deref());
+    apply_crop(pipeline, overrides.crop);
     apply_explicit_bool(&mut pipeline.auto_deskew, overrides.auto_deskew);
     if let Some(deskew) = overrides.deskew {
         pipeline.deskew_angle = deskew;
     }
 }
 
-fn apply_crop(pipeline: &mut PipelinePrefs, value: Option<&str>) {
-    let Some(crop) = parse_crop(value) else {
-        return;
-    };
-    if crop[2] > 0 && crop[3] > 0 {
+/// `--crop` is parsed and checked for positive size by clap (`parse_crop`).
+fn apply_crop(pipeline: &mut PipelinePrefs, value: Option<[i32; 4]>) {
+    if let Some(crop) = value {
         pipeline.crop = Some(Rect::new(crop[0], crop[1], crop[2] as u32, crop[3] as u32));
     }
 }
@@ -262,5 +272,6 @@ fn finish_scan(path: PathBuf) -> i32 {
 
 fn report_scan_error(error: crate::error::ScanError) -> i32 {
     eprintln!("scan error: {error}");
+    print_verbose_hint();
     1
 }

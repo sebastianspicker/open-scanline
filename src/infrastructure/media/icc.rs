@@ -340,7 +340,7 @@ impl PreparedScannerProfile {
                 "apply_scanner_profile requires Rgb8".into(),
             ));
         }
-        for pixel in image.data.chunks_exact_mut(3) {
+        for pixel in image.data.as_chunks_mut::<3>().0 {
             apply_profile_pixel(pixel, &self.matrix, &self.inverse_gamma);
         }
         ImageBuffer::new(image.width, image.height, image.pixel_format, image.data)

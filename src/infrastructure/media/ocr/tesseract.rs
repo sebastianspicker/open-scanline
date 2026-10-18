@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 const MAX_TEXT: u64 = 1024 * 1024;
+/// Remedy shown whenever Tesseract cannot be used. `--offline` exists only on
+/// the deprecated `ocr` path, so name the real options of each command.
+const ENGINE_HINT: &str =
+    "use --ocr-engine offline|ocrs (scan/process/batch) or --engine offline|ocrs (ocr)";
 pub fn available() -> bool {
     which("tesseract").is_some()
 }
@@ -43,9 +47,9 @@ pub fn recognize(
         language
     })?;
     let bin = which("tesseract").ok_or_else(|| {
-        ScanError::Unsupported(
-            "Tesseract is not available on PATH; install it or use --offline".into(),
-        )
+        ScanError::Unsupported(format!(
+            "Tesseract is not available on PATH; install it or {ENGINE_HINT}"
+        ))
     })?;
     run(image, language, &bin, cancellation)
 }
@@ -56,11 +60,16 @@ fn run(
     cancellation: Option<&CancellationToken>,
 ) -> Result<super::OcrResult> {
     let out = TemporaryOutput::new("ocr", "png")?;
-    let base = out.directory().join("output");
     save_image(out.path(), image, None, None)?;
     let input = std::fs::metadata(out.path())?.len();
+    // Leptonica rewrites paths that start with `/tmp` on macOS, so a temp
+    // directory reached through the `/tmp` symlink would not be found. Pass
+    // the resolved path (`/private/tmp/...`) instead.
+    let directory = std::fs::canonicalize(out.directory())?;
+    let base = directory.join("output");
+    let input_path = directory.join(out.path().file_name().unwrap_or_default());
     let cmd = run_tesseract_command(
-        &tesseract_command(bin, out.path(), &base, language),
+        &tesseract_command(bin, &input_path, &base, language),
         out.directory(),
         input,
         bin,
@@ -68,7 +77,11 @@ fn run(
     )?;
     ensure_tesseract_success(&cmd)?;
     let text = read_tesseract_text(&base.with_extension("txt"))?;
-    Ok(tesseract_result(text, language))
+    // Confidence is best effort: a build that skips the TSV still yields text.
+    let confidence = read_tesseract_output(&base.with_extension("tsv"))
+        .map(|tsv| tsv_confidence(&tsv))
+        .unwrap_or(0.0);
+    Ok(tesseract_result(text, confidence, language))
 }
 
 fn tesseract_command(bin: &Path, input: &Path, base: &Path, language: &str) -> CommandSpec {
@@ -81,6 +94,10 @@ fn tesseract_command(bin: &Path, input: &Path, base: &Path, language: &str) -> C
             effective_language(language).into(),
             "--psm".into(),
             "6".into(),
+            // One pass writes both the plain text and the per-word TSV that
+            // the confidence is computed from.
+            "txt".into(),
+            "tsv".into(),
         ],
     }
 }
@@ -110,9 +127,9 @@ fn run_tesseract_command(
         ArtifactWatch {
             directory,
             quota: ArtifactQuota {
-                max_files: 2,
+                max_files: 3,
                 max_bytes: input_bytes
-                    .checked_add(MAX_TEXT)
+                    .checked_add(2 * MAX_TEXT)
                     .ok_or_else(|| ScanError::Other("Tesseract artifact quota overflow".into()))?,
             },
         },
@@ -120,7 +137,7 @@ fn run_tesseract_command(
     .map_err(|e| match e {
         ScanError::Unsupported(m) if m.contains("failed to start") => {
             ScanError::Unsupported(format!(
-                "could not launch Tesseract at {}: {m}; install tesseract or use --offline",
+                "could not launch Tesseract at {}: {m}; install tesseract or {ENGINE_HINT}",
                 bin.display()
             ))
         }
@@ -133,13 +150,17 @@ fn ensure_tesseract_success(cmd: &crate::infrastructure::runtime::CommandOutput)
         Ok(())
     } else {
         Err(ScanError::Other(format!(
-            "Tesseract failed: {}; check the language data or use --offline",
+            "Tesseract failed: {}; check the language data or {ENGINE_HINT}",
             String::from_utf8_lossy(&cmd.stderr).trim()
         )))
     }
 }
 
 fn read_tesseract_text(path: &Path) -> Result<String> {
+    Ok(read_tesseract_output(path)?.trim().to_string())
+}
+
+fn read_tesseract_output(path: &Path) -> Result<String> {
     let meta = std::fs::metadata(path)?;
     if meta.len() > MAX_TEXT {
         return Err(ScanError::Other(format!(
@@ -155,21 +176,87 @@ fn read_tesseract_text(path: &Path) -> Result<String> {
             "Tesseract text exceeds the {MAX_TEXT} byte limit"
         )));
     }
-    Ok(String::from_utf8(b)
-        .map_err(|e| ScanError::Other(format!("Tesseract text is not UTF-8: {e}")))?
-        .trim()
-        .to_string())
+    String::from_utf8(b).map_err(|e| ScanError::Other(format!("Tesseract text is not UTF-8: {e}")))
 }
 
-fn tesseract_result(text: String, language: &str) -> super::OcrResult {
+/// Mean word confidence (0.0..=1.0) from Tesseract TSV output. Only word rows
+/// (level 5) with a non-negative `conf` and visible text count; Tesseract
+/// reports -1 for layout rows. No qualifying word gives 0.0.
+fn tsv_confidence(tsv: &str) -> f64 {
+    const LEVEL: usize = 0;
+    const CONF: usize = 10;
+    const TEXT: usize = 11;
+    let mut sum = 0.0;
+    let mut words = 0_u32;
+    for row in tsv.lines().skip(1) {
+        let columns = row.split('\t').collect::<Vec<_>>();
+        if columns.len() <= TEXT || columns[LEVEL] != "5" || columns[TEXT].trim().is_empty() {
+            continue;
+        }
+        if let Ok(conf) = columns[CONF].trim().parse::<f64>() {
+            if conf >= 0.0 {
+                sum += conf;
+                words += 1;
+            }
+        }
+    }
+    if words == 0 {
+        0.0
+    } else {
+        (sum / f64::from(words) / 100.0).clamp(0.0, 1.0)
+    }
+}
+
+fn tesseract_result(text: String, confidence: f64, language: &str) -> super::OcrResult {
     super::OcrResult {
         text: if text.is_empty() {
-            "[no text recognized]".into()
+            super::NO_TEXT_PLACEHOLDER.into()
         } else {
             text
         },
         engine: "tesseract".into(),
-        confidence: 0.8,
+        confidence,
         language: effective_language(language).into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Captured from `tesseract page.png out --psm 6 tsv` (Tesseract 5.x).
+    const SAMPLE_TSV: &str = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n\
+1\t1\t0\t0\t0\t0\t0\t0\t640\t200\t-1\t\n\
+2\t1\t1\t0\t0\t0\t20\t20\t600\t60\t-1\t\n\
+3\t1\t1\t1\t0\t0\t20\t20\t600\t60\t-1\t\n\
+4\t1\t1\t1\t1\t0\t20\t20\t600\t60\t-1\t\n\
+5\t1\t1\t1\t1\t1\t20\t20\t180\t60\t96.123\tHello\n\
+5\t1\t1\t1\t1\t2\t220\t20\t200\t60\t88.5\tscanner\n\
+5\t1\t1\t1\t1\t3\t440\t20\t180\t60\t0\t.\n\
+5\t1\t1\t1\t1\t4\t640\t20\t10\t60\t-1\tghost\n\
+5\t1\t1\t1\t1\t5\t660\t20\t10\t60\t99\t \n";
+
+    #[test]
+    fn tsv_confidence_averages_non_negative_words() {
+        let expected = (96.123 + 88.5 + 0.0) / 3.0 / 100.0;
+        assert!((tsv_confidence(SAMPLE_TSV) - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tsv_confidence_is_zero_without_words() {
+        let header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n";
+        assert_eq!(tsv_confidence(""), 0.0);
+        assert_eq!(tsv_confidence(header), 0.0);
+        assert_eq!(
+            tsv_confidence(&format!("{header}1\t1\t0\t0\t0\t0\t0\t0\t9\t9\t-1\t\n")),
+            0.0
+        );
+    }
+
+    #[test]
+    fn hints_name_the_real_engine_options() {
+        assert!(ENGINE_HINT.contains("--ocr-engine"));
+        assert!(ENGINE_HINT.contains("--engine"));
+        assert!(!ENGINE_HINT.contains("--offline"));
     }
 }

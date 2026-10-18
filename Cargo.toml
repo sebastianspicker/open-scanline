@@ -1,6 +1,6 @@
 [package]
 name = "open-scanline"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.91"
 description = "Local scanning, processing, and OCR in Rust."
@@ -55,6 +55,7 @@ tract-onnx = { version = "0.23.4", optional = true }
 eframe = { version = "0.32.3", optional = true, default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "web_screen_reader", "x11"] }
 mdns-sd = "0.13"
 ureq = { version = "3.1", default-features = false, features = ["rustls"] }
+rustls = { version = "0.23.22", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 quick-xml = "0.41"
 egui = { version = "0.32.3", optional = true }
 lopdf = "0.44"

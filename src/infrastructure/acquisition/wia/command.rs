@@ -83,11 +83,24 @@ fn geometry(request: &ScanRequest) -> (i32, i32, u32, u32) {
                 region.height.max(1),
             )
         })
-        .unwrap_or((0, 0, request.width.max(1), request.height.max(1)))
+        .unwrap_or((0, 0, request.width, request.height))
 }
 
+/// Escape for a single-quoted PowerShell string. PowerShell treats the
+/// typographic single quotes U+2018, U+2019, U+201A and U+201B like `'`, so
+/// each is doubled too.
 fn powershell_literal(value: impl std::fmt::Display) -> String {
-    value.to_string().replace('\'', "''")
+    let mut escaped = String::new();
+    for character in value.to_string().chars() {
+        escaped.push(character);
+        if matches!(
+            character,
+            '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}'
+        ) {
+            escaped.push(character);
+        }
+    }
+    escaped
 }
 
 fn scan_source(mode: ScanMode) -> &'static str {
@@ -170,4 +183,22 @@ pub(super) fn feeder_exhausted(output: &CommandOutput) -> bool {
         ]
         .iter()
         .any(|message| text.contains(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::powershell_literal;
+
+    #[test]
+    fn literal_doubles_every_powershell_single_quote() {
+        assert_eq!(powershell_literal("it's"), "it''s");
+        assert_eq!(
+            powershell_literal("C:\\Users\\O\u{2019}Brien\\x.png"),
+            "C:\\Users\\O\u{2019}\u{2019}Brien\\x.png"
+        );
+        assert_eq!(
+            powershell_literal("\u{2018}\u{201A}\u{201B}"),
+            "\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}"
+        );
+    }
 }

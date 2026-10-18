@@ -136,7 +136,7 @@ pub fn recognize(image: &ImageBuffer) -> Result<super::OcrResult> {
     let b = g.into_iter().map(|x| u8::from(x < 128)).collect::<Vec<_>>();
     let mut c = parts(&b, w as usize, h as usize);
     if c.is_empty() {
-        return Ok(out("[no text recognized]".into(), 0.));
+        return Ok(out(super::NO_TEXT_PLACEHOLDER.into(), 0.));
     }
     c.sort_by_key(|x| (x.y0, x.x0));
     let mut s = String::new();

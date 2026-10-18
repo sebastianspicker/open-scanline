@@ -35,6 +35,10 @@ Dependencies point one way. A layer may use any layer below it, never one above:
 inbound  ->  workflows  ->  infrastructure  ->  domain
 ```
 
+`cargo test` enforces this direction: the `architecture_rules` unit test fails
+with `file:line` when `src/domain/`, `src/infrastructure/`, or `src/workflows/`
+refers to a layer above it.
+
 `src/domain/` holds values and rules with no I/O: the scan request and page-limit
 rules, image buffers and geometry, processing preferences and the pure processing
 operations, export options and OCR engine names, settings validation, and the

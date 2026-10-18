@@ -33,10 +33,21 @@ pub(super) fn run_command_with_capture_limit(
     cancellation_message: &str,
     output_limits: CommandOutputLimits<'_>,
 ) -> Result<CommandOutput> {
+    crate::debug_log::debug_log!(
+        "exec",
+        "spawn {} {:?}",
+        spec.program,
+        spec.args
+            .iter()
+            .map(|arg| truncate_chars(arg, 200))
+            .collect::<Vec<_>>()
+    );
+    let started = Instant::now();
     let (child, containment) = platform::spawn_contained_command(spec).map_err(|error| {
+        crate::debug_log::debug_log!("exec", "{command_name} spawn error: {error}");
         ScanError::Unsupported(format!("{command_name} failed to start: {error}"))
     })?;
-    supervise_command_child(
+    let result = supervise_command_child(
         Supervision {
             child,
             containment,
@@ -51,7 +62,38 @@ pub(super) fn run_command_with_capture_limit(
                 .map(|watch| (watch.directory, watch.quota)),
         },
         |child| child.poll(),
-    )
+    );
+    log_command_result(command_name, started, &result);
+    result
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((end, _)) => format!("{}...", &text[..end]),
+        None => text.to_string(),
+    }
+}
+
+fn log_command_result(command_name: &str, started: Instant, result: &Result<CommandOutput>) {
+    if !crate::debug_log::enabled() {
+        return;
+    }
+    let elapsed_ms = started.elapsed().as_millis();
+    match result {
+        Ok(output) => {
+            let stderr = &output.stderr[..output.stderr.len().min(2000)];
+            crate::debug_log::debug_log!(
+                "exec",
+                "{command_name} exit={:?} elapsed={elapsed_ms}ms stderr={:?}",
+                output.exit_code,
+                String::from_utf8_lossy(stderr).trim()
+            );
+        }
+        Err(error) => crate::debug_log::debug_log!(
+            "exec",
+            "{command_name} failed after {elapsed_ms}ms: {error}"
+        ),
+    }
 }
 
 struct Supervision<'a, C: platform::SupervisedChild> {
@@ -194,6 +236,7 @@ fn finish_child(
     }
     Ok(CommandOutput {
         success: status.success(),
+        exit_code: status.code(),
         stdout: stdout.bytes,
         stderr: stderr.bytes,
     })

@@ -36,9 +36,13 @@ const MAX_DOCUMENT_DECODE_ALLOCATION: u64 = crate::domain::image::MAX_IMAGE_BYTE
 const MIN_DOCUMENT_DECODE_ALLOCATION: u64 = 4 * 1024 * 1024;
 const MIN_DOCUMENT_DIMENSION_LIMIT: u32 = 1_024;
 const MAX_DOCUMENT_DIMENSION_LIMIT: u32 = crate::domain::image::MAX_IMAGE_DIMENSION;
-const NEXT_DOCUMENT_DEADLINE: Duration = Duration::from_secs(60);
-const NEXT_DOCUMENT_SETUP_TIMEOUT: Duration = Duration::from_secs(5);
-const NEXT_DOCUMENT_RETRY_DELAY: Duration = Duration::from_millis(150);
+const DEFAULT_NEXT_DOCUMENT_DEADLINE_SECS: u64 = 60;
+const DEFAULT_NEXT_DOCUMENT_SETUP_TIMEOUT_SECS: u64 = 5;
+const MAX_ESCL_TIMEOUT_SECS: u64 = 600;
+const ESCL_PAGE_TIMEOUT_ENV: &str = "OPEN_SCANLINE_ESCL_PAGE_TIMEOUT_SECS";
+const ESCL_HEADER_TIMEOUT_ENV: &str = "OPEN_SCANLINE_ESCL_HEADER_TIMEOUT_SECS";
+const NEXT_DOCUMENT_RETRY_DELAY: Duration = Duration::from_millis(250);
+const NEXT_DOCUMENT_MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
 const NEXT_DOCUMENT_CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const CONTROL_REQUEST_SETUP_TIMEOUT: Duration = Duration::from_secs(1);
 const CANCEL_JOB_CLEANUP_TIMEOUT: Duration = Duration::from_millis(500);
@@ -70,8 +74,23 @@ pub(crate) struct SourceCapabilities {
     color_modes: Vec<String>,
     document_formats: Vec<String>,
     resolutions: Vec<(u32, u32)>,
+    resolution_ranges: Vec<ResolutionRange>,
     max_width: Option<u32>,
     max_height: Option<u32>,
+}
+
+/// One axis of an eSCL `ResolutionRange` (`Min`, `Max`, `Step` in dpi).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AxisRange {
+    min: u32,
+    max: u32,
+    step: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResolutionRange {
+    x: AxisRange,
+    y: AxisRange,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -175,8 +194,40 @@ fn merge_shared_capabilities(selected: &mut SourceCapabilities, shared: &SourceC
             selected.resolutions.push(*resolution);
         }
     }
+    for range in &shared.resolution_ranges {
+        if !selected.resolution_ranges.contains(range) {
+            selected.resolution_ranges.push(*range);
+        }
+    }
     selected.max_width = selected.max_width.or(shared.max_width);
     selected.max_height = selected.max_height.or(shared.max_height);
+}
+
+/// Parse a timeout override in seconds; a missing, non-integer or
+/// out-of-range (1..=600) value yields the default.
+pub(crate) fn timeout_from_secs(value: Option<&str>, default_secs: u64) -> Duration {
+    let secs = value
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|secs| (1..=MAX_ESCL_TIMEOUT_SECS).contains(secs))
+        .unwrap_or(default_secs);
+    Duration::from_secs(secs)
+}
+
+/// Total allowance per scanned page (OPEN_SCANLINE_ESCL_PAGE_TIMEOUT_SECS).
+pub(crate) fn next_document_deadline() -> Duration {
+    timeout_from_secs(
+        std::env::var(ESCL_PAGE_TIMEOUT_ENV).ok().as_deref(),
+        DEFAULT_NEXT_DOCUMENT_DEADLINE_SECS,
+    )
+}
+
+/// Connect/response-header allowance per NextDocument attempt
+/// (OPEN_SCANLINE_ESCL_HEADER_TIMEOUT_SECS).
+pub(crate) fn next_document_setup_timeout() -> Duration {
+    timeout_from_secs(
+        std::env::var(ESCL_HEADER_TIMEOUT_ENV).ok().as_deref(),
+        DEFAULT_NEXT_DOCUMENT_SETUP_TIMEOUT_SECS,
+    )
 }
 
 /// Network discovery enabled unless OPEN_SCANLINE_NETWORK_DISCOVERY=0.
@@ -218,3 +269,21 @@ pub use session::EsclDeviceSession;
 
 mod job_id;
 pub use job_id::parse_job_id;
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::timeout_from_secs;
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_override_is_bounded_with_default_fallback() {
+        let default = Duration::from_secs(60);
+        assert_eq!(timeout_from_secs(None, 60), default);
+        assert_eq!(timeout_from_secs(Some("90"), 60), Duration::from_secs(90));
+        assert_eq!(timeout_from_secs(Some(" 1 "), 60), Duration::from_secs(1));
+        assert_eq!(timeout_from_secs(Some("600"), 60), Duration::from_secs(600));
+        for invalid in ["0", "601", "-5", "abc", "", "1.5", "99999999999999999999"] {
+            assert_eq!(timeout_from_secs(Some(invalid), 60), default, "{invalid}");
+        }
+    }
+}

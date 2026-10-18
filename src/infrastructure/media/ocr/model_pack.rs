@@ -18,10 +18,6 @@ mod io;
 pub(crate) use io::active_verified_model_pair;
 #[cfg(feature = "ocrs")]
 pub(crate) use io::read_model_source_bytes;
-#[cfg(all(test, feature = "ocrs"))]
-pub(crate) use io::{
-    active_verified_model_pair_in, reset_test_read_counts, test_read_count, verified_model_bytes,
-};
 use io::{checked_source, copy_model, read_bounded_regular, verify_model, CheckedSource};
 
 pub const MODEL_PACK_FORMAT_VERSION: u32 = 1;

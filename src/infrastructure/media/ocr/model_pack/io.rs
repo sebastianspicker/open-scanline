@@ -4,12 +4,6 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 
-#[cfg(test)]
-thread_local! {
-    static TEST_READ_COUNTS: std::cell::RefCell<std::collections::HashMap<PathBuf, usize>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
 pub(super) struct CheckedSource {
     pub(super) path: PathBuf,
     pub(super) bytes: u64,
@@ -90,14 +84,6 @@ fn validate_copied_model(source: &CheckedSource, copied: u64) -> Result<()> {
 pub(super) fn verify_model(root: &Path, file: &ModelFile, label: &str) -> Result<()> {
     let _ = read_verified_model(root, file, label)?;
     Ok(())
-}
-
-#[cfg(all(test, feature = "ocrs"))]
-pub(crate) fn verified_model_bytes(pack: &InstalledModelPack) -> Result<(Vec<u8>, Vec<u8>)> {
-    Ok((
-        read_verified_model(&pack.root, &pack.manifest.detection, "detection")?,
-        read_verified_model(&pack.root, &pack.manifest.recognition, "recognition")?,
-    ))
 }
 
 pub(crate) fn active_verified_model_pair(
@@ -204,30 +190,9 @@ fn read_bounded_regular_cancelled(
     let path_metadata = fs::symlink_metadata(path)?;
     validate_bounded_regular_metadata(&path_metadata, limit, label)?;
     let mut file = File::open(path)?;
-    record_test_read(path);
     let opened_metadata = file.metadata()?;
     validate_bounded_regular_metadata(&opened_metadata, limit, label)?;
     read_bounded_file(&mut file, opened_metadata.len(), limit, label, cancellation)
-}
-
-#[cfg(test)]
-fn record_test_read(path: &Path) {
-    TEST_READ_COUNTS.with(|counts| {
-        *counts.borrow_mut().entry(path.to_path_buf()).or_default() += 1;
-    });
-}
-
-#[cfg(not(test))]
-fn record_test_read(_: &Path) {}
-
-#[cfg(all(test, feature = "ocrs"))]
-pub(crate) fn reset_test_read_counts() {
-    TEST_READ_COUNTS.with(|counts| counts.borrow_mut().clear());
-}
-
-#[cfg(all(test, feature = "ocrs"))]
-pub(crate) fn test_read_count(path: &Path) -> usize {
-    TEST_READ_COUNTS.with(|counts| counts.borrow().get(path).copied().unwrap_or(0))
 }
 
 fn validate_bounded_regular_metadata(

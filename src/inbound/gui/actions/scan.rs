@@ -1,8 +1,13 @@
-use super::super::state::GuiState;
+use super::super::state::{paper_label, GuiState};
+use crate::domain::acquisition::{PaperSize, MIN_SCAN_DPI};
 use crate::workflows::capture::single::ScanToFileArgs;
+use crate::workflows::settings::resolve_scan_extent;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+/// Resolution of physical-device previews.
+const PREVIEW_DPI: u32 = 75;
 
 impl GuiState {
     pub(in super::super) fn do_cancel(&mut self) {
@@ -23,14 +28,19 @@ impl GuiState {
         let invert_colors = self.invert_colors || pipeline.invert;
         pipeline.invert = false;
         let cancel_requested = Arc::clone(&self.cancel_requested);
-        let (width, height) = self.scan_dimensions(preview);
+        let (width, height, dpi) = self.scan_geometry(preview);
+        // The crop is in full-resolution source pixels; a reduced-resolution
+        // preview must select the same physical area.
+        if dpi != self.dpi {
+            pipeline.crop = pipeline.crop.map(|crop| scale_rect(crop, dpi, self.dpi));
+        }
         Ok(ScanToFileArgs {
             device: Some(self.device.clone()),
             out,
             width,
             height,
             seed: 1,
-            dpi: self.dpi,
+            dpi,
             mode: self.scan_mode(),
             duplex: self.duplex,
             pipeline,
@@ -43,6 +53,7 @@ impl GuiState {
             on_progress: None,
             cancel_check: Some(Box::new(move || cancel_requested.load(Ordering::SeqCst))),
             raw_out: self.raw_output_path(preview)?,
+            overwrite: true,
         })
     }
 
@@ -55,11 +66,61 @@ impl GuiState {
         }
     }
 
-    fn scan_dimensions(&self, preview: bool) -> (u32, u32) {
-        if preview {
-            (self.width.min(320), self.height.min(240))
+    /// Requested pixel extent at `dpi`; 0 on an axis means the device maximum.
+    pub(in crate::inbound::gui) fn requested_extent(&self, dpi: u32) -> (u32, u32) {
+        let (paper, width, height) = if self.custom_area {
+            (None, Some(self.width), Some(self.height))
+        } else if self.paper == PaperSize::Auto {
+            // Explicit zeros keep stale persisted pixel extents out of play.
+            (None, Some(0), Some(0))
         } else {
-            (self.width, self.height)
+            (Some(self.paper), None, None)
+        };
+        resolve_scan_extent(&self.config, paper, width, height, dpi)
+    }
+
+    /// Extent and resolution for one acquisition. Physical previews scan the
+    /// same area as the final scan at a reduced resolution.
+    pub(in crate::inbound::gui) fn scan_geometry(&self, preview: bool) -> (u32, u32, u32) {
+        let (width, height) = self.requested_extent(self.dpi);
+        if !preview {
+            return (width, height, self.dpi);
+        }
+        if self.device.starts_with("file:") {
+            // The file source fits its image inside this box.
+            return (320, 240, self.dpi);
+        }
+        if self.device == "mock" || self.device.starts_with("mock") {
+            return (width.min(320), height.min(240), self.dpi);
+        }
+        let dpi = self.dpi.clamp(MIN_SCAN_DPI, PREVIEW_DPI);
+        let (width, height) = self.requested_extent(dpi);
+        // Custom pixel extents are defined at the full resolution.
+        let scale = |pixels: u32| {
+            if pixels == 0 || !self.custom_area {
+                return pixels;
+            }
+            scale_pixels(pixels, dpi, self.dpi).max(1)
+        };
+        (scale(width), scale(height), dpi)
+    }
+
+    pub(in crate::inbound::gui) fn scan_area_summary(&self) -> String {
+        if self.custom_area {
+            return format!(
+                "Custom · {} × {} px at {} dpi",
+                self.width, self.height, self.dpi
+            );
+        }
+        match self.paper.to_pixels(self.dpi, self.dpi) {
+            Some((width, height)) => format!(
+                "{} · {} × {} px at {} dpi",
+                paper_label(self.paper),
+                width,
+                height,
+                self.dpi
+            ),
+            None => paper_label(self.paper).into(),
         }
     }
 
@@ -75,4 +136,25 @@ impl GuiState {
             })
             .transpose()
     }
+}
+
+/// Convert a pixel length measured at `from_dpi` to `to_dpi`, rounding.
+fn scale_pixels(pixels: u32, to_dpi: u32, from_dpi: u32) -> u32 {
+    let scaled = (u64::from(pixels) * u64::from(to_dpi) + u64::from(from_dpi) / 2)
+        / u64::from(from_dpi.max(1));
+    scaled.min(u64::from(u32::MAX)) as u32
+}
+
+fn scale_rect(
+    rect: crate::domain::image::Rect,
+    to_dpi: u32,
+    from_dpi: u32,
+) -> crate::domain::image::Rect {
+    let offset = |value: i32| scale_pixels(value.max(0) as u32, to_dpi, from_dpi) as i32;
+    crate::domain::image::Rect::new(
+        offset(rect.x),
+        offset(rect.y),
+        scale_pixels(rect.width, to_dpi, from_dpi).max(1),
+        scale_pixels(rect.height, to_dpi, from_dpi).max(1),
+    )
 }

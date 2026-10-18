@@ -15,6 +15,8 @@ pub struct SaneCapabilities {
     pub(super) source_option: bool,
     pub(super) mode_option: bool,
     pub(super) duplex_option: Option<String>,
+    pub(super) page_width_option: bool,
+    pub(super) page_height_option: bool,
     pub(super) resolution: Option<ResolutionConstraint>,
     pub(super) x_resolution: Option<ResolutionConstraint>,
     pub(super) y_resolution: Option<ResolutionConstraint>,
@@ -83,6 +85,8 @@ impl SaneCapabilities {
         !self.source_option
             && !self.mode_option
             && self.duplex_option.is_none()
+            && !self.page_width_option
+            && !self.page_height_option
             && self.resolution.is_none()
             && self.x_resolution.is_none()
             && self.y_resolution.is_none()
@@ -123,10 +127,21 @@ pub fn parse_scanimage_help(text: &str) -> SaneCapabilities {
 }
 
 fn parse_scanimage_option_line(capabilities: &mut SaneCapabilities, line: &str) {
+    // scanimage marks options that the current settings disable; setting one
+    // fails, so they are treated as not advertised.
+    if line.contains("[inactive]") {
+        return;
+    }
     parse_source_option(capabilities, line);
     parse_mode_option(capabilities, line);
     parse_duplex_option(capabilities, line);
+    parse_page_size_options(capabilities, line);
     parse_resolution_options(capabilities, line);
+}
+
+fn parse_page_size_options(capabilities: &mut SaneCapabilities, line: &str) {
+    capabilities.page_width_option |= option_line(line, "--page-width");
+    capabilities.page_height_option |= option_line(line, "--page-height");
 }
 
 fn parse_source_option(capabilities: &mut SaneCapabilities, line: &str) {
