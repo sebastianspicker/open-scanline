@@ -170,7 +170,11 @@ fn process_umask() -> u32 {
         // value is restored immediately.
         let previous = unsafe { libc::umask(0) };
         unsafe { libc::umask(previous) };
-        u32::from(previous)
+        // `mode_t` is `u16` on macOS and `u32` on Linux, so this conversion is
+        // a no-op only on some targets.
+        #[allow(clippy::useless_conversion)]
+        let mode = u32::from(previous);
+        mode
     })
 }
 
