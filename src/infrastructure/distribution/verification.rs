@@ -60,7 +60,7 @@ fn validate_binary_metadata(
     entry_name: &str,
     expected: &BinaryFingerprint,
 ) -> Result<()> {
-    if entry.name() != entry_name {
+    if !entry.name().is_ok_and(|name| name == entry_name) {
         return Err(ScanError::Other(
             "portable archive binary entry name is invalid".into(),
         ));
@@ -114,7 +114,7 @@ fn matching_entries(archive: &mut ZipArchive<File>, entry_name: &str) -> usize {
             archive
                 .by_index(index)
                 .ok()
-                .map(|entry| entry.name() == entry_name)
+                .map(|entry| entry.name().is_ok_and(|name| name == entry_name))
         })
         .filter(|matches| *matches)
         .count()
@@ -132,7 +132,7 @@ fn verify_embedded_regular_file(
             archive
                 .by_index(index)
                 .ok()
-                .map(|entry| entry.name() == entry_name)
+                .map(|entry| entry.name().is_ok_and(|name| name == entry_name))
         })
         .filter(|matches| *matches)
         .count();

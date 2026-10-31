@@ -408,7 +408,7 @@ The portable ZIP embeds this file verbatim. It is a source-metadata record, not 
 | `tract-transformers@0.23.4` | `MIT OR Apache-2.0` |
 | `transpose@0.2.3` | `MIT OR Apache-2.0` |
 | `ttf-parser@0.25.1` | `MIT OR Apache-2.0` |
-| `typed-path@0.12.3` | `MIT OR Apache-2.0` |
+| `typed-path@0.13.0` | `MIT OR Apache-2.0` |
 | `typeid@1.0.3` | `MIT OR Apache-2.0` |
 | `typenum@1.20.1` | `MIT OR Apache-2.0` |
 | `uds_windows@1.2.1` | `MIT` |
@@ -526,7 +526,7 @@ The portable ZIP embeds this file verbatim. It is a source-metadata record, not 
 | `zerotrie@0.2.4` | `Unicode-3.0` |
 | `zerovec@0.11.6` | `Unicode-3.0` |
 | `zerovec-derive@0.11.3` | `Unicode-3.0` |
-| `zip@8.6.0` | `MIT` |
+| `zip@9.2.0` | `MIT` |
 | `zlib-rs@0.6.7` | `Zlib` |
 | `zmij@1.0.23` | `MIT` |
 | `zopfli@0.8.3` | `Apache-2.0` |
@@ -68318,7 +68318,7 @@ THE SOFTWARE.
 
 ~~~~
 
-### typed-path@0.12.3: `LICENSE-APACHE`
+### typed-path@0.13.0: `LICENSE-APACHE`
 
 Declared license metadata: `MIT OR Apache-2.0`.
 
@@ -68501,7 +68501,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 ~~~~
 
-### typed-path@0.12.3: `LICENSE-MIT`
+### typed-path@0.13.0: `LICENSE-MIT`
 
 Declared license metadata: `MIT OR Apache-2.0`.
 
@@ -89875,7 +89875,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 ~~~~
 
-### zip@8.6.0: `LICENSE`
+### zip@9.2.0: `LICENSE`
 
 Declared license metadata: `MIT`.
 
