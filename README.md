@@ -7,6 +7,31 @@ and writes out images, searchable PDFs, and multipage TIFF or PDF — all on you
 own machine. It ships as a command-line tool with an optional desktop GUI, plus a
 public Rust library you can embed.
 
+<details>
+<summary>Status and limitations</summary>
+
+> [!NOTE]
+> Open Scanline is an independent experimental project for local scanning, image processing and
+> OCR. Developed independently alongside my main professional work. The application and Rust
+> library remain a work in progress and provide a foundation to review, adapt and test against
+> the scanners and document workflows you intend to support.
+>
+> **Disclaimer.** Mock-source checks do not establish compatibility with a physical scanner,
+> feeder, driver or operating system. Check captured pages, OCR and exported files before
+> relying on them, especially where omissions or recognition errors matter. Retain important
+> originals; you are responsible for device selection, output review and use.
+
+</details>
+
+```mermaid
+flowchart LR
+    Source["Scanner or image file"] --> Capture["Acquire pages"]
+    Capture --> Process["Review and process"]
+    Process --> Text["Optional local OCR"]
+    Process --> Files["Images or PDF"]
+    Text --> Files
+```
+
 No cloud service, no accounts, no telemetry.
 
 [![CI](https://github.com/sebastianspicker/open-scanline/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianspicker/open-scanline/actions/workflows/ci.yml)
@@ -156,6 +181,10 @@ The release executable is `target/release/open-scanline` on Linux and macOS, or
 `target/release/open-scanline.exe` on Windows. Use `--no-default-features` for a
 core-only build, or `--no-default-features --features ocrs,onnx` for a full
 headless build.
+
+Automatic build checks run for Dependabot-authored pull requests; other builds
+can be started manually. The dependency audit also runs on `main` pushes, pull
+requests and a weekly schedule. The workflow does not deploy or publish the app.
 
 ## Portable archive
 

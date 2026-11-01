@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 2"
 
 permissions:
   contents: read
@@ -13,6 +17,7 @@ concurrency:
 
 jobs:
   stable:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'dependabot[bot]'
     name: Stable forward compatibility
     runs-on: ubuntu-latest
     env:
@@ -51,6 +56,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'dependabot[bot]'
     name: Rust 1.91 build gate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
