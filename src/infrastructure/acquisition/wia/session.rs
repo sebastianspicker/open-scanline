@@ -1,6 +1,4 @@
-use super::command::{
-    feeder_exhausted, numbered_page_outputs, wia_transfer_command, wia_transfer_pages_command,
-};
+use super::command::{feeder_exhausted, wia_transfer_command, wia_transfer_pages_command};
 use super::probing::SystemCommandRunner;
 use crate::domain::acquisition::reject_single_page_duplex;
 use crate::domain::acquisition::{
@@ -9,14 +7,15 @@ use crate::domain::acquisition::{
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::batch::batch_timeout;
+use crate::infrastructure::acquisition::command_backend::numbered_page_outputs;
 use crate::infrastructure::acquisition::{
-    opens_simulated_session, simulate_backends, DeviceMaintenanceCapabilities, DeviceSession,
-    ScanPagesResult,
+    opens_simulated_session, simulate_backends, DeviceInfo, DeviceMaintenanceCapabilities,
+    DeviceSession, ScanPagesResult,
 };
 use crate::infrastructure::media::NativeImageDecoder;
 use crate::infrastructure::runtime::{
-    artifact_quota_for_request, validate_artifact_quota, CommandOutput, CommandRunner,
-    CommandSession, ImageDecoder, TemporaryOutput,
+    artifact_quota_for_request, validate_artifact_quota, ArtifactWatch, CommandOutput,
+    CommandRunner, CommandSession, ImageDecoder, TemporaryOutput,
 };
 use crate::operation::CancellationToken;
 use std::sync::{Arc, Mutex};
@@ -102,7 +101,8 @@ impl WiaDeviceSession {
             Err(error @ ScanError::Cancelled(_)) => return Err(error),
             // A timeout or quota stop still leaves the finished pages on disk.
             Err(error) => {
-                let mut paths = numbered_page_outputs(output.directory()).unwrap_or_default();
+                let mut paths =
+                    numbered_page_outputs(output.directory(), "png").unwrap_or_default();
                 paths.truncate(max_pages as usize);
                 self.salvage_materialized_pages(paths, emit);
                 return Err(error);
@@ -123,7 +123,7 @@ impl WiaDeviceSession {
         emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
     ) -> Result<ScanPagesResult> {
         validate_artifact_quota(output.directory(), artifact_quota)?;
-        let mut paths = numbered_page_outputs(output.directory())?;
+        let mut paths = numbered_page_outputs(output.directory(), "png")?;
         if let Err(failure) = validate_batch_output(&self.session, command_output) {
             if matches!(failure, ScanError::Cancelled(_)) {
                 return Err(failure);
@@ -163,13 +163,15 @@ impl WiaDeviceSession {
         artifact_quota: crate::infrastructure::runtime::ArtifactQuota,
     ) -> Result<CommandOutput> {
         let spec = wia_transfer_pages_command(&self.raw_id, request, output.directory(), max_pages);
-        self.runner.run_with_cancellation_and_artifact_quota(
+        self.runner.run(
             &spec,
             batch_timeout(max_pages),
             self.session.cancelled(),
             self.session.cancellation_token().as_ref(),
-            output.directory(),
-            artifact_quota,
+            Some(ArtifactWatch {
+                directory: output.directory(),
+                quota: artifact_quota,
+            }),
         )
     }
 
@@ -413,7 +415,14 @@ pub fn open_with_cancellation(
     if opens_simulated_session(id, "wia:sim", simulate_backends()) {
         return Ok(WiaDeviceSession::new(id.into(), "sim".into(), true));
     }
-    let listed = super::probing::list_devices_with_cancellation(cancellation);
+    let listed = list_for_open(
+        id,
+        || super::probing::list_devices_with_cancellation(cancellation),
+        // With a token the first listing was already uncached.
+        cancellation
+            .is_none()
+            .then_some(super::probing::list_devices_refreshing_cache),
+    );
     if !listed.iter().any(|d| d.id == id) {
         return Err(ScanError::DeviceNotFound(format!(
             "unknown WIA device: {id}"
@@ -423,13 +432,29 @@ pub fn open_with_cancellation(
     Ok(WiaDeviceSession::new(id.into(), raw, false))
 }
 
+/// Devices to check `id` against. The first listing may be a cached one that
+/// predates the scanner being switched on, so a miss lists once more.
+fn list_for_open(
+    id: &str,
+    first: impl FnOnce() -> Vec<DeviceInfo>,
+    retry: Option<impl FnOnce() -> Vec<DeviceInfo>>,
+) -> Vec<DeviceInfo> {
+    let listed = first();
+    match retry {
+        Some(retry) if !listed.iter().any(|device| device.id == id) => retry(),
+        _ => listed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::WiaDeviceSession;
+    use super::{list_for_open, WiaDeviceSession};
     use crate::domain::image::{ImageBuffer, PixelFormat};
     use crate::error::{Result, ScanError};
+    use crate::infrastructure::acquisition::DeviceInfo;
     use crate::infrastructure::runtime::{
-        ArtifactQuota, CommandOutput, CommandRunner, CommandSpec, ImageDecoder, TemporaryOutput,
+        ArtifactQuota, ArtifactWatch, CommandOutput, CommandRunner, CommandSpec, ImageDecoder,
+        TemporaryOutput,
     };
     use crate::operation::CancellationToken;
     use std::path::Path;
@@ -439,28 +464,13 @@ mod tests {
     struct UnusedRunner;
 
     impl CommandRunner for UnusedRunner {
-        fn run(&self, _: &CommandSpec, _: Duration, _: &Mutex<bool>) -> Result<CommandOutput> {
-            unreachable!("page emission does not run commands")
-        }
-
-        fn run_with_cancellation(
+        fn run(
             &self,
             _: &CommandSpec,
             _: Duration,
             _: &Mutex<bool>,
             _: Option<&CancellationToken>,
-        ) -> Result<CommandOutput> {
-            unreachable!("page emission does not run commands")
-        }
-
-        fn run_with_cancellation_and_artifact_quota(
-            &self,
-            _: &CommandSpec,
-            _: Duration,
-            _: &Mutex<bool>,
-            _: Option<&CancellationToken>,
-            _: &Path,
-            _: ArtifactQuota,
+            _: Option<ArtifactWatch<'_>>,
         ) -> Result<CommandOutput> {
             unreachable!("page emission does not run commands")
         }
@@ -538,5 +548,21 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result.emitted, 2);
+    }
+
+    #[test]
+    fn a_missing_device_is_looked_up_again_uncached() {
+        let device = |id: &str| DeviceInfo::new(id, "scanner", "wia");
+        let found = list_for_open("wia:a", Vec::new, Some(|| vec![device("wia:a")]));
+        assert_eq!(found.len(), 1);
+        // A hit, or a listing that was already uncached, does not list again.
+        let hit = list_for_open(
+            "wia:a",
+            || vec![device("wia:a")],
+            Some(|| panic!("must not list again")),
+        );
+        assert_eq!(hit.len(), 1);
+        let none = list_for_open("wia:a", Vec::new, None::<fn() -> Vec<DeviceInfo>>);
+        assert!(none.is_empty());
     }
 }

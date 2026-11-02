@@ -6,7 +6,7 @@ use crate::infrastructure::runtime::{
     TemporaryOutput,
 };
 use crate::operation::CancellationToken;
-use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgb, Rgba};
+use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgba};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -14,6 +14,7 @@ use std::time::Duration;
 
 mod bmp;
 mod jpeg;
+mod png_writer;
 mod temp_output;
 use jpeg::write_jpeg;
 pub(super) use temp_output::{create_output_temp, OutputTemp};
@@ -141,19 +142,42 @@ pub fn load_image_with_limits(
     dynamic_to_buffer(reader.decode()?)
 }
 
+/// Grey sources (any depth, with or without alpha) become Gray8, everything
+/// else Rgb8. Transparent pixels are composited onto white.
 fn dynamic_to_buffer(dyn_img: DynamicImage) -> Result<ImageBuffer> {
-    match dyn_img {
-        DynamicImage::ImageLuma8(g) => {
-            let (w, h) = g.dimensions();
-            ImageBuffer::new(w, h, PixelFormat::Gray8, g.into_raw())
+    let (w, h) = (dyn_img.width(), dyn_img.height());
+    let color = dyn_img.color();
+    match (color.has_color(), color.has_alpha()) {
+        (false, false) => {
+            let data = dyn_img.into_luma8().into_raw();
+            ImageBuffer::new(w, h, PixelFormat::Gray8, data)
         }
-        // Prefer packed Rgb8 for all non-luma sources (incl. RGBA).
-        other => {
-            let rgb = other.to_rgb8();
-            let (w, h) = rgb.dimensions();
-            ImageBuffer::new(w, h, PixelFormat::Rgb8, rgb.into_raw())
+        (false, true) => {
+            let la = dyn_img.into_luma_alpha8().into_raw();
+            let data = la.chunks_exact(2).map(|p| over_white(p[0], p[1])).collect();
+            ImageBuffer::new(w, h, PixelFormat::Gray8, data)
+        }
+        (true, false) => ImageBuffer::new(w, h, PixelFormat::Rgb8, dyn_img.into_rgb8().into_raw()),
+        (true, true) => {
+            let rgba = dyn_img.into_rgba8().into_raw();
+            let data = rgba
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    [
+                        over_white(p[0], p[3]),
+                        over_white(p[1], p[3]),
+                        over_white(p[2], p[3]),
+                    ]
+                })
+                .collect();
+            ImageBuffer::new(w, h, PixelFormat::Rgb8, data)
         }
     }
+}
+
+fn over_white(channel: u8, alpha: u8) -> u8 {
+    let (channel, alpha) = (u16::from(channel), u16::from(alpha));
+    ((channel * alpha + 255 * (255 - alpha) + 127) / 255) as u8
 }
 
 pub fn save_image(
@@ -173,7 +197,6 @@ pub fn save_image_with_cancellation(
     cancellation: Option<&CancellationToken>,
 ) -> Result<PathBuf> {
     let path = path.as_ref();
-    create_output_parent(path)?;
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -201,7 +224,7 @@ fn save_by_extension(
     if ext == "jxl" {
         return save_jpeg_xl_with_cancellation(path, image, quality.unwrap_or(90), cancellation);
     }
-    save_standard_image_output(path, image, quality, cancellation, ext)
+    save_standard_image_output(path, image, dpi, quality, cancellation, ext)
 }
 
 fn save_pdf_image(
@@ -213,9 +236,10 @@ fn save_pdf_image(
     save_pdf_with_options_and_cancellation(
         path,
         std::slice::from_ref(image),
-        &PdfOptions {
-            dpi: dpi.unwrap_or(150),
-            ..PdfOptions::default()
+        &{
+            let mut options = PdfOptions::default();
+            options.dpi = dpi.unwrap_or(150);
+            options
         },
         cancellation,
     )
@@ -224,13 +248,14 @@ fn save_pdf_image(
 fn save_standard_image_output(
     path: &Path,
     image: &ImageBuffer,
+    dpi: Option<u32>,
     quality: Option<u8>,
     cancellation: Option<&CancellationToken>,
     ext: &str,
 ) -> Result<PathBuf> {
     validate_packed_buffer(image)?;
     let temp = create_output_temp(path)?;
-    write_standard_image(image, ext, temp.path(), quality)?;
+    write_standard_image(image, ext, temp.path(), quality, dpi)?;
     validate_output_container(temp.path(), expected_container(ext))?;
     check_native_publication_cancellation(cancellation)?;
     temp.publish()?;
@@ -242,24 +267,27 @@ fn write_standard_image(
     extension: &str,
     output: &Path,
     quality: Option<u8>,
+    dpi: Option<u32>,
 ) -> Result<()> {
     validate_packed_buffer(image)?;
-    if matches!(extension, "jpg" | "jpeg") {
-        return write_jpeg(image, output, quality);
-    }
-    if extension == "bmp" {
-        return bmp::write_bmp(image, output);
+    match extension {
+        "jpg" | "jpeg" => return write_jpeg(image, output, quality, dpi),
+        "bmp" => return bmp::write_bmp(image, output),
+        "png" => return png_writer::write_png(image, output, dpi),
+        "tif" | "tiff" => return super::tiff::write_single_tiff(image, output, dpi),
+        _ => {}
     }
     let format = standard_image_format(extension)?;
-    image::save_buffer_with_format(
-        output,
-        &image.data,
-        image.width,
-        image.height,
-        image_color_type(image.pixel_format),
-        format,
-    )
-    .map_err(|error| ScanError::Image(error.to_string()))
+    // GifEncoder accepts only Rgb8/Rgba8, so grey pages are expanded.
+    let rgb;
+    let (data, color) = if format == ImageFormat::Gif && image.pixel_format == PixelFormat::Gray8 {
+        rgb = to_rgb_bytes(image)?;
+        (&rgb, ColorType::Rgb8)
+    } else {
+        (&image.data, image_color_type(image.pixel_format))
+    };
+    image::save_buffer_with_format(output, data, image.width, image.height, color, format)
+        .map_err(|error| ScanError::Image(error.to_string()))
 }
 
 pub(super) fn validate_packed_buffer(image: &ImageBuffer) -> Result<()> {
@@ -287,7 +315,6 @@ fn image_color_type(format: PixelFormat) -> ColorType {
 
 fn standard_image_format(extension: &str) -> Result<ImageFormat> {
     match extension {
-        "tif" | "tiff" => Ok(ImageFormat::Tiff),
         "bmp" => Ok(ImageFormat::Bmp),
         "gif" => Ok(ImageFormat::Gif),
         "webp" => Ok(ImageFormat::WebP),
@@ -329,7 +356,6 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
     program: &Path,
     cancellation: Option<&CancellationToken>,
 ) -> Result<PathBuf> {
-    create_output_parent(path)?;
     let artifacts = TemporaryOutput::new("jpeg-xl", "jxl")?;
     let input_path = artifacts.directory().join("input.png");
     let encoded_path = artifacts.path();
@@ -349,7 +375,7 @@ pub(super) fn save_jpeg_xl_with_program_and_cancellation(
 }
 
 fn write_jxl_input(image: &ImageBuffer, input_path: &Path) -> Result<u64> {
-    write_standard_image(image, "png", input_path, None)?;
+    write_standard_image(image, "png", input_path, None, None)?;
     std::fs::metadata(input_path)?
         .len()
         .checked_add(MAX_IMAGE_BYTES as u64)
@@ -469,31 +495,6 @@ pub(super) fn validate_output_container(path: &Path, expected: &str) -> Result<(
     Ok(())
 }
 
-pub(super) fn buffer_to_dynamic(image: &ImageBuffer) -> Result<DynamicImage> {
-    match image.pixel_format {
-        PixelFormat::Gray8 => {
-            let buf = ImgBuf::<image::Luma<u8>, _>::from_raw(
-                image.width,
-                image.height,
-                image.data.clone(),
-            )
-            .ok_or_else(|| ScanError::Image("gray buffer".into()))?;
-            Ok(DynamicImage::ImageLuma8(buf))
-        }
-        PixelFormat::Rgb8 => {
-            let buf = ImgBuf::<Rgb<u8>, _>::from_raw(image.width, image.height, image.data.clone())
-                .ok_or_else(|| ScanError::Image("rgb buffer".into()))?;
-            Ok(DynamicImage::ImageRgb8(buf))
-        }
-        PixelFormat::Rgba8 => {
-            let buf =
-                ImgBuf::<Rgba<u8>, _>::from_raw(image.width, image.height, image.data.clone())
-                    .ok_or_else(|| ScanError::Image("rgba buffer".into()))?;
-            Ok(DynamicImage::ImageRgba8(buf))
-        }
-    }
-}
-
 pub fn convert_image(
     inp: impl AsRef<Path>,
     out: impl AsRef<Path>,
@@ -521,4 +522,97 @@ pub fn to_rgb_bytes(image: &ImageBuffer) -> Result<Vec<u8>> {
         }
     };
     Ok(converted.into_raw())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::runtime::TemporaryOutput;
+
+    fn grey(w: u32, h: u32) -> ImageBuffer {
+        ImageBuffer::new(w, h, PixelFormat::Gray8, vec![90; (w * h) as usize]).unwrap()
+    }
+
+    fn rgb(w: u32, h: u32) -> ImageBuffer {
+        ImageBuffer::new(w, h, PixelFormat::Rgb8, vec![90; (w * h * 3) as usize]).unwrap()
+    }
+
+    #[test]
+    fn dpi_is_written_to_png_jpeg_and_tiff() {
+        let dir = TemporaryOutput::new("dpi-test", "tmp").unwrap();
+        let image = rgb(10, 10);
+
+        let png_path = dir.directory().join("a.png");
+        save_image(&png_path, &image, Some(300), None).unwrap();
+        let reader = ::png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(&png_path).unwrap(),
+        ))
+        .read_info()
+        .unwrap();
+        let dims = reader.info().pixel_dims.expect("pHYs chunk");
+        assert_eq!((dims.xppu, dims.yppu), (11811, 11811));
+        assert_eq!(dims.unit, ::png::Unit::Meter);
+
+        let jpeg_path = dir.directory().join("a.jpg");
+        save_image(&jpeg_path, &image, Some(300), None).unwrap();
+        let jpeg = std::fs::read(&jpeg_path).unwrap();
+        assert_eq!(&jpeg[6..11], b"JFIF\0");
+        assert_eq!(jpeg[13], 1, "density unit is dots per inch");
+        assert_eq!(u16::from_be_bytes([jpeg[14], jpeg[15]]), 300);
+        assert_eq!(u16::from_be_bytes([jpeg[16], jpeg[17]]), 300);
+
+        let tiff_path = dir.directory().join("a.tif");
+        save_image(&tiff_path, &image, Some(300), None).unwrap();
+        let mut decoder =
+            tiff::decoder::Decoder::new(std::fs::File::open(&tiff_path).unwrap()).unwrap();
+        for tag in [tiff::tags::Tag::XResolution, tiff::tags::Tag::YResolution] {
+            assert_eq!(
+                decoder.get_tag(tag).unwrap(),
+                tiff::decoder::ifd::Value::Rational(300, 1)
+            );
+        }
+        assert_eq!(decoder.colortype().unwrap(), tiff::ColorType::RGB(8));
+    }
+
+    #[test]
+    fn grey_pages_save_as_gif_and_jpeg() {
+        let dir = TemporaryOutput::new("grey-test", "tmp").unwrap();
+        let gif = dir.directory().join("g.gif");
+        save_image(&gif, &grey(6, 4), None, None).unwrap();
+        assert_eq!(load_image(&gif).unwrap().width, 6);
+
+        let jpeg = dir.directory().join("g.jpg");
+        save_image(&jpeg, &grey(6, 4), None, None).unwrap();
+        assert_eq!(load_image(&jpeg).unwrap().pixel_format, PixelFormat::Gray8);
+
+        // The JPEG encoder takes no alpha; Rgba8 is saved as RGB.
+        let rgba = ImageBuffer::new(1, 1, PixelFormat::Rgba8, vec![10, 20, 30, 128]).unwrap();
+        let jpeg = dir.directory().join("rgba.jpg");
+        save_image(&jpeg, &rgba, None, None).unwrap();
+        assert_eq!(load_image(&jpeg).unwrap().pixel_format, PixelFormat::Rgb8);
+
+        // The JPEG XL input is written to a path that does not exist yet.
+        let png = dir.directory().join("new.png");
+        png_writer::write_png(&grey(2, 2), &png, None).unwrap();
+        assert_eq!(load_image(&png).unwrap().width, 2);
+    }
+
+    #[test]
+    fn transparent_png_loads_as_white() {
+        let dir = TemporaryOutput::new("alpha-test", "tmp").unwrap();
+        let path = dir.directory().join("t.png");
+        let rgba =
+            ImageBuffer::new(1, 2, PixelFormat::Rgba8, vec![0, 0, 0, 0, 10, 20, 30, 255]).unwrap();
+        save_image(&path, &rgba, None, None).unwrap();
+        let loaded = load_image(&path).unwrap();
+        assert_eq!(loaded.pixel_format, PixelFormat::Rgb8);
+        assert_eq!(loaded.data, vec![255, 255, 255, 10, 20, 30]);
+
+        let la = image::GrayAlphaImage::from_raw(1, 1, vec![0, 0]).unwrap();
+        let path = dir.directory().join("la.png");
+        la.save(&path).unwrap();
+        let loaded = load_image(&path).unwrap();
+        assert_eq!(loaded.pixel_format, PixelFormat::Gray8);
+        assert_eq!(loaded.data, vec![255]);
+    }
 }

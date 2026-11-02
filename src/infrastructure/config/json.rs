@@ -159,7 +159,35 @@ fn validate_config_processing(config: &AppConfig) -> Result<()> {
     if let Some(points) = config.curves.as_deref() {
         parse_curve_points(&format_curve_points(Some(points)))?;
     }
+    validate_config_corrections(config)?;
     validate_crop(config.crop)
+}
+
+fn validate_config_corrections(config: &AppConfig) -> Result<()> {
+    if config.rotate % 90 != 0 {
+        return Err(ScanError::Invalid(
+            "config rotate must be a multiple of 90".into(),
+        ));
+    }
+    if !config.levels_gamma.is_finite() || config.levels_gamma <= 0.0 {
+        return Err(ScanError::Invalid(
+            "config levels_gamma must be a finite number greater than 0".into(),
+        ));
+    }
+    if !config.deskew_angle.is_finite() || config.deskew_angle.abs() > 45.0 {
+        return Err(ScanError::Invalid(
+            "config deskew_angle must be from -45 to 45 degrees".into(),
+        ));
+    }
+    if let Some(film) = config.film_type.as_deref().map(str::trim) {
+        let disabled = ["", "off", "none"]
+            .iter()
+            .any(|value| film.eq_ignore_ascii_case(value));
+        if !disabled {
+            crate::domain::processing::get_film_profile(film)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_crop(crop: Option<[i32; 4]>) -> Result<()> {
@@ -301,6 +329,25 @@ mod tests {
             (explicit.default_width, explicit.default_height),
             (320, 240)
         );
+    }
+
+    #[test]
+    fn config_rejects_bad_corrections_and_film_type() {
+        for bad in [
+            json!({"rotate": 45}),
+            json!({"levels_gamma": 0.0}),
+            json!({"levels_gamma": -1.0}),
+            json!({"deskew_angle": 90.0}),
+            json!({"film_type": "kodak_gold200"}),
+        ] {
+            assert!(config_from_value(bad.clone()).is_err(), "{bad}");
+        }
+        assert!(config_from_value(json!({"rotate": -270, "film_type": "OFF"})).is_ok());
+        assert!(config_from_value(json!({"film_type": ""})).is_ok());
+        let id = crate::domain::processing::list_film_profiles()[0]
+            .id
+            .clone();
+        assert!(config_from_value(json!({ "film_type": id })).is_ok());
     }
 
     #[test]

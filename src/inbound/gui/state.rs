@@ -122,6 +122,8 @@ pub(super) struct GuiState {
     pub(super) open_path_input: String,
     pub(super) cancel_requested: Arc<AtomicBool>,
     pub(super) scanning: bool,
+    /// Maintenance action requested by the UI; the app turns it into a background job.
+    pub(super) device_job: Option<super::actions::DeviceJob>,
 }
 
 macro_rules! build_gui_state {
@@ -218,6 +220,7 @@ macro_rules! build_gui_state {
             open_path_input: String::new(),
             cancel_requested: Arc::new(AtomicBool::new(false)),
             scanning: false,
+            device_job: None,
         }
     };
 }
@@ -228,6 +231,7 @@ mod maintenance;
 mod multipage;
 mod paths;
 mod pipeline;
+pub(super) use pipeline::checked_crop;
 
 fn media_for_scan_mode(mode: ScanMode) -> &'static str {
     match mode {

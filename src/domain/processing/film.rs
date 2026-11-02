@@ -171,10 +171,12 @@ fn remove_orange_mask(
     }
 
     let (red_gain, green_gain, blue_gain) = orange_mask_gains(mask);
+    let tables = [red_gain, green_gain, blue_gain]
+        .map(|gain| std::array::from_fn::<u8, 256, _>(|v| clamp_u8(v as f64 * gain)));
     for pixel in data.chunks_exact_mut(bpp) {
-        pixel[0] = clamp_u8(pixel[0] as f64 * red_gain);
-        pixel[1] = clamp_u8(pixel[1] as f64 * green_gain);
-        pixel[2] = clamp_u8(pixel[2] as f64 * blue_gain);
+        for (channel, table) in pixel.iter_mut().zip(&tables) {
+            *channel = table[*channel as usize];
+        }
     }
 }
 
@@ -188,13 +190,20 @@ fn orange_mask_gains((red, green, blue): (f64, f64, f64)) -> (f64, f64, f64) {
 }
 
 fn apply_tone_curve(data: &mut [u8], bpp: usize, contrast: f64, gamma: f64) {
-    let gamma = if gamma <= 0.0 { 1.0 } else { gamma };
+    let table = tone_curve_table(contrast, gamma);
     for pixel in data.chunks_exact_mut(bpp) {
         for channel in &mut pixel[..bpp.min(3)] {
-            let tone = (*channel as f64 / 255.0 - 0.5) * contrast + 0.5;
-            *channel = clamp_u8(tone.clamp(0.0, 1.0).powf(1.0 / gamma) * 255.0);
+            *channel = table[*channel as usize];
         }
     }
+}
+
+fn tone_curve_table(contrast: f64, gamma: f64) -> [u8; 256] {
+    let gamma = if gamma <= 0.0 { 1.0 } else { gamma };
+    std::array::from_fn(|value| {
+        let tone = (value as f64 / 255.0 - 0.5) * contrast + 0.5;
+        clamp_u8(tone.clamp(0.0, 1.0).powf(1.0 / gamma) * 255.0)
+    })
 }
 
 fn desaturate_bw(data: &mut [u8], bpp: usize, kind: &str) {
@@ -208,5 +217,35 @@ fn desaturate_bw(data: &mut [u8], bpp: usize, kind: &str) {
         pixel[0] = luma;
         pixel[1] = luma;
         pixel[2] = luma;
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    #[test]
+    fn tone_curve_table_matches_the_per_sample_formula() {
+        for (contrast, gamma) in [(1.0, 1.0), (1.3, 0.8), (0.7, 2.2), (1.1, 0.0)] {
+            let table = tone_curve_table(contrast, gamma);
+            let g = if gamma <= 0.0 { 1.0 } else { gamma };
+            for value in 0..=255u8 {
+                let tone = (value as f64 / 255.0 - 0.5) * contrast + 0.5;
+                let old = clamp_u8(tone.clamp(0.0, 1.0).powf(1.0 / g) * 255.0);
+                assert_eq!(table[value as usize], old);
+            }
+        }
+    }
+
+    #[test]
+    fn orange_mask_table_matches_the_per_sample_formula() {
+        let mask = (0.9, 0.6, 0.4);
+        let (red_gain, ..) = orange_mask_gains(mask);
+        let mut data: Vec<u8> = (0..=255u8).flat_map(|v| [v, v, v, 9]).collect();
+        remove_orange_mask(&mut data, 4, PixelFormat::Rgba8, Some(mask));
+        for (value, pixel) in data.chunks(4).enumerate() {
+            assert_eq!(pixel[0], clamp_u8(value as f64 * red_gain));
+            assert_eq!(pixel[3], 9);
+        }
     }
 }

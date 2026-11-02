@@ -256,6 +256,13 @@ pub(crate) fn subnet_candidates(value: &str, cap: usize) -> Vec<Endpoint> {
         .collect()
 }
 
+/// Keep the first of each endpoint, so one scanner found twice (a configured
+/// host and mDNS) is probed once and uses one slot of the cap.
+fn dedup_endpoints(endpoints: &mut Vec<Endpoint>) {
+    let mut seen = std::collections::HashSet::new();
+    endpoints.retain(|endpoint| seen.insert(endpoint.clone()));
+}
+
 pub(crate) fn discover_devices_locked(max_hosts: usize) -> Vec<DeviceInfo> {
     discover_devices_locked_with_cancellation(max_hosts, None)
 }
@@ -279,7 +286,9 @@ pub(crate) fn discover_devices_locked_with_cancellation(
     if crate::operation::is_cancelled(cancellation) {
         return Vec::new();
     }
+    dedup_endpoints(&mut endpoints);
     endpoints.extend(subnet_endpoints(cap.saturating_sub(endpoints.len())));
+    dedup_endpoints(&mut endpoints);
     endpoints.truncate(cap);
     crate::debug_log::debug_log!("escl", "probing {} candidate endpoint(s)", endpoints.len());
     let mut devices =
@@ -380,4 +389,32 @@ pub fn list_escl_devices_safe_with_cancellation(
     }
     std::panic::catch_unwind(|| discover_devices_locked_with_cancellation(32, Some(cancellation)))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint(host: &str, port: u16) -> Endpoint {
+        Endpoint {
+            host: host.into(),
+            port,
+            secure: false,
+        }
+    }
+
+    #[test]
+    fn duplicate_endpoints_are_dropped_keeping_the_first() {
+        let mut endpoints = vec![
+            endpoint("a", 80),
+            endpoint("b", 80),
+            endpoint("a", 80),
+            endpoint("a", 443),
+        ];
+        dedup_endpoints(&mut endpoints);
+        assert_eq!(
+            endpoints,
+            vec![endpoint("a", 80), endpoint("b", 80), endpoint("a", 443)]
+        );
+    }
 }

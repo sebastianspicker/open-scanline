@@ -70,60 +70,50 @@ pub fn sharpen(image: &ImageBuffer, amount: f64) -> Result<ImageBuffer> {
     ImageBuffer::new(image.width, image.height, image.pixel_format, out)
 }
 
-/// Median filter over radius (box neighborhood).
+/// Median filter over radius (box neighborhood, edges replicated).
+///
+/// Slides a 256-bin histogram along each row, so the cost per sample no
+/// longer depends on sorting the whole (2r+1)^2 window.
 pub fn median_filter(image: &ImageBuffer, radius: i32) -> Result<ImageBuffer> {
     let r = radius.max(1);
     let bpp = image.bpp();
     let w = image.width as i32;
     let h = image.height as i32;
     let src = &image.data;
-    let context = MedianContext {
-        data: src,
-        width: w,
-        height: h,
-        bpp,
-        radius: r,
+    let sample = |x: i32, y: i32, ch: usize| -> usize {
+        let xx = x.clamp(0, w - 1) as usize;
+        let yy = y.clamp(0, h - 1) as usize;
+        src[(yy * w as usize + xx) * bpp + ch] as usize
     };
+    // Window holds n samples; the median is the sample at sorted index n / 2.
+    let target = ((2 * r + 1) * (2 * r + 1)) as u32 / 2;
     let mut out = vec![0u8; src.len()];
-    let mut vals = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
-
+    let mut hist = [0u32; 256];
     for y in 0..h {
-        for x in 0..w {
-            for ch in 0..bpp {
-                out[(y as usize * w as usize + x as usize) * bpp + ch] =
-                    context.at(x, y, ch, &mut vals);
+        for ch in 0..bpp {
+            hist.fill(0);
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    hist[sample(dx, y + dy, ch)] += 1;
+                }
+            }
+            for x in 0..w {
+                if x > 0 {
+                    for dy in -r..=r {
+                        hist[sample(x - 1 - r, y + dy, ch)] -= 1;
+                        hist[sample(x + r, y + dy, ch)] += 1;
+                    }
+                }
+                let mut seen = 0;
+                let median = hist.iter().position(|&count| {
+                    seen += count;
+                    seen > target
+                });
+                out[(y as usize * w as usize + x as usize) * bpp + ch] = median.unwrap_or(0) as u8;
             }
         }
     }
     ImageBuffer::new(image.width, image.height, image.pixel_format, out)
-}
-
-struct MedianContext<'a> {
-    data: &'a [u8],
-    width: i32,
-    height: i32,
-    bpp: usize,
-    radius: i32,
-}
-
-impl MedianContext<'_> {
-    fn at(&self, x: i32, y: i32, channel: usize, vals: &mut Vec<u8>) -> u8 {
-        vals.clear();
-        for dy in -self.radius..=self.radius {
-            for dx in -self.radius..=self.radius {
-                let xx = (x + dx).clamp(0, self.width - 1) as usize;
-                let yy = (y + dy).clamp(0, self.height - 1) as usize;
-                vals.push(self.data[(yy * self.width as usize + xx) * self.bpp + channel]);
-            }
-        }
-        let middle = vals.len() / 2;
-        if vals.len() >= 49 {
-            *vals.select_nth_unstable(middle).1
-        } else {
-            vals.sort_unstable();
-            vals[middle]
-        }
-    }
 }
 
 /// Separable box blur.
@@ -386,10 +376,16 @@ fn brighten_corner(out: &mut [u8], width: i32, height: i32, bpp: usize, cx: i32,
 }
 
 fn brighten_pixel(out: &mut [u8], index: usize, bpp: usize) {
-    for channel in 0..bpp.min(3) {
-        if out[index + channel] < 40 {
-            out[index + channel] = 245;
-        }
+    let luma = if bpp >= 3 {
+        (77 * u32::from(out[index])
+            + 150 * u32::from(out[index + 1])
+            + 29 * u32::from(out[index + 2]))
+            >> 8
+    } else {
+        u32::from(out[index])
+    };
+    if luma < 40 {
+        out[index..index + bpp.min(3)].fill(245);
     }
 }
 
@@ -405,4 +401,106 @@ pub fn colorize(image: &ImageBuffer, mode: Option<&str>) -> Result<ImageBuffer> 
         PixelFormat::Rgb8,
         color::colorized(image, &mode),
     )
+}
+
+#[cfg(test)]
+mod median_and_hole_punch_tests {
+    use super::*;
+    use crate::domain::image::PixelFormat;
+
+    /// Median filter over radius (box neighborhood).
+    fn reference_median(image: &ImageBuffer, radius: i32) -> Result<ImageBuffer> {
+        let r = radius.max(1);
+        let bpp = image.bpp();
+        let w = image.width as i32;
+        let h = image.height as i32;
+        let src = &image.data;
+        let context = MedianContext {
+            data: src,
+            width: w,
+            height: h,
+            bpp,
+            radius: r,
+        };
+        let mut out = vec![0u8; src.len()];
+        let mut vals = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
+
+        for y in 0..h {
+            for x in 0..w {
+                for ch in 0..bpp {
+                    out[(y as usize * w as usize + x as usize) * bpp + ch] =
+                        context.at(x, y, ch, &mut vals);
+                }
+            }
+        }
+        ImageBuffer::new(image.width, image.height, image.pixel_format, out)
+    }
+
+    struct MedianContext<'a> {
+        data: &'a [u8],
+        width: i32,
+        height: i32,
+        bpp: usize,
+        radius: i32,
+    }
+
+    impl MedianContext<'_> {
+        fn at(&self, x: i32, y: i32, channel: usize, vals: &mut Vec<u8>) -> u8 {
+            vals.clear();
+            for dy in -self.radius..=self.radius {
+                for dx in -self.radius..=self.radius {
+                    let xx = (x + dx).clamp(0, self.width - 1) as usize;
+                    let yy = (y + dy).clamp(0, self.height - 1) as usize;
+                    vals.push(self.data[(yy * self.width as usize + xx) * self.bpp + channel]);
+                }
+            }
+            let middle = vals.len() / 2;
+            if vals.len() >= 49 {
+                *vals.select_nth_unstable(middle).1
+            } else {
+                vals.sort_unstable();
+                vals[middle]
+            }
+        }
+    }
+
+    fn pseudo_random_image(width: u32, height: u32, format: PixelFormat) -> ImageBuffer {
+        let len = width as usize * height as usize * format.bpp();
+        let mut state = 12345u32;
+        let data = (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 24) as u8
+            })
+            .collect();
+        ImageBuffer::new(width, height, format, data).unwrap()
+    }
+
+    #[test]
+    fn histogram_median_matches_the_sorting_median() {
+        for format in [PixelFormat::Rgb8, PixelFormat::Gray8] {
+            for (w, h) in [(13, 11), (2, 3), (1, 5)] {
+                let image = pseudo_random_image(w, h, format);
+                for r in 1..=3 {
+                    assert_eq!(
+                        median_filter(&image, r).unwrap().data,
+                        reference_median(&image, r).unwrap().data,
+                        "{w}x{h} {format:?} r={r}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hole_punch_only_whitens_dark_pixels() {
+        let (w, h) = (50u32, 50u32);
+        let mut data = vec![128u8; (w * h * 3) as usize];
+        data[..3].copy_from_slice(&[200, 10, 10]);
+        data[3..6].copy_from_slice(&[10, 10, 10]);
+        let image = ImageBuffer::new(w, h, PixelFormat::Rgb8, data).unwrap();
+        let out = hole_punch_removal(&image).unwrap();
+        assert_eq!(out.data[..3], [200, 10, 10]);
+        assert_eq!(out.data[3..6], [245, 245, 245]);
+    }
 }

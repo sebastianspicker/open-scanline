@@ -1,6 +1,7 @@
 //! Workspace building blocks. Each one draws from the Platen tokens only.
 
 use super::theme::{self, color, size, space};
+use super::tr;
 use egui::{RichText, Stroke};
 
 /// Status readout above the title, like the display on the scanner itself.
@@ -69,7 +70,7 @@ pub(super) fn section(ui: &mut egui::Ui, number: &str, text: &str) {
                 .font(theme::mono(size::MONO_SMALL))
                 .color(color::GRAPHITE),
         );
-        ui.label(RichText::new(text).font(theme::bold(size::HEADING)));
+        ui.label(RichText::new(tr(text)).font(theme::bold(size::HEADING)));
     });
     ui.add_space(space::M);
 }
@@ -165,7 +166,7 @@ pub(super) fn focus_ring(ui: &egui::Ui, response: &egui::Response) {
 }
 
 pub(super) fn field(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
-    let label = ui.label(label_text(label));
+    let label = ui.label(label_text(&tr(label)));
     ui.add(
         egui::TextEdit::singleline(value)
             .desired_width(ui.available_width())
@@ -182,19 +183,18 @@ pub(super) fn choice(
     value: &mut String,
     choices: &[(&str, &str)],
 ) {
-    let label_response = ui.label(label_text(label));
+    let label_response = ui.label(label_text(&tr(label)));
     let selected = choices
         .iter()
         .find(|(key, _)| *key == value)
-        .map_or(value.as_str(), |(_, label)| *label)
-        .to_owned();
+        .map_or_else(|| value.clone(), |(_, label)| tr(label));
     egui::ComboBox::from_id_salt(id)
         .width(ui.available_width())
         .height(size::CONTROL * 8.0)
         .selected_text(selected)
         .show_ui(ui, |ui| {
             for (key, label) in choices {
-                ui.selectable_value(value, (*key).into(), *label);
+                ui.selectable_value(value, (*key).into(), tr(label));
             }
         })
         .response
@@ -208,7 +208,12 @@ pub(super) fn segmented(
     value: &mut bool,
     options: [(&str, bool); 2],
 ) {
-    let label_response = ui.label(label_text(label));
+    let label_response = ui.label(label_text(&tr(label)));
+    let texts = [tr(options[0].0), tr(options[1].0)];
+    let options = [
+        (texts[0].as_str(), options[0].1),
+        (texts[1].as_str(), options[1].1),
+    ];
     let width = ui.available_width();
     let stacked = stacks(ui, &options, width);
     let (cell, rows) = if stacked {

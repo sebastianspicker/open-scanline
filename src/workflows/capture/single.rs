@@ -67,14 +67,14 @@ impl Default for ScanToFileArgs {
 
 /// Runtime controls for the canonical capture entry.
 #[derive(Default)]
-pub(crate) struct CaptureOptions {
-    pub(crate) export: ExportOptions,
-    pub(crate) cancellation: CancellationToken,
-    pub(crate) policy: DeviceOpenPolicy,
+pub struct CaptureOptions {
+    pub export: ExportOptions,
+    pub cancellation: CancellationToken,
+    pub policy: DeviceOpenPolicy,
 }
 
 /// Scan using the native acquisition and media adapters.
-pub(crate) fn run_scan_to_file(args: ScanToFileArgs, options: CaptureOptions) -> Result<PathBuf> {
+pub fn run_scan_to_file(args: ScanToFileArgs, options: CaptureOptions) -> Result<PathBuf> {
     let CaptureOptions {
         export,
         cancellation: token,
@@ -139,9 +139,24 @@ fn validate_scan_args(args: &ScanToFileArgs, pipeline: &PipelinePrefs) -> Result
         ));
     }
     if let Some(crop) = pipeline.crop {
-        validate_crop(args, crop)?;
+        validate_crop(args.width, args.height, crop)?;
     }
-    Ok(())
+    validate_film_type(pipeline)
+}
+
+/// Reject an unknown film type before the device is opened.
+pub(super) fn validate_film_type(pipeline: &PipelinePrefs) -> Result<()> {
+    let film = pipeline.film_type.as_deref().map(str::trim);
+    match film {
+        Some(film)
+            if !film.is_empty()
+                && !film.eq_ignore_ascii_case("off")
+                && !film.eq_ignore_ascii_case("none") =>
+        {
+            crate::domain::processing::get_film_profile(film).map(|_| ())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_output_destinations(args: &ScanToFileArgs) -> Result<()> {
@@ -178,16 +193,16 @@ fn validate_dimensions(args: &ScanToFileArgs) -> Result<()> {
     Ok(())
 }
 
-fn validate_crop(args: &ScanToFileArgs, crop: Rect) -> Result<()> {
+pub(super) fn validate_crop(width: u32, height: u32, crop: Rect) -> Result<()> {
     if crop_has_invalid_shape(crop) {
         return Err(ScanError::Invalid(
             "crop must be x,y,w,h with positive size".into(),
         ));
     }
-    if crop_exceeds_scan_size(args, crop) {
+    if crop_exceeds_scan_size(width, height, crop) {
         return Err(ScanError::Invalid(format!(
             "crop {},{},{},{} exceeds scan size {}x{}",
-            crop.x, crop.y, crop.width, crop.height, args.width, args.height
+            crop.x, crop.y, crop.width, crop.height, width, height
         )));
     }
     Ok(())
@@ -197,10 +212,11 @@ fn crop_has_invalid_shape(crop: Rect) -> bool {
     crop.x < 0 || crop.y < 0 || crop.width < 1 || crop.height < 1
 }
 
-fn crop_exceeds_scan_size(args: &ScanToFileArgs, crop: Rect) -> bool {
+fn crop_exceeds_scan_size(width: u32, height: u32, crop: Rect) -> bool {
     // An axis left to the device has no known size to check against.
-    (args.width > 0 && crop.x as u32 + crop.width > args.width)
-        || (args.height > 0 && crop.y as u32 + crop.height > args.height)
+    // Widened to u64 so a huge crop cannot overflow the sum.
+    (width > 0 && crop.x as u64 + crop.width as u64 > width as u64)
+        || (height > 0 && crop.y as u64 + crop.height as u64 > height as u64)
 }
 
 fn report_progress(args: &ScanToFileArgs, phase: &str, percent: f64, message: &str) {
@@ -356,5 +372,17 @@ impl<'args> ScanContext<'args> {
             return Err(ScanError::Cancelled("scan cancelled".into()));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crop_bounds_check_does_not_overflow() {
+        let crop = Rect::new(i32::MAX, 0, u32::MAX, 1);
+        assert!(validate_crop(100, 100, crop).is_err());
+        assert!(validate_crop(100, 100, Rect::new(10, 10, 90, 90)).is_ok());
     }
 }

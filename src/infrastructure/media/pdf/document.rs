@@ -32,6 +32,13 @@ impl Default for PdfOptions {
         }
     }
 }
+
+// Every copy of the options zeroes its password when it is dropped.
+impl Drop for PdfOptions {
+    fn drop(&mut self) {
+        crate::domain::export::clear_pdf_password(&mut self.password);
+    }
+}
 pub fn save_pdf_with_options(
     path: impl AsRef<Path>,
     images: &[ImageBuffer],
@@ -50,7 +57,6 @@ pub fn save_pdf_with_options_and_cancellation(
     validate_pdf_input(images, options)?;
     check_pdf_cancellation(cancellation)?;
     let path = path.as_ref();
-    create_pdf_parent(path)?;
     let (mut doc, pages_id, searchable_font) = create_pdf_document(options, cancellation)?;
     let mut page_ids = Vec::with_capacity(images.len());
     {
@@ -144,15 +150,6 @@ pub(super) fn validate_pdf_options(page_count: usize, options: &PdfOptions) -> R
             ));
         }
         validate_pdf_password(password)?;
-    }
-    Ok(())
-}
-
-pub(super) fn create_pdf_parent(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
     }
     Ok(())
 }

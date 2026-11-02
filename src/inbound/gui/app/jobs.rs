@@ -6,7 +6,11 @@ impl OpenScanlineApp {
     pub(in crate::inbound::gui) fn cancel_job(&mut self) {
         if let Some(job) = &self.job {
             job.cancel.store(true, Ordering::SeqCst);
-            self.state.do_cancel();
+            if job.device {
+                self.state.status = self.state.translator.t("status.waiting_for_device");
+            } else {
+                self.state.do_cancel();
+            }
         }
     }
 
@@ -55,6 +59,7 @@ impl OpenScanlineApp {
             handle: Some(handle),
             cancel,
             pending_pdf_password,
+            device: false,
         }
     }
 

@@ -29,7 +29,7 @@ pub fn available_with_cancellation(cancellation: Option<&CancellationToken>) -> 
     }
     which("scanimage").is_some_and(|binary| {
         let cancelled = Mutex::new(false);
-        let result = SystemCommandRunner.run_with_cancellation(
+        let result = SystemCommandRunner.run(
             &CommandSpec {
                 program: binary.display().to_string(),
                 args: vec!["--version".into()],
@@ -37,6 +37,7 @@ pub fn available_with_cancellation(cancellation: Option<&CancellationToken>) -> 
             probe_timeout(Duration::from_secs(2)),
             &cancelled,
             cancellation,
+            None,
         );
         if let Err(error) = &result {
             crate::debug_log::debug_log!("sane", "scanimage --version probe failed: {error}");
@@ -106,7 +107,7 @@ fn try_list_scanimage(cancellation: Option<&CancellationToken>) -> Vec<DeviceInf
         return Vec::new();
     };
     let cancelled = Mutex::new(false);
-    let output = match SystemCommandRunner.run_with_cancellation(
+    let output = match SystemCommandRunner.run(
         &CommandSpec {
             program: bin.display().to_string(),
             args: vec!["-f".into(), "%d|%v %m%n".into()],
@@ -114,6 +115,7 @@ fn try_list_scanimage(cancellation: Option<&CancellationToken>) -> Vec<DeviceInf
         probe_timeout(Duration::from_secs(8)),
         &cancelled,
         cancellation,
+        None,
     ) {
         Ok(output) => output,
         Err(error) => {
@@ -142,15 +144,16 @@ const LISTING_REUSE: Duration = Duration::from_secs(30);
 static LAST_LISTING: Mutex<Option<(std::time::Instant, Vec<DeviceInfo>)>> = Mutex::new(None);
 
 /// Devices from a listing at most [`LISTING_REUSE`] old, or a fresh listing.
-pub(super) fn recent_devices(cancellation: Option<&CancellationToken>) -> Vec<DeviceInfo> {
+/// The flag is true when the cached listing was used.
+pub(super) fn recent_devices(cancellation: Option<&CancellationToken>) -> (Vec<DeviceInfo>, bool) {
     let cached = LAST_LISTING
         .lock()
         .ok()
         .and_then(|last| last.clone())
         .filter(|(listed_at, _)| listed_at.elapsed() < LISTING_REUSE);
     match cached {
-        Some((_, devices)) => devices,
-        None => list_devices_with_cancellation(cancellation),
+        Some((_, devices)) => (devices, true),
+        None => (list_devices_with_cancellation(cancellation), false),
     }
 }
 

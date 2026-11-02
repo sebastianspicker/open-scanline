@@ -255,12 +255,7 @@ fn apply_colorization(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<Image
 }
 
 fn apply_film(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageBuffer> {
-    if let Some(film) = prefs
-        .film_type
-        .as_deref()
-        .map(str::trim)
-        .filter(|film| !film.is_empty())
-    {
+    if let Some(film) = enabled_value(prefs.film_type.as_deref(), &["off", "none"]) {
         return super::film::convert_film(&image, film);
     }
 

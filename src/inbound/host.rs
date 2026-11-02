@@ -82,7 +82,10 @@ pub fn launch_plugin_host(
     wait: bool,
     quiet: bool,
 ) -> Value {
-    let argv = resolve_host_command("plugin", out, config);
+    let mut argv = resolve_host_command("plugin", out, config);
+    if quiet {
+        argv.push("--quiet".into());
+    }
     if wait {
         // In-process path (same orchestration as CLI plugin).
         let code = run_plugin_mode(config, out, quiet, None);
@@ -98,7 +101,16 @@ pub fn launch_plugin_host(
     match launch_out_of_process(&argv, current_exe, |executable, args| {
         let mut command = Command::new(executable);
         command.args(args);
-        command.spawn().map(|child| child.id())
+        let mut child = {
+            let _spawn_guard = crate::infrastructure::runtime::lock_process_spawn();
+            command.spawn()?
+        };
+        let pid = child.id();
+        // Reap the child when it exits so it does not stay a zombie.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(pid)
     }) {
         Ok(pid) => json!({
             "argv": argv,

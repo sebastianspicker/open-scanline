@@ -13,6 +13,10 @@ hasn't been tried yet, and what to do about it.
   the duplex batch and the "feeder ran out of paper" handling have only been
   checked against a simulated scanner. If something goes wrong here, a report
   helps us more than anything else.
+  - A feeder batch now saves each page while the scanner is still running,
+    instead of after the last sheet. This relies on `scanimage` finishing each
+    page under a temporary `.part` name and is not yet tried on the P-215II.
+    If a batch saves nothing, or saves pages twice, please report it.
   - Before you start, run `scanimage -L` in Terminal. If it doesn't list a
     `canon_dr:` device, Open Scanline can't see the scanner either. Please tell
     us; this is the single most important thing we need to know.
@@ -42,6 +46,11 @@ hasn't been tried yet, and what to do about it.
 - **Duplex needs `--source adf`** and an even `--pages` count, because
   `--pages` counts sides, not sheets. Without `--source`, the P-215II scans the
   front side only.
+- **Colour pages in PDFs are stored as JPEG** (quality 90), grey pages as
+  lossless greyscale. This keeps long batches within the PDF size limit; a very
+  long colour batch can still stop at the PDF step, and its page files remain.
+- **The main window is English only.** The language setting changes only the
+  Image tools panels for now.
 - **Built-in text recognition is very limited.** The default `offline` OCR
   engine only reads large, clean capital letters, so searchable PDFs made with
   it usually contain no text. For real documents, install Tesseract

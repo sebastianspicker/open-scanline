@@ -30,7 +30,7 @@ pub use pdf::{
 };
 pub use preview::image_buffer_to_rgba;
 pub use tiff::{
-    append_page_to_multipage, save_multipage_tiff, save_multipage_tiff_from_paths_with_transform,
+    save_multipage_tiff, save_multipage_tiff_from_paths_with_transform,
     save_multipage_tiff_from_paths_with_transform_and_cancellation,
     save_multipage_tiff_with_cancellation,
 };

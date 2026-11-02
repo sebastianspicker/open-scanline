@@ -335,10 +335,20 @@ fn parsed_inverse_gamma(profile: &Value) -> Result<[f64; 3]> {
 impl PreparedScannerProfile {
     /// Apply this prepared profile to an owned image, consuming its buffer.
     pub(crate) fn apply_owned(&self, mut image: ImageBuffer) -> Result<ImageBuffer> {
-        if image.pixel_format != PixelFormat::Rgb8 {
-            return Err(ScanError::Unsupported(
-                "apply_scanner_profile requires Rgb8".into(),
-            ));
+        match image.pixel_format {
+            PixelFormat::Rgb8 => {}
+            PixelFormat::Gray8 => {
+                crate::debug_log::debug_log!(
+                    "icc",
+                    "scanner profile skipped: it applies to colour pages, not Gray8"
+                );
+                return Ok(image);
+            }
+            _ => {
+                return Err(ScanError::Unsupported(
+                    "apply_scanner_profile requires Rgb8".into(),
+                ))
+            }
         }
         for pixel in image.data.as_chunks_mut::<3>().0 {
             apply_profile_pixel(pixel, &self.matrix, &self.inverse_gamma);
@@ -361,128 +371,13 @@ fn apply_profile_pixel(pixel: &mut [u8], matrix: &[[f64; 3]; 3], inverse_gamma: 
 
 fn mixed_channel(matrix: &[f64; 3], red: f64, green: f64, blue: f64, inverse_gamma: f64) -> u8 {
     let mixed = (matrix[0] * red + matrix[1] * green + matrix[2] * blue).clamp(0.0, 1.0);
-    clamp_byte(mixed.powf(inverse_gamma) * 255.0)
-}
-
-/// Apply a scanner profile (diagonal gain matrix) to an image.
-pub fn apply_scanner_profile(image: &ImageBuffer, profile: &Value) -> Result<ImageBuffer> {
-    if image.pixel_format != PixelFormat::Rgb8 {
-        return Err(ScanError::Unsupported(
-            "apply_scanner_profile requires Rgb8".into(),
-        ));
-    }
-    prepare_scanner_profile(profile)?.apply_owned(image.clone())
-}
-
-/// Encode float as ICC s15Fixed16Number (big-endian u32 bit pattern).
-fn s15_fixed(value: f64) -> u32 {
-    ((value * 65536.0).round() as i64 & 0xFFFF_FFFF) as u32
-}
-
-fn trc_tag(gamma: f64) -> Vec<u8> {
-    let mut tag = Vec::with_capacity(16);
-    tag.extend_from_slice(b"curv");
-    tag.extend_from_slice(&0u32.to_be_bytes());
-    tag.extend_from_slice(&1u32.to_be_bytes());
-    tag.extend_from_slice(&s15_fixed(gamma).to_be_bytes());
-    tag
-}
-
-fn xyz_tag(values: [f64; 3]) -> Vec<u8> {
-    let mut tag = Vec::with_capacity(20);
-    tag.extend_from_slice(b"XYZ ");
-    tag.extend_from_slice(&0u32.to_be_bytes());
-    for value in values {
-        tag.extend_from_slice(&s15_fixed(value).to_be_bytes());
-    }
-    tag
-}
-
-fn icc_tag_payloads() -> Vec<([u8; 4], Vec<u8>)> {
-    let gamma = 2.2_f64;
-    let mut tags = vec![
-        (*b"rTRC", trc_tag(gamma)),
-        (*b"gTRC", trc_tag(gamma)),
-        (*b"bTRC", trc_tag(gamma)),
-        (*b"rXYZ", xyz_tag([0.4361, 0.2225, 0.0139])),
-        (*b"gXYZ", xyz_tag([0.3851, 0.7169, 0.0971])),
-        (*b"bXYZ", xyz_tag([0.1431, 0.0606, 0.7141])),
-        (*b"wtpt", xyz_tag([0.9642, 1.0, 0.8249])),
-    ];
-    tags.sort_by_key(|tag| tag.0);
-    tags
-}
-
-fn positioned_icc_payloads(
-    tags: &[([u8; 4], Vec<u8>)],
-    start_offset: usize,
-) -> Vec<([u8; 4], usize, Vec<u8>)> {
-    let mut offset = start_offset;
-    tags.iter()
-        .map(|(signature, payload)| {
-            let positioned = (*signature, offset, payload.clone());
-            offset += payload.len();
-            positioned
-        })
-        .collect()
-}
-
-fn icc_description_tail(profile_id: &str) -> Vec<u8> {
-    let id_bytes = profile_id.as_bytes();
-    let length = id_bytes.len().min(31);
-    let mut tail = Vec::with_capacity(4 + length);
-    tail.extend_from_slice(&(length as u32).to_be_bytes());
-    tail.extend_from_slice(&id_bytes[..length]);
-    tail
-}
-
-fn icc_header(size: usize) -> Vec<u8> {
-    let mut header = vec![0u8; 128];
-    header[0..4].copy_from_slice(&(size as u32).to_be_bytes());
-    header[4..8].copy_from_slice(b"ovue");
-    header[8] = 0x02;
-    header[9] = 0x10;
-    header[12..16].copy_from_slice(b"mntr");
-    header[16..20].copy_from_slice(b"RGB ");
-    header[20..24].copy_from_slice(b"XYZ ");
-    header[36..40].copy_from_slice(b"acsp");
-    header[40..44].copy_from_slice(b"ovue");
-    for (index, value) in [0.9642_f64, 1.0, 0.8249].iter().enumerate() {
-        let offset = 68 + index * 4;
-        header[offset..offset + 4].copy_from_slice(&s15_fixed(*value).to_be_bytes());
-    }
-    header
-}
-
-/// Minimal ICC v2 display profile bytes with TRC + matrix XYZ + white point tags.
-/// Matches the established profile structure (7 tags: r/g/b TRC, r/g/b XYZ, wtpt).
-pub fn build_icc_bytes(profile_id: &str) -> Vec<u8> {
-    let tags = icc_tag_payloads();
-    let payloads = positioned_icc_payloads(&tags, 128 + 4 + tags.len() * 12);
-    let description = icc_description_tail(profile_id);
-    let size = payloads
-        .last()
-        .map_or(128 + 4 + tags.len() * 12, |(_, offset, payload)| {
-            offset + payload.len()
-        })
-        + description.len();
-
-    let mut out = Vec::with_capacity(size);
-    out.extend_from_slice(&icc_header(size));
-    out.extend_from_slice(&(payloads.len() as u32).to_be_bytes());
-    for (signature, offset, payload) in &payloads {
-        out.extend_from_slice(signature);
-        out.extend_from_slice(&(*offset as u32).to_be_bytes());
-        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    }
-    for (_, _, payload) in &payloads {
-        out.extend_from_slice(payload);
-    }
-    out.extend_from_slice(&description);
-    // Fix size field in case of padding drift
-    let final_size = out.len() as u32;
-    out[0..4].copy_from_slice(&final_size.to_be_bytes());
-    out
+    // Exact for 1.0; the IT8 profiler always writes gamma 1.0, so skip the per-sample powf.
+    let curved = if inverse_gamma == 1.0 {
+        mixed
+    } else {
+        mixed.powf(inverse_gamma)
+    };
+    clamp_byte(curved * 255.0)
 }
 
 /// Save IT8 profile JSON to path.
@@ -491,4 +386,54 @@ pub fn save_profile_json(path: impl AsRef<Path>, profile: &Value) -> Result<()> 
     let s = serde_json::to_string_pretty(profile).map_err(|e| ScanError::Other(e.to_string()))?;
     crate::infrastructure::runtime::atomic_publish::write_file_atomic(path.as_ref(), s.as_bytes())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(gamma: f64) -> PreparedScannerProfile {
+        prepare_scanner_profile(&json!({
+            "format": PROFILE_FORMAT,
+            "version": PROFILE_VERSION,
+            "kind": "scanner_it8",
+            "matrix": [[1.1, 0.0, 0.0], [0.0, 0.9, 0.0], [0.0, 0.0, 1.0]],
+            "gamma": [gamma, gamma, gamma],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn unit_gamma_matches_powf_for_every_byte() {
+        let prepared = profile(1.0);
+        for value in 0..=255u8 {
+            let mut fast = [value, value, value];
+            apply_profile_pixel(&mut fast, &prepared.matrix, &prepared.inverse_gamma);
+            let red = value as f64 / 255.0;
+            let expected =
+                clamp_byte((prepared.matrix[0][0] * red).clamp(0.0, 1.0).powf(1.0) * 255.0);
+            assert_eq!(fast[0], expected);
+        }
+        // A non-unit gamma still takes the `powf` path.
+        let curved = profile(2.2);
+        for value in 0..=255u8 {
+            let mut pixel = [value, value, value];
+            apply_profile_pixel(&mut pixel, &curved.matrix, &curved.inverse_gamma);
+            let red = value as f64 / 255.0;
+            let expected = clamp_byte(
+                (curved.matrix[0][0] * red)
+                    .clamp(0.0, 1.0)
+                    .powf(curved.inverse_gamma[0])
+                    * 255.0,
+            );
+            assert_eq!(pixel[0], expected);
+        }
+    }
+
+    #[test]
+    fn gray_pages_skip_the_scanner_profile() {
+        let gray = ImageBuffer::new(2, 1, PixelFormat::Gray8, vec![10, 200]).unwrap();
+        let out = profile(1.0).apply_owned(gray.clone()).unwrap();
+        assert_eq!(out, gray);
+    }
 }

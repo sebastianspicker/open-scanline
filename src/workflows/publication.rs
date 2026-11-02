@@ -158,15 +158,6 @@ pub(crate) fn apply_export_profile_owned(
     }
 }
 
-/// Token-aware searchable-text generation for scan and batch workflows.
-pub(crate) fn searchable_text_with_cancellation(
-    image: &ImageBuffer,
-    prepared: &PreparedExportOptions,
-    cancellation: Option<&CancellationToken>,
-) -> Result<Option<String>> {
-    prepared.recognize(image, cancellation)
-}
-
 pub(crate) fn save_final_image(
     destination: &Path,
     image: &ImageBuffer,
@@ -213,7 +204,7 @@ pub(crate) fn save_final_image_with_searchable_text(
     if is_pdf {
         let text = match searchable_text {
             Some(text) => Some(text.to_owned()),
-            None => searchable_text_with_cancellation(image, prepared, cancellation)?,
+            None => prepared.recognize(image, cancellation)?,
         };
         return crate::infrastructure::media::save_pdf_with_options_and_cancellation(
             destination,
@@ -314,7 +305,8 @@ fn save_profiled_pdf_from_paths_with_cancellation(
                 crate::infrastructure::media::load_image(path)?,
                 prepared,
             )?;
-            searchable_text_with_cancellation(&image, prepared, cancellation)?
+            prepared
+                .recognize(&image, cancellation)?
                 .ok_or_else(|| ScanError::Other("searchable PDF did not produce OCR text".into()))
         })?
     } else {

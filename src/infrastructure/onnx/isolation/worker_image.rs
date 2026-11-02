@@ -2,7 +2,7 @@ use super::launch;
 use super::paths::{self, worker_unavailable};
 use super::OnnxInferenceOptions;
 use crate::error::{Result, ScanError};
-use crate::infrastructure::runtime::{run_command, CommandSpec, TemporaryOutput};
+use crate::infrastructure::runtime::{run_contained_command, CommandSpec, TemporaryOutput};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -128,15 +128,18 @@ impl StagedWorkerExecutable {
             .and_then(|value| value.to_str())
             .filter(|value| !value.is_empty())
             .unwrap_or("bin");
-        let output = TemporaryOutput::new("onnx-worker-image", extension)?;
-        stage_worker_image(source, &output)?;
-        if !WorkerIdentity::capture(output.path())?.has_same_content(source_identity) {
+        // Own the output before staging so `Drop` restores 0700 on every error path.
+        let staged = Self {
+            output: TemporaryOutput::new("onnx-worker-image", extension)?,
+        };
+        stage_worker_image(source, &staged.output)?;
+        if !WorkerIdentity::capture(staged.path())?.has_same_content(source_identity) {
             return Err(worker_unavailable(format!(
                 "ONNX worker executable {} changed while its private execution image was created",
                 source.display()
             )));
         }
-        Ok(Self { output })
+        Ok(staged)
     }
     fn path(&self) -> &Path {
         self.output.path()
@@ -250,6 +253,12 @@ impl OnnxWorker {
                 self.executable.display()
             )));
         }
+        if !WorkerIdentity::capture(self.staged.path())?.has_same_content(&self.identity) {
+            return Err(worker_unavailable(format!(
+                "private ONNX worker execution image {} was modified after runtime construction",
+                self.staged.path().display()
+            )));
+        }
         let _ = paths::working_directory(&self.executable)?;
         let source = TrustedWorkerHandle::acquire(&self.executable, "ONNX worker executable")?;
         let staged = TrustedWorkerHandle::acquire(
@@ -263,13 +272,14 @@ impl OnnxWorker {
 fn validate_worker_executable(executable: &Path) -> Result<()> {
     let expected = format!("open-scanline {}", env!("CARGO_PKG_VERSION"));
     let cancelled = std::sync::Mutex::new(false);
-    let output = run_command(
+    let output = run_contained_command(
         &CommandSpec {
             program: executable.to_string_lossy().into_owned(),
             args: vec!["--version".into()],
         },
         std::time::Duration::from_secs(5),
         &cancelled,
+        None,
         "ONNX worker version probe",
         "ONNX worker version probe cancelled",
     )?;
@@ -391,6 +401,7 @@ mod tests {
     use super::*;
     #[test]
     fn private_worker_image_is_removed_when_its_owner_drops() {
+        let _serial = STAGING_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let source = TemporaryOutput::new("onnx-worker-stage-source", "bin").unwrap();
         std::fs::write(source.path(), b"open-scanline-worker-test-image").unwrap();
         let identity = WorkerIdentity::capture(source.path()).unwrap();
@@ -399,5 +410,32 @@ mod tests {
         assert!(staged.path().is_file());
         drop(staged);
         assert!(!directory.exists());
+    }
+
+    // Both tests count staging folders by pid, so they must not overlap.
+    static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_mismatch_leaves_no_staged_folder() {
+        let _serial = STAGING_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let source = TemporaryOutput::new("onnx-worker-stage-source", "bin").unwrap();
+        std::fs::write(source.path(), b"open-scanline-worker-test-image").unwrap();
+        let mut identity = WorkerIdentity::capture(source.path()).unwrap();
+        identity.sha256[0] ^= 1;
+        let before = staged_folders();
+        assert!(StagedWorkerExecutable::copy_from(source.path(), &identity).is_err());
+        assert_eq!(staged_folders(), before);
+    }
+
+    #[cfg(unix)]
+    fn staged_folders() -> std::collections::BTreeSet<std::path::PathBuf> {
+        let prefix = format!(".open-scanline-onnx-worker-image-{}-", std::process::id());
+        std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .map(|entry| entry.path())
+            .collect()
     }
 }

@@ -13,16 +13,6 @@ use std::path::Path;
 pub(crate) const ONNX_WORKER_PROTOCOL: &str = concat!(env!("CARGO_PKG_VERSION"), ":1");
 pub(crate) use worker_image::OnnxWorker;
 
-pub(crate) fn run_isolated_onnx(
-    input: &Path,
-    model: &Path,
-    options: &OnnxInferenceOptions,
-) -> Result<super::OnnxReport> {
-    paths::validate_onnx_paths(input, model)?;
-    let _ = options;
-    Err(paths::worker_unavailable("automatic worker discovery is disabled because a current-executable-derived path cannot authenticate the worker image; use run_user_onnx_with_worker with an explicit worker path"))
-}
-
 pub(crate) fn run_isolated_onnx_with_executable(
     input: &Path,
     model: &Path,

@@ -6,8 +6,7 @@ pub use crate::domain::processing::{
     OrientationResult,
 };
 pub use crate::inbound::diagnostics::ml_module_info;
-#[allow(deprecated)]
 pub use crate::infrastructure::onnx::{
-    run_user_onnx, run_user_onnx_with_options, run_user_onnx_with_worker, OnnxInferenceOptions,
-    OnnxInputLayout, OnnxNormalization, OnnxOutputSummary, OnnxReport, OnnxRuntime,
+    run_user_onnx_with_worker, OnnxInferenceOptions, OnnxInputLayout, OnnxNormalization,
+    OnnxOutputSummary, OnnxReport, OnnxRuntime,
 };

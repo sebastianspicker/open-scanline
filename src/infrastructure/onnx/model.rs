@@ -16,44 +16,6 @@ pub use types::{
     OnnxInferenceOptions, OnnxInputLayout, OnnxNormalization, OnnxOutputSummary, OnnxReport,
 };
 
-/// Run a user-supplied ONNX model in a resource-contained worker process.
-///
-/// This historical convenience API cannot authenticate a worker without an
-/// explicit path, so it deliberately fails closed. Use [`OnnxRuntime`] or
-/// [`run_user_onnx_with_worker`] instead.
-#[deprecated(
-    note = "use OnnxRuntime::from_worker(...).run(...) or run_user_onnx_with_worker with an explicit worker"
-)]
-pub fn run_user_onnx(image: &ImageBuffer, model_path: impl AsRef<Path>) -> Result<OnnxReport> {
-    run_user_onnx_with_options_unavailable(
-        image,
-        model_path.as_ref(),
-        &OnnxInferenceOptions::default(),
-    )
-}
-
-#[deprecated(
-    note = "use OnnxRuntime::from_worker(...).run_with_options(...) or run_user_onnx_with_worker with an explicit worker"
-)]
-pub fn run_user_onnx_with_options(
-    image: &ImageBuffer,
-    model_path: impl AsRef<Path>,
-    options: &OnnxInferenceOptions,
-) -> Result<OnnxReport> {
-    run_user_onnx_with_options_unavailable(image, model_path.as_ref(), options)
-}
-
-fn run_user_onnx_with_options_unavailable(
-    image: &ImageBuffer,
-    model_path: &Path,
-    options: &OnnxInferenceOptions,
-) -> Result<OnnxReport> {
-    super::ensure_enabled()?;
-    let input = crate::infrastructure::runtime::TemporaryOutput::new("onnx-input", "png")?;
-    crate::infrastructure::media::save_image(input.path(), image, None, None)?;
-    super::isolation::run_isolated_onnx(input.path(), model_path, options)
-}
-
 /// A reusable, explicitly selected ONNX worker runtime.
 #[derive(Debug)]
 pub struct OnnxRuntime {

@@ -27,6 +27,57 @@ The package version drops from `1.0.0` to `0.1.0`. `VERSION` is now taken from
   file without `config_version` whose extents are exactly the old 320 × 240
   default resets them to `0`.
 
+### Public API (code-quality fixes)
+
+New:
+
+- `scan::run_scan_to_file_with_options(args, CaptureOptions)`,
+  `batch::run_batch_scan_with_options(args, BatchCaptureOptions)` and
+  `process::process_image_file_with_options(&options, ProcessRunOptions)` take
+  the export, cancellation and device-policy controls as an options struct. The
+  structs are public, with public fields and `Default`.
+
+Removed:
+
+- The twelve permutation wrappers they replace:
+  - `scan::run_scan_to_file_with_token`, `_with_export_options`,
+    `_with_export_options_and_token` and
+    `_with_export_options_and_token_and_policy`;
+  - `batch::run_batch_scan_with_token`, `_with_export_options`,
+    `_with_export_options_and_token`,
+    `_with_export_options_and_token_and_policy` and
+    `_with_export_options_and_cancel`;
+  - `process::process_image_file_with_token`, `_with_export_options` and
+    `_with_export_options_and_token`.
+  - `run_scan_to_file`, `run_batch_scan` and `process_image_file` are unchanged.
+- `ml::run_user_onnx` and `ml::run_user_onnx_with_options`, which always failed.
+  Use `OnnxRuntime::from_worker` or `run_user_onnx_with_worker`. The
+  `ml_module_info` JSON drops its `run_user_onnx` key.
+- `imaging::append_page_to_multipage`. Its PDF branch replaced an existing
+  document with a single page.
+- `icc::build_icc_bytes` and `icc::apply_scanner_profile`, which had no callers.
+- `sane::scanimage_command` and `FileDeviceSession::resize_nearest`.
+
+Changed:
+
+- `ExportOptions` and `PdfOptions` implement `Drop`, which zeroes the PDF
+  password, and `ExportOptions` debug output redacts it. Build them with
+  `let mut o = ExportOptions::default(); o.pdf_password = …;` instead of the
+  `..Default::default()` struct-update syntax.
+- `OnnxOutputSummary.sample` is `Vec<Option<f64>>`; non-finite values are `None`.
+- `resolve_device_id(None)` returns `mock` without running device discovery.
+  Only the exact id `mock` opens the synthetic scanner.
+- `escl::open_explicit_id("escl:sim")` needs `OPEN_SCANLINE_SIMULATE_BACKENDS=1`.
+- `deskew` and `adjust_levels` return `ScanError::Invalid` for a non-finite angle
+  or gamma.
+- `invert`, `adjust_levels`, `apply_curves` and `adjust_brightness_contrast`
+  keep the alpha byte of `Rgba8` pixels.
+- `AppConfig` loading rejects a `rotate` that is not a multiple of 90, a
+  non-positive or non-finite `levels_gamma`, a `deskew_angle` outside ±45, and
+  an unknown `film_type`.
+- The plugin status JSON reports `ok: false` with an `error` field, and exit 1,
+  when the configuration cannot be loaded.
+
 ## Earlier changes
 
 ### Public API

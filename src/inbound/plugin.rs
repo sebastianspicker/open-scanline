@@ -5,6 +5,7 @@ use crate::infrastructure::acquisition::{
     list_all_devices_with_cancellation, list_backends_with_cancellation,
 };
 use crate::infrastructure::config::json::{default_config_path, load_config};
+use crate::infrastructure::config::AppConfig;
 use crate::infrastructure::runtime::platform::platform_summary;
 use crate::operation::CancellationToken;
 
@@ -26,7 +27,9 @@ pub fn plugin_status_with_cancellation(
     let cfg_path = config_path
         .map(|path| path.to_path_buf())
         .unwrap_or_else(default_config_path);
-    let _ = load_config(config_path);
+    let config_error = load_config(config_path)
+        .err()
+        .map(|error| error.to_string());
     let devices: Vec<Value> = list_all_devices_with_cancellation(cancellation)
         .into_iter()
         .map(|d| {
@@ -47,7 +50,7 @@ pub fn plugin_status_with_cancellation(
             })
         })
         .collect();
-    json!({
+    let mut status = json!({
         "mode": "plugin",
         "app": APP_NAME,
         "version": VERSION,
@@ -56,8 +59,12 @@ pub fn plugin_status_with_cancellation(
         "backends": backends,
         "shared_scan": "open_scanline::scan::run_scan_to_file",
         "platform": platform_summary(),
-        "ok": true,
-    })
+        "ok": config_error.is_none(),
+    });
+    if let (Some(error), Some(obj)) = (config_error, status.as_object_mut()) {
+        obj.insert("error".into(), json!(format!("config load: {error}")));
+    }
+    status
 }
 
 /// Headless host entry: print status JSON and optionally run one shared-path scan.
@@ -164,12 +171,11 @@ fn perform_plugin_scan(
 ) -> Result<PluginScan> {
     let cfg = load_config(config_path)
         .map_err(|error| ScanError::Other(format!("config load: {error}")))?;
-    let devices = list_all_devices_with_cancellation(Some(cancellation));
     check_plugin_cancellation(cancellation)?;
-    let device = selected_plugin_device(device, &devices);
+    let device = selected_plugin_device(device, &cfg);
     let defaults = crate::workflows::settings::resolve_defaults(&cfg);
     let path = run_scan_to_file(
-        plugin_scan_args(out_path, &device, defaults),
+        plugin_scan_args(out_path, &device, defaults, cfg),
         CaptureOptions {
             cancellation: cancellation.clone(),
             ..CaptureOptions::default()
@@ -183,13 +189,10 @@ fn perform_plugin_scan(
     })
 }
 
-fn selected_plugin_device(
-    device: Option<&str>,
-    devices: &[crate::infrastructure::acquisition::DeviceInfo],
-) -> String {
+fn selected_plugin_device(device: Option<&str>, config: &AppConfig) -> String {
     device
         .map(str::to_owned)
-        .or_else(|| devices.first().map(|device| device.id.clone()))
+        .or_else(|| Some(config.last_device_id.clone()).filter(|id| !id.is_empty()))
         .unwrap_or_else(|| "mock".into())
 }
 
@@ -197,6 +200,7 @@ fn plugin_scan_args(
     out_path: &Path,
     device: &str,
     defaults: crate::workflows::settings::ResolvedSettings,
+    config: AppConfig,
 ) -> ScanToFileArgs {
     ScanToFileArgs {
         device: Some(device.to_owned()),
@@ -208,6 +212,44 @@ fn plugin_scan_args(
         duplex: defaults.acquisition.duplex,
         pipeline: defaults.processing,
         overwrite: true,
+        config: Some(config),
         ..ScanToFileArgs::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_comes_from_arg_then_config_then_mock() {
+        let mut cfg = AppConfig::default();
+        assert_eq!(selected_plugin_device(None, &cfg), "mock");
+        cfg.last_device_id = "file:x.png".into();
+        assert_eq!(selected_plugin_device(None, &cfg), "file:x.png");
+        assert_eq!(selected_plugin_device(Some("a"), &cfg), "a");
+    }
+
+    #[test]
+    fn scan_args_carry_the_config() {
+        let cfg = AppConfig {
+            invert_colors: true,
+            ..AppConfig::default()
+        };
+        let defaults = crate::workflows::settings::resolve_defaults(&cfg);
+        let args = plugin_scan_args(Path::new("o.png"), "mock", defaults, cfg);
+        assert!(args.config.is_some_and(|c| c.invert_colors));
+    }
+
+    #[test]
+    fn corrupt_config_makes_status_not_ok() {
+        // The path points at a directory, so loading fails without a file to clean up.
+        let path = std::env::temp_dir();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let status = plugin_status_with_cancellation(Some(&path), Some(&cancel));
+        assert_eq!(status["ok"], false);
+        assert!(status["error"].as_str().is_some());
+        assert_eq!(plugin_status_code(&status), 1);
     }
 }

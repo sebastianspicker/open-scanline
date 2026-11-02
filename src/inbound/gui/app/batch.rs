@@ -39,6 +39,10 @@ impl OpenScanlineApp {
         if self.job_active() || self.closing {
             return;
         }
+        if self.state.discovery_loading {
+            self.state.status = self.state.translator.t("ws.looking_for_scanners");
+            return;
+        }
         if let Err(error) = self.state.validate_color_controls() {
             self.state
                 .set_error(format!("invalid color controls: {error}"));

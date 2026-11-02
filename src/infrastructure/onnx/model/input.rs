@@ -71,7 +71,7 @@ fn input_dimensions(
 ) -> Result<InputDimensions> {
     if shape.len() != 4 {
         return Err(ScanError::Unsupported(format!(
-            "run_user_onnx requires a rank-4 image input, model declares rank {}",
+            "ONNX input requires a rank-4 image input, model declares rank {}",
             shape.len()
         )));
     }
@@ -113,13 +113,13 @@ fn dimension(shape: &[usize], axis: usize, fallback: usize) -> usize {
 fn validate_dimensions(dimensions: &InputDimensions) -> Result<()> {
     if !matches!(dimensions.channels, 1 | 3) {
         return Err(ScanError::Unsupported(format!(
-            "run_user_onnx supports one or three input channels, model requires {}",
+            "ONNX input supports one or three input channels, model requires {}",
             dimensions.channels
         )));
     }
     if dimensions.batch > MAX_ONNX_BATCH {
         return Err(ScanError::Unsupported(format!(
-            "run_user_onnx supports a batch dimension up to {MAX_ONNX_BATCH}, model requires {}",
+            "ONNX input supports a batch dimension up to {MAX_ONNX_BATCH}, model requires {}",
             dimensions.batch
         )));
     }
@@ -196,7 +196,7 @@ fn fill_nchw_plane(
         let source_index = source_index(target_index, image, dimensions);
         let pixel = normalized_rgb(image, source_index, normalization);
         *value = if dimensions.channels == 1 {
-            0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2]
+            luma(pixel)
         } else {
             pixel[channel]
         };
@@ -212,8 +212,16 @@ fn fill_nhwc_batch(
     for (target_index, pixel_output) in output.chunks_exact_mut(dimensions.channels).enumerate() {
         let source_index = source_index(target_index, image, dimensions);
         let pixel = normalized_rgb(image, source_index, normalization);
-        pixel_output.copy_from_slice(&pixel[..dimensions.channels]);
+        if dimensions.channels == 1 {
+            pixel_output[0] = luma(pixel);
+        } else {
+            pixel_output.copy_from_slice(&pixel[..dimensions.channels]);
+        }
     }
+}
+
+fn luma(pixel: [f32; 3]) -> f32 {
+    0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2]
 }
 
 fn source_index(target_index: usize, image: &ImageBuffer, dimensions: &InputDimensions) -> usize {
@@ -252,5 +260,24 @@ fn normalize(sample: u8, normalization: OnnxNormalization) -> f32 {
     match normalization {
         OnnxNormalization::ZeroToOne => sample as f32 / 255.0,
         OnnxNormalization::None => sample as f32,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_channel_input_is_grey_in_both_layouts() {
+        let image = ImageBuffer::new(2, 1, PixelFormat::Rgb8, vec![255, 0, 0, 0, 0, 255]).unwrap();
+        let values = |shape: &[usize], layout| {
+            let tensor = image_tensor(&image, shape, layout, OnnxNormalization::ZeroToOne).unwrap();
+            let plain = tensor.try_as_plain().unwrap();
+            plain.as_slice::<f32>().unwrap().to_vec()
+        };
+        let nchw = values(&[1, 1, 1, 2], OnnxInputLayout::Nchw);
+        let nhwc = values(&[1, 1, 2, 1], OnnxInputLayout::Nhwc);
+        assert_eq!(nchw, nhwc);
+        assert!((nchw[0] - 0.299).abs() < 1e-6, "{nchw:?}");
     }
 }

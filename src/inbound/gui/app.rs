@@ -63,6 +63,8 @@ pub(in crate::inbound::gui::app) enum GuiJobEvent {
         engine: String,
         text: String,
     },
+    /// A maintenance action finished; the payload is the status line.
+    DeviceFinished(String),
     Cancelled,
     Failed(String),
 }
@@ -73,6 +75,8 @@ pub(in crate::inbound::gui::app) struct GuiJob {
     handle: Option<JoinHandle<()>>,
     cancel: Arc<AtomicBool>,
     pending_pdf_password: Option<String>,
+    /// A maintenance job: it cannot be interrupted once started.
+    device: bool,
 }
 
 #[cfg(feature = "gui")]
@@ -182,6 +186,8 @@ impl OpenScanlineApp {
     }
 }
 
+#[cfg(feature = "gui")]
+mod device;
 #[cfg(feature = "gui")]
 mod discovery;
 #[cfg(feature = "gui")]

@@ -170,7 +170,7 @@ function Test-WiaFeederExhausted($errorRecord) {
     $exception = $exception.InnerException
   }
   $text = [string]$errorRecord
-  return $text -match '(?i)(paper|document|feeder).{0,40}(empty|emptying|out|none|no more)|no.{0,40}(paper|document|feeder)|wia_error_paper_empty'
+  return $text -match '(?i)wia_error_paper_empty'
 }
 
 $dm = New-Object -ComObject WIA.DeviceManager

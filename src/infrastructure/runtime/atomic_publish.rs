@@ -47,7 +47,16 @@ pub(crate) fn write_file_atomic(destination: &Path, bytes: &[u8]) -> Result<()> 
 /// existing ancestor so collision checks can run before output directories are
 /// created.
 pub fn output_paths_alias(left: &Path, right: &Path) -> Result<bool> {
-    if resolve_destination(left)? == resolve_destination(right)? {
+    let (resolved_left, resolved_right) = (resolve_destination(left)?, resolve_destination(right)?);
+    if resolved_left == resolved_right {
+        return Ok(true);
+    }
+    // Default macOS and Windows volumes ignore case; refusing some pairs on a
+    // case-sensitive volume is the safe direction.
+    #[cfg(any(target_os = "macos", windows))]
+    if resolved_left.to_string_lossy().to_lowercase()
+        == resolved_right.to_string_lossy().to_lowercase()
+    {
         return Ok(true);
     }
 
@@ -339,5 +348,15 @@ mod output_absent_tests {
         assert!(error.contains("--overwrite"), "{error}");
         ensure_output_absent(&existing, true).unwrap();
         ensure_output_absent(&dir.join("missing.png"), false).unwrap();
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn case_only_different_outputs_alias() {
+        let dir = std::env::temp_dir().join(format!("osl-case-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let aliased = output_paths_alias(&dir.join("Scan.tif"), &dir.join("scan.tif")).unwrap();
+        let _ = std::fs::remove_dir(&dir);
+        assert!(aliased);
     }
 }

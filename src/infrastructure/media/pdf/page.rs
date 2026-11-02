@@ -2,14 +2,18 @@ use super::check_pdf_cancellation;
 use super::searchable::{
     encode_searchable_text, searchable_line_width, SearchableFont, SEARCHABLE_FONT_SIZE,
 };
-use crate::domain::image::{ImageBuffer, MAX_IMAGE_BYTES};
+use crate::domain::image::{ImageBuffer, PixelFormat, MAX_IMAGE_BYTES};
 use crate::error::{Result, ScanError};
+use crate::infrastructure::media::codecs::validate_packed_buffer;
 use crate::infrastructure::media::to_rgb_bytes;
 use crate::operation::CancellationToken;
+use image::codecs::jpeg::JpegEncoder;
+use image::ExtendedColorType;
 use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Document, Object, ObjectId, Stream, StringFormat};
 
 const MAX_PDF_RETAINED_IMAGE_STREAM_BYTES: usize = MAX_IMAGE_BYTES / 2;
+const PDF_JPEG_QUALITY: u8 = 90;
 
 pub(super) struct PdfPageContext {
     pub(super) pages_id: ObjectId,
@@ -33,7 +37,7 @@ impl<'a> PdfPageBuilder<'a> {
     ) -> Result<ObjectId> {
         check_pdf_cancellation(cancellation)?;
         let dimensions = PdfPageDimensions::from_image(image, self.context.dpi);
-        let image_stream = build_image_stream(image.width, image.height, to_rgb_bytes(image)?)?;
+        let image_stream = build_image_stream(image)?;
         self.add_page_stream(
             index,
             dimensions,
@@ -50,19 +54,7 @@ impl<'a> PdfPageBuilder<'a> {
         searchable_text: Option<&str>,
         cancellation: Option<&CancellationToken>,
     ) -> Result<ObjectId> {
-        check_pdf_cancellation(cancellation)?;
-        super::super::codecs::validate_packed_buffer(&image)?;
-        let dimensions = PdfPageDimensions::from_image(&image, self.context.dpi);
-        let (width, height) = (image.width, image.height);
-        let image_stream =
-            build_image_stream(width, height, super::super::pixels::into_rgb_bytes(image)?)?;
-        self.add_page_stream(
-            index,
-            dimensions,
-            image_stream,
-            searchable_text,
-            cancellation,
-        )
+        self.add_page(index, &image, searchable_text, cancellation)
     }
 
     fn add_page_stream(
@@ -126,8 +118,32 @@ impl<'a> PdfPageBuilder<'a> {
     }
 }
 
-fn build_image_stream(width: u32, height: u32, rgb: Vec<u8>) -> Result<Stream> {
-    let mut stream = Stream::new(
+/// Grey pages stay `DeviceGray` (Flate). Colour pages are stored as JPEG
+/// (`DCTDecode`); lopdf's `compress()` skips streams that already have a Filter.
+fn build_image_stream(image: &ImageBuffer) -> Result<Stream> {
+    validate_packed_buffer(image)?;
+    let (width, height) = (image.width, image.height);
+    let pixels = width as usize * height as usize;
+    if image.pixel_format == PixelFormat::Gray8 {
+        return flate_image_stream(width, height, "DeviceGray", image.data[..pixels].to_vec());
+    }
+    let rgb = if image.pixel_format == PixelFormat::Rgb8 {
+        std::borrow::Cow::Borrowed(&image.data[..pixels * 3])
+    } else {
+        std::borrow::Cow::Owned(to_rgb_bytes(image)?)
+    };
+    let mut jpeg = Vec::new();
+    let encoded = JpegEncoder::new_with_quality(&mut jpeg, PDF_JPEG_QUALITY).encode(
+        &rgb,
+        width,
+        height,
+        ExtendedColorType::Rgb8,
+    );
+    if encoded.is_err() {
+        // JPEG cannot hold dimensions above 65535; fall back to lossless Flate.
+        return flate_image_stream(width, height, "DeviceRGB", rgb.into_owned());
+    }
+    Ok(Stream::new(
         dictionary! {
             "Type" => "XObject",
             "Subtype" => "Image",
@@ -135,8 +151,23 @@ fn build_image_stream(width: u32, height: u32, rgb: Vec<u8>) -> Result<Stream> {
             "Height" => i64::from(height),
             "ColorSpace" => "DeviceRGB",
             "BitsPerComponent" => 8,
+            "Filter" => "DCTDecode",
         },
-        rgb,
+        jpeg,
+    ))
+}
+
+fn flate_image_stream(width: u32, height: u32, color_space: &str, data: Vec<u8>) -> Result<Stream> {
+    let mut stream = Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => i64::from(width),
+            "Height" => i64::from(height),
+            "ColorSpace" => color_space,
+            "BitsPerComponent" => 8,
+        },
+        data,
     );
     stream
         .compress()
@@ -317,6 +348,61 @@ mod tests {
         let font = font_for(text);
         let dimensions = PdfPageDimensions { width, height };
         page_operations("Im0", dimensions, Some(text), Some(&font)).unwrap()
+    }
+
+    fn image_filters(path: &std::path::Path, password: Option<&str>) -> Vec<(String, String)> {
+        let document = match password {
+            Some(password) => Document::load_with_password(path, password).unwrap(),
+            None => Document::load(path).unwrap(),
+        };
+        assert_eq!(document.get_pages().len(), 2);
+        let mut found = Vec::new();
+        for object in document.objects.values() {
+            let Object::Stream(stream) = object else {
+                continue;
+            };
+            if stream.dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Image") {
+                continue;
+            }
+            let name = |key: &[u8]| {
+                String::from_utf8_lossy(stream.dict.get(key).unwrap().as_name().unwrap())
+                    .into_owned()
+            };
+            found.push((name(b"ColorSpace"), name(b"Filter")));
+        }
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn grey_pages_stay_grey_and_colour_pages_are_jpeg() {
+        let pages = [
+            ImageBuffer::new(32, 32, PixelFormat::Gray8, vec![128; 32 * 32]).unwrap(),
+            ImageBuffer::new(32, 32, PixelFormat::Rgb8, vec![200; 32 * 32 * 3]).unwrap(),
+        ];
+        let dir = crate::infrastructure::runtime::TemporaryOutput::new("pdf-test", "pdf").unwrap();
+        let expected = vec![
+            ("DeviceGray".to_string(), "FlateDecode".to_string()),
+            ("DeviceRGB".to_string(), "DCTDecode".to_string()),
+        ];
+
+        let plain = dir.directory().join("plain.pdf");
+        crate::infrastructure::media::save_pdf_with_options(
+            &plain,
+            &pages,
+            &crate::infrastructure::media::PdfOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(image_filters(&plain, None), expected);
+
+        let locked = dir.directory().join("locked.pdf");
+        crate::infrastructure::media::save_pdf_with_options(&locked, &pages, &{
+            let mut options = crate::infrastructure::media::PdfOptions::default();
+            options.password = Some("secret".into());
+            options
+        })
+        .unwrap();
+        assert_eq!(image_filters(&locked, Some("secret")), expected);
     }
 
     #[test]

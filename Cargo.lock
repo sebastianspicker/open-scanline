@@ -2968,6 +2968,7 @@ dependencies = [
  "lopdf",
  "mdns-sd",
  "ocrs",
+ "png",
  "quick-xml",
  "rfd",
  "rten",

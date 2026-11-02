@@ -35,6 +35,7 @@ impl eframe::App for OpenScanlineApp {
         } else {
             workspace::render(ctx, self);
         }
+        self.start_pending_device_job();
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -107,13 +108,15 @@ fn render_scan_menu(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
                 app.start_batch();
             }
         });
-        panels::render_maintenance_actions(ui, &mut app.state);
-        render_action_button(
-            ui,
-            &mut app.state,
-            "filter.brightness",
-            super::state::GuiState::do_exposure,
-        );
+        ui.add_enabled_ui(!app.job_active(), |ui| {
+            panels::render_maintenance_actions(ui, &mut app.state);
+            render_action_button(
+                ui,
+                &mut app.state,
+                "filter.brightness",
+                super::state::GuiState::do_exposure,
+            );
+        });
         render_action_button(
             ui,
             &mut app.state,

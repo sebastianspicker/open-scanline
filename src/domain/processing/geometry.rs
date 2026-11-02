@@ -206,6 +206,9 @@ pub fn estimate_skew_degrees(image: &ImageBuffer, max_angle: f64) -> f64 {
 /// Rotate by `angle_degrees` (counter-clockwise) with expand canvas, white fill.
 /// Nearest-neighbor inverse mapping (pure-fallback path).
 pub fn deskew(image: &ImageBuffer, angle_degrees: f64) -> Result<ImageBuffer> {
+    if !angle_degrees.is_finite() {
+        return Err(ScanError::Invalid("deskew angle must be finite".into()));
+    }
     if angle_degrees.abs() < 0.05 {
         return Ok(image.clone());
     }
@@ -291,7 +294,8 @@ fn has_valid_crop_shape(region: Rect) -> bool {
 }
 
 fn crop_fits_image(image: &ImageBuffer, region: Rect) -> bool {
-    region.x as u32 + region.width <= image.width && region.y as u32 + region.height <= image.height
+    region.x as u64 + u64::from(region.width) <= u64::from(image.width)
+        && region.y as u64 + u64::from(region.height) <= u64::from(image.height)
 }
 
 fn copy_bytes(
@@ -488,5 +492,30 @@ fn copy_deskewed_pixels(source: &[u8], output: &mut [u8], mapping: DeskewMapping
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+
+    fn gray() -> ImageBuffer {
+        ImageBuffer::new(4, 4, PixelFormat::Gray8, vec![0; 16]).unwrap()
+    }
+
+    #[test]
+    fn huge_crop_is_rejected_without_overflow() {
+        assert!(crop(&gray(), Rect::new(i32::MAX, 0, u32::MAX, 1)).is_err());
+        assert!(crop(&gray(), Rect::new(0, 1, 1, u32::MAX)).is_err());
+        assert!(crop(&gray(), Rect::new(1, 1, 3, 3)).is_ok());
+    }
+
+    #[test]
+    fn non_finite_deskew_angle_is_invalid() {
+        assert!(matches!(
+            deskew(&gray(), f64::NAN),
+            Err(ScanError::Invalid(_))
+        ));
+        assert!(deskew(&gray(), f64::INFINITY).is_err());
     }
 }

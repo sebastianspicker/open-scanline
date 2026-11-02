@@ -49,7 +49,7 @@ fn prepare_model_input(
     let input_outlets = model.input_outlets().map_err(onnx_error)?;
     if input_outlets.len() != 1 {
         return Err(ScanError::Unsupported(format!(
-            "run_user_onnx supports exactly one model input, found {}",
+            "ONNX input supports exactly one model input, found {}",
             input_outlets.len()
         )));
     }
@@ -236,7 +236,7 @@ fn output_summary(tensor: Tensor) -> Result<OnnxOutputSummary> {
     })
 }
 
-type NumericSummary = (Option<f64>, Option<f64>, Option<f64>, Vec<f64>);
+type NumericSummary = (Option<f64>, Option<f64>, Option<f64>, Vec<Option<f64>>);
 
 fn numeric_summary(tensor: &Tensor) -> Result<NumericSummary> {
     if tensor.datum_type() != f32::datum_type() {
@@ -249,7 +249,7 @@ fn numeric_summary(tensor: &Tensor) -> Result<NumericSummary> {
     let sample = view
         .iter()
         .take(64)
-        .map(|value| *value as f64)
+        .map(|value| Some(*value as f64).filter(|value| value.is_finite()))
         .collect::<Vec<_>>();
     if view.is_empty() {
         return Ok((Some(0.0), Some(0.0), Some(0.0), sample));

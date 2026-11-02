@@ -5,12 +5,12 @@ use crate::inbound::gui::app::report::{
 
 pub(super) fn render(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
     let report = app.job_report().expect("report selected by workspace");
-    stage(ui, stage_label(report), report.terminal.is_none());
-    title(ui, &report.title, "Untitled scan");
+    stage(ui, &tr(stage_label(report)), report.terminal.is_none());
+    title(ui, &report.title, &tr("ws.untitled_scan"));
     lead(ui, headline(report));
     if let Some(error) = &report.error {
         ui.add_space(space::L);
-        banner(ui, "This job stopped with an error", error);
+        banner(ui, &tr("ws.job_stopped"), error);
     }
     ui.add_space(space::XXL);
     columns(ui, |ui, left| {
@@ -24,10 +24,10 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
 
 fn stage_label(report: &JobReport) -> &'static str {
     match report.terminal {
-        None => "Scanning",
-        Some(JobTerminal::Completed(_)) => "Saved",
-        Some(JobTerminal::Cancelled) => "Cancelled",
-        Some(JobTerminal::Failed) => "Stopped",
+        None => "ws.stage_scanning",
+        Some(JobTerminal::Completed(_)) => "ws.saved",
+        Some(JobTerminal::Cancelled) => "ws.stage_cancelled",
+        Some(JobTerminal::Failed) => "ws.stage_stopped",
     }
 }
 
@@ -35,44 +35,53 @@ fn headline(report: &JobReport) -> String {
     let done = report.sides_complete;
     let limit = report.side_limit;
     match report.terminal {
-        None => format!(
-            "{done} of up to {limit} sides saved. {}",
-            phase(report.phase)
+        None => tr_args(
+            "ws.headline_running",
+            &[
+                ("done", &done.to_string()),
+                ("limit", &limit.to_string()),
+                ("phase", &tr(phase(report.phase))),
+            ],
         ),
         Some(JobTerminal::Completed(reason)) => completed(report, reason),
-        Some(JobTerminal::Cancelled) => {
-            format!("Cancelled after {done} of {limit} sides. Files marked saved are kept.")
-        }
-        Some(JobTerminal::Failed) => {
-            format!("Stopped after {done} of {limit} sides. Files marked saved are kept.")
-        }
+        Some(JobTerminal::Cancelled) => tr_args(
+            "ws.headline_cancelled",
+            &[("done", &done.to_string()), ("limit", &limit.to_string())],
+        ),
+        Some(JobTerminal::Failed) => tr_args(
+            "ws.headline_stopped",
+            &[("done", &done.to_string()), ("limit", &limit.to_string())],
+        ),
     }
 }
 
 fn phase(phase: JobPhase) -> &'static str {
     match phase {
-        JobPhase::Preparing => "Preparing the scanner…",
-        JobPhase::Acquiring => "Scanning the next side…",
-        JobPhase::Processing => "Processing the last side…",
-        JobPhase::Publishing => "Writing files…",
-        JobPhase::Finished => "Finishing…",
+        JobPhase::Preparing => "ws.phase_preparing",
+        JobPhase::Acquiring => "ws.phase_acquiring",
+        JobPhase::Processing => "ws.phase_processing",
+        JobPhase::Publishing => "ws.phase_publishing",
+        JobPhase::Finished => "ws.phase_finishing",
     }
 }
 
 fn completed(report: &JobReport, reason: Option<BatchStopReason>) -> String {
     let done = report.sides_complete;
     match reason {
-        Some(BatchStopReason::LimitReached) if feeder_may_hold_more(report) => format!(
-            "All {done} sides saved. Stopped at the side limit; check the feeder for sheets left over."
-        ),
-        Some(BatchStopReason::LimitReached) => {
-            format!("All {done} sides saved. Stopped at the side limit.")
+        Some(BatchStopReason::LimitReached) if feeder_may_hold_more(report) => {
+            tr_args("ws.done_limit_feeder", &[("done", &done.to_string())])
         }
-        Some(BatchStopReason::FeederExhausted) => format!(
-            "{done} sides saved. The feeder was empty before the {}-side limit.",
-            report.side_limit
+        Some(BatchStopReason::LimitReached) => {
+            tr_args("ws.done_limit", &[("done", &done.to_string())])
+        }
+        Some(BatchStopReason::FeederExhausted) => tr_args(
+            "ws.done_feeder_empty",
+            &[
+                ("done", &done.to_string()),
+                ("limit", &report.side_limit.to_string()),
+            ],
         ),
-        None => "The image is saved.".into(),
+        None => tr("ws.image_saved"),
     }
 }
 
@@ -83,37 +92,40 @@ fn feeder_may_hold_more(report: &JobReport) -> bool {
 }
 
 fn capture(ui: &mut egui::Ui, report: &JobReport) {
-    section(ui, "1", "Sides");
+    section(ui, "1", "ws.sec_sides");
     sheets::rail(ui, report);
     ui.add_space(space::XL);
-    detail(ui, "Scanner", &report.device, true);
-    detail(ui, "Source", &report.source, false);
-    let sides = if report.duplex {
-        "Both sides (duplex)"
+    detail(ui, "ws.scanner", &report.device, true);
+    detail(ui, "ws.source", &report.source, false);
+    let sides = tr(if report.duplex {
+        "ws.both_sides_duplex"
     } else {
-        "One side"
-    };
-    detail(ui, "Sides", sides, false);
+        "ws.one_side"
+    });
+    detail(ui, "ws.sides", &sides, false);
     detail(
         ui,
-        "Resolution",
-        &format!("{} dpi requested", report.dpi),
+        "ws.resolution",
+        &tr_args("ws.dpi_requested", &[("dpi", &report.dpi.to_string())]),
         false,
     );
     let area = match (report.width, report.height) {
-        (0, 0) => "Device maximum".to_string(),
+        (0, 0) => tr("ws.device_maximum"),
         (width, height) => {
             let axis = |pixels: u32| {
                 if pixels == 0 {
-                    "max".to_string()
+                    tr("ws.max_axis")
                 } else {
                     pixels.to_string()
                 }
             };
-            format!("{} × {} px requested", axis(width), axis(height))
+            tr_args(
+                "ws.px_requested",
+                &[("width", &axis(width)), ("height", &axis(height))],
+            )
         }
     };
-    detail(ui, "Scan area", &area, false);
+    detail(ui, "ws.scan_area", &area, false);
 }
 
 fn detail(ui: &mut egui::Ui, label: &str, value: &str, mono: bool) {
@@ -122,7 +134,11 @@ fn detail(ui: &mut egui::Ui, label: &str, value: &str, mono: bool) {
         egui::Layout::left_to_right(egui::Align::Min),
         |ui| {
             let label_width = 120.0_f32.min(ui.available_width() / 2.5);
-            text_cell(ui, label_width, RichText::new(label).color(color::GRAPHITE));
+            text_cell(
+                ui,
+                label_width,
+                RichText::new(tr(label)).color(color::GRAPHITE),
+            );
             let value = RichText::new(value);
             let value = if mono {
                 value.font(theme::mono(size::MONO))
@@ -150,7 +166,7 @@ fn text_cell(ui: &mut egui::Ui, width: f32, text: RichText) -> egui::Response {
 }
 
 fn manifest(ui: &mut egui::Ui, report: &JobReport) {
-    section(ui, "2", "Files");
+    section(ui, "2", "ws.sec_files");
     for kind in [
         OutputKind::Document,
         OutputKind::Image,
@@ -163,13 +179,10 @@ fn manifest(ui: &mut egui::Ui, report: &JobReport) {
     missing(ui, report);
     pages(ui, report);
     for file in files(report, OutputKind::ContactSheet) {
-        saved_row(ui, file, "Contact sheet");
+        saved_row(ui, file, "ws.contact_sheet");
     }
     ui.add_space(space::M);
-    note(
-        ui,
-        "Nothing was uploaded. Files marked saved are on this computer.",
-    );
+    note(ui, tr("ws.nothing_uploaded"));
 }
 
 fn files(report: &JobReport, kind: OutputKind) -> impl Iterator<Item = &PublishedFile> {
@@ -181,10 +194,10 @@ fn files(report: &JobReport, kind: OutputKind) -> impl Iterator<Item = &Publishe
 
 fn role(kind: OutputKind) -> &'static str {
     match kind {
-        OutputKind::Document => "Document",
-        OutputKind::RawImage => "Unprocessed copy",
-        OutputKind::ContactSheet => "Contact sheet",
-        OutputKind::Image | OutputKind::Page => "Image",
+        OutputKind::Document => "ws.role_document",
+        OutputKind::RawImage => "ws.role_raw_copy",
+        OutputKind::ContactSheet => "ws.contact_sheet",
+        OutputKind::Image | OutputKind::Page => "ws.role_image",
     }
 }
 
@@ -199,11 +212,11 @@ fn missing(ui: &mut egui::Ui, report: &JobReport) {
                 .any(|file| file.path == output.path)
     }) {
         let status = match (running, requested.kind) {
-            (true, OutputKind::Document) => "Written after the last side",
-            (true, _) => "Waiting",
-            (false, _) => "Not created",
+            (true, OutputKind::Document) => "ws.written_after_last",
+            (true, _) => "ws.waiting",
+            (false, _) => "ws.not_created",
         };
-        ledger_row(ui, &file_name(&requested.path), status, false);
+        ledger_row(ui, &file_name(&requested.path), &tr(status), false);
     }
 }
 
@@ -226,18 +239,21 @@ fn pages(ui: &mut egui::Ui, report: &JobReport) {
         saved_pages(ui, &saved, first);
     } else if report.side_limit > 1 {
         let message = if report.terminal.is_none() {
-            "No page images saved yet."
+            "ws.no_pages_yet"
         } else {
-            "No page images were saved."
+            "ws.no_pages_saved"
         };
-        note(ui, message);
+        note(ui, tr(message));
     }
     if report.terminal.is_none() && report.sides_complete < report.side_limit {
         note(
             ui,
-            format!(
-                "Up to {} more to come.",
-                report.side_limit - report.sides_complete
+            tr_args(
+                "ws.more_to_come",
+                &[(
+                    "count",
+                    &(report.side_limit - report.sides_complete).to_string(),
+                )],
             ),
         );
     } else if report.terminal.is_some() {
@@ -248,7 +264,10 @@ fn pages(ui: &mut egui::Ui, report: &JobReport) {
 fn saved_pages(ui: &mut egui::Ui, saved: &[&PublishedFile], first: &PublishedFile) {
     ui.add_space(space::M);
     if let Some(folder) = first.path.parent() {
-        ui.label(label_text(&format!("{} page images in", saved.len())));
+        ui.label(label_text(&tr_args(
+            "ws.page_images_in",
+            &[("count", &saved.len().to_string())],
+        )));
         ui.label(
             RichText::new(display_path(folder))
                 .font(theme::mono(size::MONO_SMALL))
@@ -264,7 +283,7 @@ fn saved_pages(ui: &mut egui::Ui, saved: &[&PublishedFile], first: &PublishedFil
         .auto_shrink([false, true])
         .show(ui, |ui| {
             for file in saved {
-                ledger_row(ui, &file_name(&file.path), "Saved", true);
+                ledger_row(ui, &file_name(&file.path), &tr("ws.saved"), true);
             }
         });
 }
@@ -287,16 +306,21 @@ fn missing_page_summary(report: &JobReport) -> Option<(String, String)> {
         format!("{} … {}", file_name(&first.path), file_name(&last.path))
     };
     let status = if missing.len() == 1 {
-        "Not created".to_owned()
+        tr("ws.not_created")
     } else {
-        format!("{} not created", missing.len())
+        tr_args("ws.n_not_created", &[("count", &missing.len().to_string())])
     };
     Some((name, status))
 }
 
 fn saved_row(ui: &mut egui::Ui, file: &PublishedFile, role: &str) {
-    ledger_row(ui, &file_name(&file.path), &format!("{role}, saved"), true)
-        .on_hover_text(file.path.display().to_string());
+    ledger_row(
+        ui,
+        &file_name(&file.path),
+        &tr_args("ws.role_saved", &[("role", &tr(role))]),
+        true,
+    )
+    .on_hover_text(file.path.display().to_string());
 }
 
 fn file_name(path: &std::path::Path) -> String {
@@ -359,15 +383,12 @@ pub(super) fn actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
     action_layout(ui, &folder, running, |ui| {
         if running {
             cancel(ui, app);
-        } else if ui.add(primary("Start another scan")).clicked() {
+        } else if ui.add(primary(&tr("ws.start_another"))).clicked() {
             app.clear_job_report();
         }
     });
     if running {
-        note(
-            ui,
-            "Cancelling keeps saved pages. The document may not be created.",
-        );
+        note(ui, tr("ws.cancel_note"));
     }
 }
 
@@ -399,7 +420,11 @@ fn action_layout<R>(
 
 fn destination(ui: &mut egui::Ui, folder: &std::path::Path, running: bool, truncate: bool) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(label_text(if running { "Saving to" } else { "Saved to" }));
+        ui.label(label_text(&tr(if running {
+            "ws.saving_to"
+        } else {
+            "ws.saved_to"
+        })));
         let path =
             egui::Label::new(RichText::new(display_path(folder)).font(theme::mono(size::MONO)));
         let response = if truncate {
@@ -416,15 +441,15 @@ fn cancel(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
         .state
         .cancel_requested
         .load(std::sync::atomic::Ordering::Relaxed);
-    let label = if cancelling {
-        "Cancelling…"
+    let label = tr(if cancelling {
+        "ws.cancelling"
     } else {
-        "Cancel scan"
-    };
+        "ws.cancel_scan"
+    });
     if ui
         .add_enabled(
             !cancelling,
-            secondary(label).min_size(egui::vec2(160.0, size::ACTION)),
+            secondary(&label).min_size(egui::vec2(160.0, size::ACTION)),
         )
         .clicked()
     {

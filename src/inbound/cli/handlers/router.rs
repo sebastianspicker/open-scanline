@@ -3,6 +3,8 @@ mod routes;
 
 use super::{cancellation, commands, info};
 use crate::inbound::cli::args::{Commands, OcrModelCommand};
+use crate::inbound::gui::run_gui;
+use crate::inbound::plugin::run_plugin_mode_with_token;
 use std::path::{Path, PathBuf};
 
 pub(super) fn dispatch_command(command: Commands, config_path: Option<&Path>) -> i32 {
@@ -53,7 +55,7 @@ fn dispatch_local(command: Commands, config_path: Option<&Path>) -> i32 {
             set_paper,
             set_device,
         }),
-        Commands::Gui => commands::gui(config_path),
+        Commands::Gui => run_gui(config_path),
         Commands::Plugin { out, device, quiet } => plugin(config_path, out, device, quiet),
         Commands::Convert {
             inp,
@@ -112,7 +114,13 @@ fn plugin(
     quiet: bool,
 ) -> i32 {
     cancellation::with_registered_token(move |cancellation| {
-        commands::plugin(config_path, out, device, quiet, cancellation)
+        run_plugin_mode_with_token(
+            config_path,
+            out.as_deref(),
+            quiet,
+            device.as_deref(),
+            cancellation,
+        )
     })
 }
 
@@ -150,8 +158,4 @@ fn ocr_model(command: OcrModelCommand) -> i32 {
         } => commands::ocr_model_install(detection, recognition),
         OcrModelCommand::Status => commands::ocr_model_status(),
     }
-}
-
-pub(super) fn clear_pdf_password(pdf_password: &mut Option<String>) {
-    export::clear_pdf_password(pdf_password);
 }

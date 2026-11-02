@@ -3,7 +3,7 @@ use crate::domain::acquisition::PaperSize;
 use crate::inbound::gui::state::paper_label;
 
 pub(super) fn scan(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
-    section(ui, "1", "Scanner and pages");
+    section(ui, "1", "ws.sec_scanner");
     scanner(ui, state);
     ui.add_space(space::L);
     source_capture(ui, state, batch);
@@ -12,7 +12,7 @@ pub(super) fn scan(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
     side_limit(ui, state, *batch);
     ui.add_space(space::L);
     scan_area(ui, state);
-    if quiet(ui, "Image corrections…", true).clicked() {
+    if quiet(ui, &tr("ws.image_corrections"), true).clicked() {
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(TOOLS), true));
         state.active_tab = 1;
@@ -20,8 +20,8 @@ pub(super) fn scan(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
 }
 
 pub(super) fn output(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
-    section(ui, "2", "Files");
-    field(ui, "File name", &mut state.output_name);
+    section(ui, "2", "ws.sec_files");
+    field(ui, "ws.file_name", &mut state.output_name);
     if let Err(error) = crate::domain::settings::validate_output_name(&state.output_name) {
         problem(ui, plan::name_problem(&error.to_string()));
     }
@@ -29,26 +29,23 @@ pub(super) fn output(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     choice(
         ui,
         "workspace-format",
-        "Format",
+        "ws.format",
         &mut state.output_fmt,
         &[
-            ("pdf", "PDF document"),
-            ("png", "PNG image"),
-            ("jpg", "JPEG image"),
-            ("tif", "TIFF image"),
-            ("webp", "WebP image"),
-            ("bmp", "BMP image"),
-            ("gif", "GIF image"),
-            ("jxl", "JPEG XL image"),
+            ("pdf", "ws.fmt_pdf"),
+            ("png", "ws.fmt_png"),
+            ("jpg", "ws.fmt_jpg"),
+            ("tif", "ws.fmt_tif"),
+            ("webp", "ws.fmt_webp"),
+            ("bmp", "ws.fmt_bmp"),
+            ("gif", "ws.fmt_gif"),
+            ("jxl", "ws.fmt_jxl"),
         ],
     );
     if batch {
         document_controls(ui, state);
         if state.output_fmt == "jxl" {
-            problem(
-                ui,
-                "JPEG XL holds a single image. Choose another format for multiple sides.",
-            );
+            problem(ui, tr("ws.jxl_multi"));
         }
     }
     plan::ledger(ui, state, batch);
@@ -60,10 +57,7 @@ fn document_controls(ui: &mut egui::Ui, state: &mut GuiState) {
         return;
     }
     ui.add_space(space::S);
-    ui.checkbox(
-        &mut state.multipage,
-        "Also combine the pages into one document",
-    );
+    ui.checkbox(&mut state.multipage, tr("ws.combine_pages"));
     if state.multipage {
         ui.add_space(space::XS);
         choice(
@@ -77,12 +71,20 @@ fn document_controls(ui: &mut egui::Ui, state: &mut GuiState) {
 }
 
 fn scanner(ui: &mut egui::Ui, state: &mut GuiState) {
-    let device_label = ui.label(label_text("Scanner"));
+    let device_label = ui.label(label_text(&tr("ws.scanner")));
     let old = state.device.clone();
     egui::ComboBox::from_id_salt("workspace-device")
         .width(ui.available_width())
-        .selected_text(RichText::new(&state.device).font(theme::mono(size::MONO)))
+        .selected_text(
+            RichText::new(state.device_label(&state.device)).font(theme::mono(size::MONO)),
+        )
         .show_ui(ui, |ui| {
+            if state.device_missing() {
+                let device = state.device.clone();
+                let label =
+                    RichText::new(state.device_label(&device)).font(theme::mono(size::MONO));
+                ui.selectable_value(&mut state.device, device, label);
+            }
             for device in &state.devices {
                 ui.selectable_value(
                     &mut state.device,
@@ -97,8 +99,8 @@ fn scanner(ui: &mut egui::Ui, state: &mut GuiState) {
         state.refresh_maintenance_capabilities();
     }
     ui.horizontal_wrapped(|ui| {
-        note(ui, scanner_note(state));
-        if quiet(ui, "Refresh", true).clicked() {
+        note(ui, tr(scanner_note(state)));
+        if quiet(ui, &tr("ws.refresh"), true).clicked() {
             state.refresh_devices();
         }
     });
@@ -106,15 +108,17 @@ fn scanner(ui: &mut egui::Ui, state: &mut GuiState) {
 
 fn scanner_note(state: &GuiState) -> &'static str {
     if state.discovery_loading {
-        "Looking for scanners…"
+        "ws.looking_for_scanners"
+    } else if state.device_missing() {
+        "ws.scanner_missing"
     } else if state.devices.is_empty() {
-        "No scanner found. Connect one and refresh, or use an image file."
+        "ws.no_scanner"
     } else if state.device == "mock" {
-        "Built-in test source. Generates sample pages, no hardware needed."
+        "ws.scanner_mock"
     } else if state.device.starts_with("file:") {
-        "File source. Repeats the same image for every side."
+        "ws.scanner_file"
     } else {
-        "Settings the scanner doesn't support are adjusted by the scanner."
+        "ws.scanner_adjusts"
     }
 }
 
@@ -123,20 +127,20 @@ fn source_capture(ui: &mut egui::Ui, state: &mut GuiState, batch: &mut bool) {
         choice(
             &mut columns[0],
             "workspace-source",
-            "Paper source",
+            "ws.paper_source",
             &mut state.media,
             &[
-                ("flatbed", "Flatbed"),
-                ("document", "Document feeder"),
+                ("flatbed", "ws.media_flatbed"),
+                ("document", "ws.media_feeder"),
                 ("adf", "ADF"),
-                ("film", "Film"),
+                ("film", "ws.media_film"),
             ],
         );
         segmented(
             &mut columns[1],
-            "Capture",
+            "ws.capture",
             batch,
-            [("Single image", false), ("Multiple sides", true)],
+            [("ws.single_image", false), ("ws.multiple_sides", true)],
         );
     });
 }
@@ -146,7 +150,7 @@ fn sides_resolution(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     ui.columns(2, |columns| {
         duplex_choice(&mut columns[0], state, batch, document);
         let ui = &mut columns[1];
-        let label = ui.label(label_text("Resolution"));
+        let label = ui.label(label_text(&tr("ws.resolution")));
         ui.add_sized(
             [ui.available_width(), size::CONTROL],
             egui::DragValue::new(&mut state.dpi)
@@ -154,32 +158,32 @@ fn sides_resolution(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
                 .suffix(" dpi"),
         )
         .labelled_by(label.id)
-        .on_hover_text("Drag or type. The scanner may use its nearest supported value.");
+        .on_hover_text(tr("ws.resolution_hint"));
     });
     if state.duplex && (!document || !batch) {
-        problem(ui, "Duplex needs the document feeder and multiple sides.");
+        problem(ui, tr("ws.duplex_needs_feeder"));
     }
 }
 
 fn duplex_choice(ui: &mut egui::Ui, state: &mut GuiState, batch: bool, document: bool) {
-    let label = ui.label(label_text("Sides"));
+    let label = ui.label(label_text(&tr("ws.sides")));
     ui.add_enabled_ui((document && batch) || state.duplex, |ui| {
         egui::ComboBox::from_id_salt("workspace-sides")
             .width(ui.available_width())
-            .selected_text(if state.duplex {
-                "Both sides"
+            .selected_text(tr(if state.duplex {
+                "ws.both_sides"
             } else {
-                "One side"
-            })
+                "ws.one_side"
+            }))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut state.duplex, false, "One side");
+                ui.selectable_value(&mut state.duplex, false, tr("ws.one_side"));
                 ui.add_enabled_ui(document && batch, |ui| {
-                    ui.selectable_value(&mut state.duplex, true, "Both sides (duplex)");
+                    ui.selectable_value(&mut state.duplex, true, tr("ws.both_sides_duplex"));
                 });
             })
             .response
             .labelled_by(label.id)
-            .on_disabled_hover_text("Both sides needs the document feeder and multiple sides.");
+            .on_disabled_hover_text(tr("ws.both_sides_needs"));
     });
 }
 
@@ -189,7 +193,7 @@ fn side_limit(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     }
     ui.add_space(space::M);
     ui.horizontal(|ui| {
-        let label = ui.label(label_text("Side limit"));
+        let label = ui.label(label_text(&tr("ws.side_limit")));
         ui.add_sized(
             [72.0, size::CONTROL],
             egui::DragValue::new(&mut state.batch_pages).range(1..=1000),
@@ -205,7 +209,10 @@ fn side_limit(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
         };
         problem(
             ui,
-            format!("Duplex scans sides in pairs. Use an even limit, such as {suggestion}."),
+            tr_args(
+                "ws.duplex_pairs",
+                &[("suggestion", &suggestion.to_string())],
+            ),
         );
     }
 }
@@ -213,25 +220,28 @@ fn side_limit(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
 fn side_limit_note(state: &GuiState) -> String {
     let sides = state.batch_pages;
     if !state.duplex || !sides.is_multiple_of(2) {
-        return "Scanning stops here or when the feeder is empty.".into();
+        return tr("ws.limit_note");
     }
     if state.device == "mock" {
-        format!("{sides} simulated sides.")
+        tr_args("ws.limit_simulated", &[("sides", &sides.to_string())])
     } else if state.device.starts_with("file:") {
-        format!("{sides} repeated sides.")
+        tr_args("ws.limit_repeated", &[("sides", &sides.to_string())])
     } else {
-        format!("= {} double-sided sheets.", sides / 2)
+        tr_args("ws.limit_sheets", &[("sheets", &(sides / 2).to_string())])
     }
 }
 
 fn scan_area(ui: &mut egui::Ui, state: &mut GuiState) {
     ui.collapsing(
-        RichText::new(format!("Scan area  {}", state.scan_area_summary())),
+        RichText::new(tr_args(
+            "ws.scan_area_summary",
+            &[("summary", &state.scan_area_summary())],
+        )),
         |ui| {
             paper_choice(ui, state);
             if state.custom_area {
                 ui.horizontal_wrapped(|ui| {
-                    let width_label = ui.label(label_text("Width"));
+                    let width_label = ui.label(label_text(&tr("ws.width")));
                     ui.add(
                         egui::DragValue::new(&mut state.width)
                             .range(1..=16384)
@@ -239,7 +249,7 @@ fn scan_area(ui: &mut egui::Ui, state: &mut GuiState) {
                     )
                     .labelled_by(width_label.id);
                     ui.add_space(space::S);
-                    let height_label = ui.label(label_text("Height"));
+                    let height_label = ui.label(label_text(&tr("ws.height")));
                     ui.add(
                         egui::DragValue::new(&mut state.height)
                             .range(1..=16384)
@@ -248,20 +258,17 @@ fn scan_area(ui: &mut egui::Ui, state: &mut GuiState) {
                     .labelled_by(height_label.id);
                 });
             }
-            note(
-                ui,
-                "Device maximum scans the full glass or page. Custom sizes are pixels at the selected resolution.",
-            );
+            note(ui, tr("ws.area_note"));
         },
     );
 }
 
 fn paper_choice(ui: &mut egui::Ui, state: &mut GuiState) {
-    let label_response = ui.label(label_text("Paper size"));
+    let label_response = ui.label(label_text(&tr("ws.paper_size")));
     let selected = if state.custom_area {
-        "Custom"
+        tr("ws.custom")
     } else {
-        paper_label(state.paper)
+        paper_text(state.paper)
     };
     let mut choice = None;
     egui::ComboBox::from_id_salt("workspace-paper")
@@ -271,11 +278,14 @@ fn paper_choice(ui: &mut egui::Ui, state: &mut GuiState) {
         .show_ui(ui, |ui| {
             for paper in PaperSize::ALL {
                 let current = !state.custom_area && state.paper == paper;
-                if ui.selectable_label(current, paper_label(paper)).clicked() {
+                if ui.selectable_label(current, paper_text(paper)).clicked() {
                     choice = Some(Some(paper));
                 }
             }
-            if ui.selectable_label(state.custom_area, "Custom").clicked() {
+            if ui
+                .selectable_label(state.custom_area, tr("ws.custom"))
+                .clicked()
+            {
                 choice = Some(None);
             }
         })
@@ -304,23 +314,24 @@ fn paper_choice(ui: &mut egui::Ui, state: &mut GuiState) {
     }
 }
 
+fn paper_text(paper: PaperSize) -> String {
+    match paper {
+        PaperSize::Auto => tr("ws.device_maximum"),
+        other => paper_label(other).to_owned(),
+    }
+}
+
 fn pdf_controls(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     ui.add_space(space::L);
     let pdf = plan::writes_pdf(state, batch);
     ui.add_enabled_ui(pdf || state.searchable_pdf, |ui| {
-        ui.checkbox(
-            &mut state.searchable_pdf,
-            "Searchable PDF (adds a text layer)",
-        );
+        ui.checkbox(&mut state.searchable_pdf, tr("ws.searchable_pdf"));
     });
     if !pdf {
         if state.searchable_pdf || !state.pdf_password.is_empty() {
-            problem(
-                ui,
-                "Choose PDF output, or turn off searchable text and clear the PDF password.",
-            );
+            problem(ui, tr("ws.pdf_conflict"));
         } else {
-            note(ui, "Searchable text and passwords need PDF output.");
+            note(ui, tr("ws.needs_pdf"));
         }
     }
     if state.searchable_pdf {
@@ -329,8 +340,8 @@ fn pdf_controls(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
     }
     ui.add_space(space::M);
     ui.add_enabled_ui(pdf || !state.pdf_password.is_empty(), |ui| {
-        ui.collapsing("PDF password", |ui| {
-            let label = ui.label(label_text("Password"));
+        ui.collapsing(tr("ws.pdf_password"), |ui| {
+            let label = ui.label(label_text(&tr("ws.password")));
             ui.add(
                 egui::TextEdit::singleline(&mut state.pdf_password)
                     .password(true)
@@ -338,31 +349,22 @@ fn pdf_controls(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
                     .margin(egui::Margin::symmetric(10, 10)),
             )
             .labelled_by(label.id);
-            note(
-                ui,
-                "Used for this session only. It is never written to settings.",
-            );
+            note(ui, tr("ws.password_note"));
         });
     });
     more_output(ui, state, batch);
 }
 
 fn more_output(ui: &mut egui::Ui, state: &mut GuiState, batch: bool) {
-    ui.collapsing("More output options", |ui| {
+    ui.collapsing(tr("ws.more_output"), |ui| {
         ui.add_enabled_ui(!batch, |ui| {
-            ui.checkbox(
-                &mut state.save_raw,
-                "Keep an unprocessed TIFF copy (single image)",
-            );
+            ui.checkbox(&mut state.save_raw, tr("ws.keep_raw"));
         });
         ui.add_enabled_ui(batch, |ui| {
-            ui.checkbox(
-                &mut state.contact_sheet,
-                "Save a contact sheet (multiple sides)",
-            );
+            ui.checkbox(&mut state.contact_sheet, tr("ws.save_contact_sheet"));
         });
         ui.add_space(space::S);
-        field(ui, "Scanner color profile", &mut state.scanner_profile_path);
+        field(ui, "ws.scanner_profile", &mut state.scanner_profile_path);
     });
 }
 
@@ -370,21 +372,19 @@ fn ocr_controls(ui: &mut egui::Ui, state: &mut GuiState) {
     if ui.available_width() >= 400.0 {
         ui.columns(2, |columns| {
             ocr_engine(&mut columns[0], &mut state.ocr_engine);
-            field(&mut columns[1], "Text language", &mut state.ocr_language);
+            field(&mut columns[1], "ws.text_language", &mut state.ocr_language);
         });
     } else {
         ocr_engine(ui, &mut state.ocr_engine);
-        field(ui, "Text language", &mut state.ocr_language);
+        field(ui, "ws.text_language", &mut state.ocr_language);
     }
     note(
         ui,
-        match state.ocr_engine.as_str() {
-            "tesseract" => {
-                "Needs Tesseract and its language data installed. Checked when the PDF is written."
-            }
-            "ocrs" => "Needs local OCRS model files. Preview quality, printed Latin English only.",
-            _ => "Basic 5×7 template matching for simple printed text, not general OCR.",
-        },
+        tr(match state.ocr_engine.as_str() {
+            "tesseract" => "ws.ocr_tesseract_note",
+            "ocrs" => "ws.ocr_ocrs_note",
+            _ => "ws.ocr_basic_note",
+        }),
     );
 }
 
@@ -392,12 +392,12 @@ fn ocr_engine(ui: &mut egui::Ui, engine: &mut String) {
     choice(
         ui,
         "workspace-ocr",
-        "Text recognition",
+        "ws.text_recognition",
         engine,
         &[
-            ("offline", "Built-in templates"),
+            ("offline", "ws.ocr_builtin"),
             ("tesseract", "Tesseract"),
-            ("ocrs", "OCRS (local models)"),
+            ("ocrs", "ws.ocr_ocrs"),
         ],
     );
 }

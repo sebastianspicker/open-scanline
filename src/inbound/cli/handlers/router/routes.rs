@@ -71,6 +71,7 @@ pub(super) fn process(options: ProcessOptions, config_path: Option<&Path>) -> i3
         quality,
         overwrite,
     } = options;
+    warn_unused_quality(quality, &out);
     let (config, export) = match configured_export(config_path, export_options) {
         Ok(value) => value,
         Err(code) => return code,
@@ -99,6 +100,16 @@ pub(super) fn process(options: ProcessOptions, config_path: Option<&Path>) -> i3
             cancellation,
         )
     })
+}
+
+fn warn_unused_quality(quality: Option<u8>, out: &Path) {
+    let extension = out
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    if quality.is_some() && !matches!(extension.as_deref(), Some("jpg" | "jpeg" | "jxl")) {
+        eprintln!("warning: --quality only applies to JPEG and JPEG XL output; ignored");
+    }
 }
 
 pub(super) fn batch(options: BatchOptions, config_path: Option<&Path>) -> i32 {

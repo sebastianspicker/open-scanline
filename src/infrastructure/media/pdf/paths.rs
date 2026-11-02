@@ -1,7 +1,5 @@
 use super::check_pdf_cancellation;
-use super::document::{
-    create_pdf_document, create_pdf_parent, finish_pdf_document, validate_pdf_options, PdfOptions,
-};
+use super::document::{create_pdf_document, finish_pdf_document, validate_pdf_options, PdfOptions};
 use super::page::{PdfPageBuilder, PdfPageContext};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
@@ -47,11 +45,12 @@ pub fn save_pdf_from_paths_with_options_and_cancellation(
     options: &PdfOptions,
     cancellation: Option<&CancellationToken>,
 ) -> Result<PathBuf> {
-    save_pdf_from_paths_with_options_and_transform_and_cancellation(
+    save_pdf_from_paths_with_loader_and_transform(
         pages,
-        out,
+        out.as_ref(),
         options,
-        |image| Ok(image.clone()),
+        |path| load_image(path),
+        Ok,
         cancellation,
     )
 }
@@ -110,7 +109,6 @@ where
     F: FnMut(ImageBuffer) -> Result<ImageBuffer>,
 {
     validate_path_pdf_request(pages, options, cancellation)?;
-    create_pdf_parent(out)?;
     let (mut document, pages_id, searchable_font) = create_pdf_document(options, cancellation)?;
     let mut page_ids = Vec::with_capacity(pages.len());
     {

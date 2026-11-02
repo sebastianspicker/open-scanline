@@ -12,12 +12,16 @@ use std::time::Duration;
 /// the requested logical side count. A large feeder job can legitimately run
 /// for hours at high DPI, but it must never become unbounded.
 pub(crate) fn document_batch_timeout(max_pages: u32) -> Duration {
+    document_batch_timeout_per_side(max_pages, 45)
+}
+
+/// [`document_batch_timeout`] with a caller-chosen allowance per side.
+pub(crate) fn document_batch_timeout_per_side(max_pages: u32, seconds_per_side: u64) -> Duration {
     const BASE_SECONDS: u64 = 60;
-    const SECONDS_PER_SIDE: u64 = 45;
     const MAX_SECONDS: u64 = 12 * 60 * 60;
     Duration::from_secs(
         BASE_SECONDS
-            .saturating_add(u64::from(max_pages).saturating_mul(SECONDS_PER_SIDE))
+            .saturating_add(u64::from(max_pages).saturating_mul(seconds_per_side))
             .min(MAX_SECONDS),
     )
 }
@@ -29,23 +33,6 @@ const AVAILABILITY_PROBE_CAPTURE_LIMIT: usize = 64 * 1024;
 pub(super) struct CommandOutputLimits<'a> {
     pub(super) capture_bytes: usize,
     pub(super) artifacts: Option<ArtifactWatch<'a>>,
-}
-
-pub(crate) fn run_command(
-    spec: &CommandSpec,
-    timeout: Duration,
-    cancelled: &Mutex<bool>,
-    command_name: &str,
-    cancellation_message: &str,
-) -> Result<CommandOutput> {
-    run_contained_command(
-        spec,
-        timeout,
-        cancelled,
-        None,
-        command_name,
-        cancellation_message,
-    )
 }
 
 /// Run a short, low-output command used only to determine whether a backend is
@@ -70,24 +57,6 @@ pub(crate) fn availability_probe_succeeds(
         },
     )
     .is_ok_and(|output| output.success)
-}
-
-pub(crate) fn run_command_with_cancellation(
-    spec: &CommandSpec,
-    timeout: Duration,
-    cancelled: &Mutex<bool>,
-    cancellation: Option<&CancellationToken>,
-    command_name: &str,
-    cancellation_message: &str,
-) -> Result<CommandOutput> {
-    run_contained_command(
-        spec,
-        timeout,
-        cancelled,
-        cancellation,
-        command_name,
-        cancellation_message,
-    )
 }
 
 /// Run a contained command with bounded pipes, cancellation, and process-tree

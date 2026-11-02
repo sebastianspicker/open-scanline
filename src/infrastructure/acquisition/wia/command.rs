@@ -3,9 +3,8 @@ mod templates;
 use super::probing::powershell_spec;
 use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::PixelFormat;
-use crate::error::Result;
 use crate::infrastructure::runtime::{CommandOutput, CommandSpec};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Build the WIA COM transfer invocation as data for inspection/injection.
 /// Values are quoted for the PowerShell script; dimensions and DPI remain
@@ -141,48 +140,14 @@ fn render_script(template: &str, data: &TransferData, max_pages: u32) -> String 
         .replace("__OSL_WIDTH__", &data.width.to_string())
         .replace("__OSL_HEIGHT__", &data.height.to_string())
 }
-pub(super) fn numbered_page_outputs(directory: &Path) -> Result<Vec<PathBuf>> {
-    let mut pages = std::fs::read_dir(directory)?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.strip_prefix("page_")
-                        .and_then(|number| number.strip_suffix(".png"))
-                        .is_some_and(|number| {
-                            number.len() == 6 && number.bytes().all(|b| b.is_ascii_digit())
-                        })
-                })
-        })
-        .collect::<Vec<_>>();
-    pages.sort_by_key(|path| {
-        path.file_stem()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_prefix("page_"))
-            .and_then(|number| number.parse::<u32>().ok())
-            .unwrap_or(u32::MAX)
-    });
-    Ok(pages)
-}
-
 pub(super) fn feeder_exhausted(output: &CommandOutput) -> bool {
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    )
-    .to_ascii_lowercase();
-    text.contains("osl_feeder_exhausted")
-        || [
-            "out of documents",
-            "no documents",
-            "document feeder empty",
-            "paper empty",
-            "no paper",
-        ]
-        .iter()
-        .any(|message| text.contains(message))
+    );
+    text.to_ascii_lowercase().contains("osl_feeder_exhausted")
+        || crate::infrastructure::acquisition::command_backend::mentions_feeder_exhausted(&text)
 }
 
 #[cfg(test)]

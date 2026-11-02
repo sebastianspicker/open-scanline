@@ -3,8 +3,9 @@ use crate::domain::acquisition::{ScanMode, ScanRequest};
 use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::runtime::{
-    document_batch_timeout, validate_artifact_quota, ArtifactQuota, CommandRunner, CommandSession,
-    CommandSpec, ImageDecoder, TemporaryOutput,
+    document_batch_timeout, document_batch_timeout_per_side, validate_artifact_quota,
+    ArtifactQuota, ArtifactWatch, CommandRunner, CommandSession, CommandSpec, ImageDecoder,
+    TemporaryOutput,
 };
 use std::time::Duration;
 
@@ -43,13 +44,15 @@ pub(crate) fn run_materialized_scan_command(
     quota: ArtifactQuota,
     failure_name: &str,
 ) -> Result<ImageBuffer> {
-    let command_output = runner.run_with_cancellation_and_artifact_quota(
+    let command_output = runner.run(
         spec,
         scan_timeout(),
         session.cancelled(),
         session.cancellation_token().as_ref(),
-        output.directory(),
-        quota,
+        Some(ArtifactWatch {
+            directory: output.directory(),
+            quota,
+        }),
     )?;
     validate_artifact_quota(output.directory(), quota)?;
     session.decode_materialized_output(&command_output, output.path(), decoder, failure_name)
@@ -58,8 +61,6 @@ pub(crate) fn run_materialized_scan_command(
 const SCAN_TIMEOUT_ENV: &str = "OPEN_SCANLINE_SCAN_TIMEOUT_SECS";
 const PROBE_TIMEOUT_ENV: &str = "OPEN_SCANLINE_PROBE_TIMEOUT_SECS";
 const DEFAULT_SCAN_TIMEOUT_SECS: u64 = 90;
-const BATCH_BASE_SECONDS: u64 = 60;
-const BATCH_MAX_SECONDS: u64 = 12 * 60 * 60;
 
 /// Parse a timeout override in whole seconds; `None` for absent, malformed or
 /// out-of-range (outside 1..=3600) values so the caller keeps its default.
@@ -93,11 +94,7 @@ pub(crate) fn batch_timeout(max_pages: u32) -> Duration {
 fn batch_timeout_with(max_pages: u32, per_side: Option<u64>) -> Duration {
     match per_side {
         None => document_batch_timeout(max_pages),
-        Some(seconds) => Duration::from_secs(
-            BATCH_BASE_SECONDS
-                .saturating_add(u64::from(max_pages).saturating_mul(seconds))
-                .min(BATCH_MAX_SECONDS),
-        ),
+        Some(seconds) => document_batch_timeout_per_side(max_pages, seconds),
     }
 }
 
@@ -124,7 +121,7 @@ mod tests {
         assert_eq!(batch_timeout_with(4, Some(10)), Duration::from_secs(100));
         assert_eq!(
             batch_timeout_with(1000, Some(3600)),
-            Duration::from_secs(BATCH_MAX_SECONDS)
+            Duration::from_secs(12 * 60 * 60)
         );
     }
 }

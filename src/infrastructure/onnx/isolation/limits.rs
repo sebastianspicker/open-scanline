@@ -20,8 +20,14 @@ pub(super) fn apply_worker_limits() -> Result<()> {
     set_limit(libc::RLIMIT_AS, ADDRESS_SPACE_BYTES, "address space")?;
     set_limit(libc::RLIMIT_CPU, CPU_SECONDS, "CPU time")
 }
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(all(any(target_os = "linux", target_os = "android"), target_env = "gnu"))]
 type RlimitResource = libc::__rlimit_resource_t;
+// musl and bionic declare `setrlimit(resource: c_int, ..)`.
+#[cfg(all(
+    any(target_os = "linux", target_os = "android"),
+    not(target_env = "gnu")
+))]
+type RlimitResource = libc::c_int;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_limit(resource: RlimitResource, value: libc::rlim_t, name: &str) -> Result<()> {
     let limit = libc::rlimit {

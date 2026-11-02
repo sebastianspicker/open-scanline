@@ -9,9 +9,9 @@ use std::path::Path;
 
 /// A private artifact directory and the quota enforced while a child runs.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ArtifactWatch<'a> {
-    pub(crate) directory: &'a Path,
-    pub(crate) quota: ArtifactQuota,
+pub struct ArtifactWatch<'a> {
+    pub directory: &'a Path,
+    pub quota: ArtifactQuota,
 }
 
 const ARTIFACT_PER_IMAGE_OVERHEAD: u64 = 1024 * 1024;
@@ -21,7 +21,9 @@ const ARTIFACT_PER_IMAGE_OVERHEAD: u64 = 1024 * 1024;
 /// Each requested logical side receives enough room for its decoded pixel
 /// buffer plus a small encoded-image overhead. The whole directory remains
 /// capped near the product-wide decoded-image ceiling, so a feeder cannot use
-/// its page limit to turn a bounded scan into an unbounded disk write.
+/// its page limit to turn a bounded scan into an unbounded disk write. With a
+/// streaming SANE batch the cap bounds the private folder at any one moment
+/// (the pages not yet published), not the total written over a run.
 pub(crate) fn artifact_quota_for_request(
     request: &ScanRequest,
     max_pages: u32,
@@ -89,12 +91,17 @@ fn add_artifact_entry(
     // DirEntry::metadata performs fresh non-following metadata access on Unix.
     // Windows may return enumeration-time metadata, so use a fresh path lookup.
     // https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata
-    let metadata = fresh_entry_metadata(&entry).map_err(|error| {
-        ScanError::Unsupported(format!(
-            "could not inspect native artifact {}: {error}",
-            entry.path().display()
-        ))
-    })?;
+    let metadata = match fresh_entry_metadata(&entry) {
+        Ok(metadata) => metadata,
+        // A streaming consumer may remove a finished page after read_dir.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ScanError::Unsupported(format!(
+                "could not inspect native artifact {}: {error}",
+                entry.path().display()
+            )))
+        }
+    };
     validate_artifact_entry(&entry, &metadata)?;
     *files = files.saturating_add(1);
     *bytes = bytes.saturating_add(metadata.len());
@@ -131,4 +138,30 @@ fn validate_artifact_entry(entry: &fs::DirEntry, metadata: &fs::Metadata) -> Res
         "native artifact output contains unexpected {kind} {}",
         entry.path().display()
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{add_artifact_entry, ArtifactQuota};
+    use crate::infrastructure::runtime::TemporaryOutput;
+
+    #[test]
+    fn quota_ignores_an_entry_removed_after_listing() {
+        let output = TemporaryOutput::new("quota-test", "png").unwrap();
+        let page = output.directory().join("page_000001.png");
+        std::fs::write(&page, b"x").unwrap();
+        let entry = std::fs::read_dir(output.directory())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        std::fs::remove_file(&page).unwrap();
+        let quota = ArtifactQuota {
+            max_files: 1,
+            max_bytes: 1,
+        };
+        let (mut files, mut bytes) = (0, 0);
+        add_artifact_entry(entry, quota, &mut files, &mut bytes).unwrap();
+        assert_eq!((files, bytes), (0, 0));
+    }
 }

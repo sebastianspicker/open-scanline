@@ -58,10 +58,20 @@ fn normalize_language(language: &str) -> String {
         .next()
         .filter(|code| !code.is_empty())
         .unwrap_or("en");
-    let code = if primary == "pt" && normalized.split('-').any(|part| part == "br") {
-        "pb"
-    } else {
-        primary
+    let code = match primary {
+        "pt" if normalized.split('-').any(|part| part == "br") => "pb",
+        // Traditional Chinese regions use the `tw` catalog; plain `zh` is Simplified.
+        "zh" if normalized
+            .split('-')
+            .any(|part| matches!(part, "tw" | "hant" | "hk" | "mo"))
+            && !normalized
+                .split('-')
+                .any(|part| matches!(part, "hans" | "cn" | "sg")) =>
+        {
+            "tw"
+        }
+        "nb" | "nn" => "no",
+        other => other,
     };
     if CATALOGS.contains_key(code) {
         code.to_owned()
@@ -168,14 +178,13 @@ pub fn language_name(code: &str) -> String {
         .unwrap_or_else(|| code.to_owned())
 }
 
-/// Return catalog codes whose key set diverges from the English authority.
+/// Return catalog codes with keys English lacks. English may have extra keys:
+/// other catalogs fall back to its text until they are translated.
 pub fn validate_catalogs() -> Vec<String> {
     let english = CATALOGS.get("en").expect("English catalog is embedded");
     let mut problems = CATALOGS
         .iter()
-        .filter(|(_, catalog)| {
-            catalog.len() != english.len() || !catalog.keys().all(|key| english.contains_key(key))
-        })
+        .filter(|(_, catalog)| !catalog.keys().all(|key| english.contains_key(key)))
         .map(|(code, _)| code.clone())
         .collect::<Vec<_>>();
     problems.sort_unstable();
@@ -196,10 +205,10 @@ mod tests {
     }
 
     #[test]
-    fn every_catalog_shares_the_english_key_set() {
+    fn every_catalog_key_exists_in_english() {
         assert!(
             validate_catalogs().is_empty(),
-            "catalogs diverging from the English key set: {:?}",
+            "catalogs with keys missing from English: {:?}",
             validate_catalogs()
         );
     }
@@ -219,5 +228,34 @@ mod tests {
         assert_eq!(language_name("de"), "Deutsch");
         assert_eq!(language_name("ja"), "日本語");
         assert_eq!(language_name("bg"), "Български");
+    }
+
+    #[test]
+    fn regional_codes_select_the_matching_catalog() {
+        for code in ["zh-TW", "zh_TW", "zh-Hant", "zh-HK", "zh_MO", "zh-Hant-TW"] {
+            assert_eq!(Translator::new(code).language(), "tw", "{code}");
+        }
+        for code in [
+            "zh",
+            "zh-CN",
+            "zh-Hans",
+            "zh-Hans-HK",
+            "zh_Hans_MO",
+            "zh-SG",
+        ] {
+            assert_eq!(Translator::new(code).language(), "zh", "{code}");
+        }
+        for code in ["nb", "nn", "nb-NO", "nn_NO"] {
+            assert_eq!(Translator::new(code).language(), "no", "{code}");
+        }
+        assert_eq!(Translator::new("pt-BR").language(), "pb");
+        assert_eq!(Translator::new("xx").language(), "en");
+    }
+
+    #[test]
+    fn keys_missing_from_a_catalog_fall_back_to_english_text() {
+        assert_eq!(translate("de", "ws.start_scan"), "Start scan");
+        assert_eq!(translate("tw", "ws.start_scan"), "Start scan");
+        assert_eq!(translate("de", "no.such.key"), "no.such.key");
     }
 }

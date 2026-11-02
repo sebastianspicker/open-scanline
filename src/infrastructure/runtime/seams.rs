@@ -1,5 +1,6 @@
 //! Stable command, decoding, and test-adapter seams.
 
+use super::artifact_watch::ArtifactWatch;
 use crate::domain::image::ImageBuffer;
 use crate::error::Result;
 use crate::operation::CancellationToken;
@@ -35,42 +36,17 @@ pub struct ArtifactQuota {
 }
 
 pub trait CommandRunner: Send + Sync {
+    /// Run `spec` to completion. `cancellation` interrupts a child blocked
+    /// inside native acquisition; `artifacts`, when set, supervises
+    /// direct-to-file scanner output while the command is running.
     fn run(
         &self,
         spec: &CommandSpec,
         timeout: Duration,
         cancelled: &Mutex<bool>,
+        cancellation: Option<&CancellationToken>,
+        artifacts: Option<ArtifactWatch<'_>>,
     ) -> Result<CommandOutput>;
-
-    /// Token-aware extension point. Existing injected runners only need to
-    /// implement [`CommandRunner::run`]; production overrides this to interrupt
-    /// a child blocked inside native acquisition.
-    fn run_with_cancellation(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-    ) -> Result<CommandOutput> {
-        let _ = cancellation;
-        self.run(spec, timeout, cancelled)
-    }
-
-    /// Artifact-aware extension point. The default keeps injected test and
-    /// integration runners source-compatible; native runners override it to
-    /// supervise direct-to-file scanner output while the command is running.
-    fn run_with_cancellation_and_artifact_quota(
-        &self,
-        spec: &CommandSpec,
-        timeout: Duration,
-        cancelled: &Mutex<bool>,
-        cancellation: Option<&CancellationToken>,
-        artifact_directory: &Path,
-        artifact_quota: ArtifactQuota,
-    ) -> Result<CommandOutput> {
-        let _ = (artifact_directory, artifact_quota);
-        self.run_with_cancellation(spec, timeout, cancelled, cancellation)
-    }
 }
 
 pub trait ImageDecoder: Send + Sync {

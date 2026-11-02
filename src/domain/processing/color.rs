@@ -24,8 +24,7 @@ pub fn adjust_brightness_contrast(
         let v = (((i as f64 - 128.0) * c_factor + 128.0).round() as i32) + b_off;
         *item = clamp_u8(v);
     }
-    let out: Vec<u8> = image.data.iter().map(|&px| lut[px as usize]).collect();
-    ImageBuffer::new(image.width, image.height, image.pixel_format, out)
+    apply_lut(image, &lut)
 }
 
 pub fn desaturate(image: &ImageBuffer) -> Result<ImageBuffer> {
@@ -52,7 +51,22 @@ pub fn desaturate(image: &ImageBuffer) -> Result<ImageBuffer> {
 }
 
 pub fn invert(image: &ImageBuffer) -> Result<ImageBuffer> {
-    let out: Vec<u8> = image.data.iter().map(|&px| 255 - px).collect();
+    let mut lut = [0u8; 256];
+    for (i, item) in lut.iter_mut().enumerate() {
+        *item = 255 - i as u8;
+    }
+    apply_lut(image, &lut)
+}
+
+/// Map every colour byte through `lut`; the alpha byte of Rgba8 is kept as is.
+fn apply_lut(image: &ImageBuffer, lut: &[u8; 256]) -> Result<ImageBuffer> {
+    let mut out = image.data.clone();
+    let bpp = image.bpp();
+    for (index, byte) in out.iter_mut().enumerate() {
+        if image.pixel_format != PixelFormat::Rgba8 || index % bpp != 3 {
+            *byte = lut[*byte as usize];
+        }
+    }
     ImageBuffer::new(image.width, image.height, image.pixel_format, out)
 }
 
@@ -115,6 +129,9 @@ pub fn adjust_levels(
     white: i32,
     gamma: f64,
 ) -> Result<ImageBuffer> {
+    if !gamma.is_finite() {
+        return Err(ScanError::Invalid("levels gamma must be finite".into()));
+    }
     let black = black.clamp(0, 255);
     let white = white.clamp(0, 255);
     if black == 0 && white == 255 && (gamma - 1.0).abs() < 1e-9 {
@@ -129,8 +146,7 @@ pub fn adjust_levels(
         t = t.powf(1.0 / g);
         *item = clamp_u8((t * 255.0).round() as i32);
     }
-    let out: Vec<u8> = image.data.iter().map(|&px| lut[px as usize]).collect();
-    ImageBuffer::new(image.width, image.height, image.pixel_format, out)
+    apply_lut(image, &lut)
 }
 
 pub fn auto_levels(image: &ImageBuffer, clip_percent: f64) -> Result<ImageBuffer> {
@@ -138,10 +154,16 @@ pub fn auto_levels(image: &ImageBuffer, clip_percent: f64) -> Result<ImageBuffer
         return Ok(image.clone());
     }
     let mut hist = [0u32; 256];
-    for &px in &image.data {
+    // The alpha byte of Rgba8 is not a colour value.
+    let skip_alpha = image.pixel_format == PixelFormat::Rgba8;
+    let mut total = 0.0;
+    for (index, &px) in image.data.iter().enumerate() {
+        if skip_alpha && index % 4 == 3 {
+            continue;
+        }
         hist[px as usize] += 1;
+        total += 1.0;
     }
-    let total = image.data.len() as f64;
     let clip = (clip_percent.clamp(0.0, 20.0) / 100.0) * total;
     let mut black = 0i32;
     let mut acc = 0u32;
@@ -310,8 +332,7 @@ pub fn apply_curves(image: &ImageBuffer, points: Option<&[[i32; 2]]>) -> Result<
         };
         lut[i as usize] = clamp_u8(v.round() as i32);
     }
-    let out: Vec<u8> = image.data.iter().map(|&px| lut[px as usize]).collect();
-    ImageBuffer::new(image.width, image.height, image.pixel_format, out)
+    apply_lut(image, &lut)
 }
 
 /// Mean gray-channel intensity, used by exposure estimation. The pixel
@@ -417,5 +438,43 @@ mod tests {
         assert_eq!(means[0], (10.0 + 40.0) / pixel_count as f64);
         assert_eq!(means[1], (20.0 + 50.0) / pixel_count as f64);
         assert_eq!(means[2], (30.0 + 60.0) / pixel_count as f64);
+    }
+}
+
+#[cfg(test)]
+mod alpha_tests {
+    use super::*;
+
+    fn rgba() -> ImageBuffer {
+        ImageBuffer::new(1, 1, PixelFormat::Rgba8, vec![10, 20, 30, 77]).unwrap()
+    }
+
+    #[test]
+    fn color_ops_leave_alpha_unchanged() {
+        let outputs = [
+            invert(&rgba()).unwrap(),
+            adjust_levels(&rgba(), 5, 200, 1.5).unwrap(),
+            apply_curves(&rgba(), Some(&[[0, 255], [255, 0]])).unwrap(),
+            adjust_brightness_contrast(&rgba(), 20, 10).unwrap(),
+        ];
+        for out in outputs {
+            assert_eq!(out.data[3], 77);
+            assert_ne!(out.data[..3], [10, 20, 30]);
+        }
+    }
+
+    #[test]
+    fn auto_levels_ignores_opaque_alpha() {
+        let data = [10, 100, 200, 255, 10, 100, 200, 255];
+        let image = ImageBuffer::new(2, 1, PixelFormat::Rgba8, data.to_vec()).unwrap();
+        let out = auto_levels(&image, 0.0).unwrap();
+        assert_eq!(out.data[..3], [0, 121, 255]);
+        assert_eq!(out.data[3], 255);
+    }
+
+    #[test]
+    fn levels_reject_non_finite_gamma() {
+        assert!(adjust_levels(&rgba(), 0, 255, f64::NAN).is_err());
+        assert!(adjust_levels(&rgba(), 0, 255, 0.0).is_ok());
     }
 }

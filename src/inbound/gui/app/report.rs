@@ -112,7 +112,11 @@ impl JobReport {
         for index in 1..=args.pages {
             requested_outputs.push(RequestedOutput {
                 kind: OutputKind::Page,
-                path: args.out_dir.join(format!("page_{index:03}.{extension}")),
+                path: args
+                    .out_dir
+                    .join(crate::workflows::capture::batch::page_file_name(
+                        index, args.pages, extension,
+                    )),
             });
         }
         for path in [

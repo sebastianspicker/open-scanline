@@ -1,5 +1,4 @@
-use super::super::parse_crop_string;
-use super::super::state::GuiState;
+use super::super::state::{checked_crop, GuiState};
 use crate::domain::acquisition::PaperSize;
 use crate::domain::settings::parse_curve_points;
 use crate::infrastructure::config::json::save_config;
@@ -106,11 +105,9 @@ impl GuiState {
     }
 
     fn config_values_for_save(&mut self) -> Option<SaveConfigValues> {
-        let crop = match parse_crop_string(&self.crop_text) {
-            Ok(Some(crop)) if crop[2] > 0 && crop[3] > 0 => Some(crop),
-            Ok(None) => None,
-            Ok(Some(_)) => return self.save_config_error("crop width and height must be positive"),
-            Err(error) => return self.save_config_error(format!("invalid crop: {error}")),
+        let crop = match checked_crop(&self.crop_text) {
+            Ok(crop) => crop,
+            Err(error) => return self.save_config_error(error),
         };
         let curves = match parse_curve_points(&self.curves_text) {
             Ok(curves) => curves,

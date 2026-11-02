@@ -1,14 +1,25 @@
 use super::*;
 
+/// Parse crop text and require a positive width and height. Shared by Save
+/// Config and every scan entry point so a bad crop is never silently dropped.
+pub(in crate::inbound::gui) fn checked_crop(
+    text: &str,
+) -> std::result::Result<Option<[i32; 4]>, String> {
+    match parse_crop_string(text) {
+        Ok(Some(crop)) if crop[2] <= 0 || crop[3] <= 0 => {
+            Err("crop width and height must be positive".into())
+        }
+        Ok(crop) => Ok(crop),
+        Err(error) => Err(format!("invalid crop: {error}")),
+    }
+}
+
 impl GuiState {
     pub(in crate::inbound::gui) fn pipeline_prefs(&self) -> PipelinePrefs {
-        let crop = parse_crop_string(&self.crop_text)
+        let crop = checked_crop(&self.crop_text)
             .ok()
             .flatten()
-            .and_then(|value| {
-                (value[2] > 0 && value[3] > 0)
-                    .then(|| Rect::new(value[0], value[1], value[2] as u32, value[3] as u32))
-            });
+            .map(|value| Rect::new(value[0], value[1], value[2] as u32, value[3] as u32));
         PipelinePrefs {
             rotate: Rotate::from_degrees(self.rotate),
             flip_h: self.flip_h,
@@ -47,6 +58,7 @@ impl GuiState {
     pub(in crate::inbound::gui) fn validate_color_controls(&self) -> Result<()> {
         validate_saturation(self.saturation)?;
         validate_hue(self.hue)?;
+        checked_crop(&self.crop_text).map_err(crate::error::ScanError::Invalid)?;
         parse_curve_points(&self.curves_text)?;
         Ok(())
     }
@@ -57,5 +69,18 @@ impl GuiState {
             "transparency" | "film" => ScanMode::Film,
             _ => ScanMode::Reflective,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_crop;
+
+    #[test]
+    fn crop_text_is_validated_in_one_place() {
+        assert_eq!(checked_crop(""), Ok(None));
+        assert_eq!(checked_crop("1,2,30,40"), Ok(Some([1, 2, 30, 40])));
+        assert!(checked_crop("10,10,0,0").unwrap_err().contains("positive"));
+        assert!(checked_crop("abc").unwrap_err().starts_with("invalid crop"));
     }
 }

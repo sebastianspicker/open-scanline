@@ -7,37 +7,6 @@ use std::path::Path;
 
 /// Build an argument-vector invocation, never a shell string, so device names
 /// and output paths are passed verbatim and can be asserted in tests.
-pub fn scanimage_command(
-    binary: &std::path::Path,
-    sane_name: &str,
-    request: &ScanRequest,
-    output_path: &Path,
-) -> CommandSpec {
-    build_scanimage_command(binary, sane_name, request, output_path, None)
-        .unwrap_or_else(|_| basic_scanimage_command(binary, sane_name, request, output_path))
-}
-
-fn basic_scanimage_command(
-    binary: &std::path::Path,
-    sane_name: &str,
-    request: &ScanRequest,
-    output_path: &Path,
-) -> CommandSpec {
-    let mut args = vec![
-        "-d".into(),
-        sane_name.into(),
-        "--resolution".into(),
-        request.dpi_x.to_string(),
-        "--format=png".into(),
-        format!("--output-file={}", output_path.display()),
-    ];
-    append_geometry(&mut args, request, None);
-    CommandSpec {
-        program: binary.display().to_string(),
-        args,
-    }
-}
-
 pub(super) fn build_scanimage_command(
     binary: &std::path::Path,
     sane_name: &str,
@@ -47,8 +16,9 @@ pub(super) fn build_scanimage_command(
 ) -> Result<CommandSpec> {
     validate_request(request)?;
     let mut args = vec!["-d".into(), sane_name.into()];
-    append_resolution(&mut args, request, capabilities);
+    // Some drivers reset the resolution when the source is set.
     let source_includes_duplex = append_source(&mut args, request, capabilities)?;
+    append_resolution(&mut args, request, capabilities);
     append_color_mode(&mut args, request, capabilities)?;
     append_duplex(&mut args, request, capabilities, source_includes_duplex)?;
     args.extend([
@@ -88,26 +58,34 @@ fn append_resolution(
     capabilities: Option<&SaneCapabilities>,
 ) {
     if let Some(capabilities) = capabilities {
-        if capabilities.x_resolution.is_some() || capabilities.y_resolution.is_some() {
-            if let Some(constraint) = &capabilities.x_resolution {
-                args.extend([
-                    "--x-resolution".into(),
-                    constraint.closest_to(request.dpi_x).to_string(),
-                ]);
-            }
-            if let Some(constraint) = &capabilities.y_resolution {
-                args.extend([
-                    "--y-resolution".into(),
-                    constraint.closest_to(request.dpi_y).to_string(),
-                ]);
-            }
+        let (x, y) = (&capabilities.x_resolution, &capabilities.y_resolution);
+        if let (Some(x), Some(y)) = (x, y) {
+            args.extend([
+                "--x-resolution".into(),
+                x.closest_to(request.dpi_x).to_string(),
+                "--y-resolution".into(),
+                y.closest_to(request.dpi_y).to_string(),
+            ]);
             return;
         }
-        if let Some(constraint) = &capabilities.resolution {
+        let single = capabilities
+            .resolution
+            .as_ref()
+            .map(|constraint| ("--resolution", constraint))
+            .or_else(|| x.as_ref().map(|constraint| ("--x-resolution", constraint)));
+        if let Some((option, constraint)) = single {
             args.extend([
-                "--resolution".into(),
+                option.into(),
                 constraint.closest_to(request.dpi_x).to_string(),
             ]);
+        }
+        if let Some(constraint) = y {
+            args.extend([
+                "--y-resolution".into(),
+                constraint.closest_to(request.dpi_y).to_string(),
+            ]);
+        }
+        if single.is_some() || y.is_some() {
             return;
         }
     }
@@ -138,7 +116,7 @@ fn append_default_source(args: &mut Vec<String>, request: &ScanRequest) -> Resul
     Ok(false)
 }
 
-fn selected_source(
+pub(super) fn selected_source(
     capabilities: &SaneCapabilities,
     request: &ScanRequest,
 ) -> Result<Option<String>> {
@@ -182,18 +160,22 @@ fn is_single_sided(value: &str) -> bool {
     !lower.contains("duplex") && !lower.contains("back")
 }
 
-/// True when the device advertises sources and every one is a feeder.
+const FEEDER_KEYWORDS: &[&str] = &["automatic document feeder", "adf", "feeder", "document"];
+
+/// True when the device advertises a feeder and no flatbed or platen source.
+/// Other sources (canon_dr lists Card sources) don't make it a flatbed.
 pub(super) fn feeder_only(capabilities: &SaneCapabilities) -> bool {
-    let feeder = &["automatic document feeder", "adf", "feeder", "document"];
-    !capabilities.source_values.is_empty()
-        && capabilities
-            .source_values
-            .iter()
-            .all(|value| matching_value(std::slice::from_ref(value), feeder).is_some())
+    let values = &capabilities.source_values;
+    matching_value(values, FEEDER_KEYWORDS).is_some()
+        && matching_value(
+            values,
+            &["flatbed", "platen", "reflective", "document table"],
+        )
+        .is_none()
 }
 
 /// A sheet-fed device has no flatbed, so the flatbed default would always
-/// fail. When every advertised source is a feeder, use its single-sided one.
+/// fail. When no advertised source is a flatbed, use the single-sided feeder.
 fn feeder_only_source<'a>(
     capabilities: &'a SaneCapabilities,
     request: &ScanRequest,
@@ -201,11 +183,15 @@ fn feeder_only_source<'a>(
     if request.mode != ScanMode::Reflective || !feeder_only(capabilities) {
         return None;
     }
-    capabilities
-        .source_values
-        .iter()
+    let feeders = || {
+        capabilities
+            .source_values
+            .iter()
+            .filter(|value| matching_value(std::slice::from_ref(value), FEEDER_KEYWORDS).is_some())
+    };
+    feeders()
         .find(|value| is_single_sided(value))
-        .or_else(|| capabilities.source_values.first())
+        .or_else(|| feeders().next())
         .map(String::as_str)
 }
 
@@ -232,7 +218,7 @@ fn source_without_constraints(request: &ScanRequest) -> Result<Option<String>> {
 fn source_keywords(request: &ScanRequest) -> &'static [&'static str] {
     match (request.mode, request.duplex) {
         (ScanMode::Document, true) => &["duplex", "adf-duplex", "adf duplex"],
-        (ScanMode::Reflective, _) => &["flatbed", "platen", "reflective"],
+        (ScanMode::Reflective, _) => &["flatbed", "platen", "reflective", "document table"],
         (ScanMode::Document, false) => &["automatic document feeder", "adf", "feeder", "document"],
         (ScanMode::Film, _) => &["transparency", "tpu", "film", "negative", "slide"],
     }
@@ -484,6 +470,64 @@ mod tests {
         assert!(capabilities.duplex_option.is_none());
         assert!(!capabilities.page_width_option);
         assert!(capabilities.source_option);
+    }
+
+    #[test]
+    fn card_sources_do_not_make_a_feeder_a_flatbed() {
+        let capabilities = parse_scanimage_help(
+            "    --source ADF Front|ADF Back|ADF Duplex|Card Front|Card Back|Card Duplex [ADF Front]\n",
+        );
+        assert!(feeder_only(&capabilities));
+        let args = command_args(&ScanRequest::default(), Some(&capabilities));
+        assert!(args.contains(&"--source=ADF Front".to_string()), "{args:?}");
+
+        let with_flatbed =
+            parse_scanimage_help("    --source Flatbed|ADF Front|ADF Duplex [Flatbed]\n");
+        assert!(!feeder_only(&with_flatbed));
+
+        let epson = parse_scanimage_help(
+            "    --source Document Table|Automatic Document Feeder [Document Table]\n",
+        );
+        assert!(!feeder_only(&epson));
+    }
+
+    #[test]
+    fn source_is_set_before_resolution_and_mode() {
+        let capabilities = parse_scanimage_help(
+            "    --source ADF Front|ADF Duplex [ADF Front]\n    --mode Lineart|Gray|Color [Color]\n    --resolution 75|150|300dpi [150]\n",
+        );
+        let args = command_args(&ScanRequest::default(), Some(&capabilities));
+        let position = |prefix: &str| args.iter().position(|arg| arg.starts_with(prefix));
+        let source = position("--source=").unwrap();
+        assert!(source < position("--resolution").unwrap(), "{args:?}");
+        assert!(source < position("--mode=").unwrap(), "{args:?}");
+    }
+
+    #[test]
+    fn y_resolution_alone_is_sent_next_to_the_plain_resolution() {
+        let request = ScanRequest {
+            dpi_x: 200,
+            dpi_y: 300,
+            ..ScanRequest::default()
+        };
+        let only_y = parse_scanimage_help(
+            "    --resolution 100..600dpi [200]\n    --y-resolution 100..600dpi [200]\n",
+        );
+        let args = command_args(&request, Some(&only_y));
+        assert!(args.windows(2).any(|pair| pair == ["--resolution", "200"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--y-resolution", "300"]));
+        assert!(!args.contains(&"--x-resolution".to_string()));
+
+        let both = parse_scanimage_help(
+            "    --x-resolution 100..600dpi [200]\n    --y-resolution 100..600dpi [200]\n",
+        );
+        let args = command_args(&request, Some(&both));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--x-resolution", "200"]));
+        assert!(!args.contains(&"--resolution".to_string()));
     }
 
     #[test]

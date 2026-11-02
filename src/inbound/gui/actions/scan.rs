@@ -90,7 +90,7 @@ impl GuiState {
             // The file source fits its image inside this box.
             return (320, 240, self.dpi);
         }
-        if self.device == "mock" || self.device.starts_with("mock") {
+        if self.device == "mock" {
             return (width.min(320), height.min(240), self.dpi);
         }
         let dpi = self.dpi.clamp(MIN_SCAN_DPI, PREVIEW_DPI);

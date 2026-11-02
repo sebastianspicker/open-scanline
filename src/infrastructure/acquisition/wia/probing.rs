@@ -6,7 +6,7 @@ use crate::infrastructure::acquisition::{
 use crate::infrastructure::runtime::{CommandRunner, CommandSpec};
 use crate::operation::CancellationToken;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::Duration;
 
 system_command_runner!(
@@ -73,7 +73,7 @@ fn powershell_available_with_cancellation(_cancellation: Option<&CancellationTok
     #[cfg(target_os = "windows")]
     {
         let cancelled = Mutex::new(false);
-        let result = SystemCommandRunner.run_with_cancellation(
+        let result = SystemCommandRunner.run(
             &CommandSpec {
                 program: powershell_program(),
                 args: vec![
@@ -86,6 +86,7 @@ fn powershell_available_with_cancellation(_cancellation: Option<&CancellationTok
             probe_timeout(Duration::from_secs(10)),
             &cancelled,
             _cancellation,
+            None,
         );
         if let Err(error) = &result {
             crate::debug_log::debug_log!("wia", "PowerShell probe failed: {error}");
@@ -156,11 +157,12 @@ fn try_list_via_powershell(cancellation: Option<&CancellationToken>) -> Vec<Devi
         return Vec::new();
     }
     let cancelled = Mutex::new(false);
-    let output = match SystemCommandRunner.run_with_cancellation(
+    let output = match SystemCommandRunner.run(
         &powershell_spec(wia_enumeration_script().into()),
         probe_timeout(Duration::from_secs(8)),
         &cancelled,
         cancellation,
+        None,
     ) {
         Ok(output) => output,
         Err(error) => {
@@ -177,32 +179,49 @@ pub fn parse_wia_devices(text: &str) -> Vec<DeviceInfo> {
     parse_pipe_devices(text, "wia", "WIA", "wia")
 }
 
-/// List WIA devices. Empty-safe; cached. Includes `wia:sim` when simulate env set.
+/// List WIA devices. Empty-safe; a non-empty listing is cached. Includes `wia:sim` when simulate env set.
 pub fn list_devices() -> Vec<DeviceInfo> {
     list_devices_with_cancellation(None)
 }
 
+static CACHE: Mutex<Option<Vec<DeviceInfo>>> = Mutex::new(None);
+
 /// List WIA devices while allowing bounded PowerShell discovery to be cancelled.
 pub fn list_devices_with_cancellation(cancellation: Option<&CancellationToken>) -> Vec<DeviceInfo> {
-    static CACHE: OnceLock<Vec<DeviceInfo>> = OnceLock::new();
     if cancellation.is_some() {
         return list_devices_uncached(cancellation);
     }
-    let mut devices = CACHE
-        .get_or_init(|| {
-            if std::env::var("OPEN_SCANLINE_SKIP_WIA").ok().as_deref() == Some("1") {
-                return Vec::new();
-            }
-            std::panic::catch_unwind(|| try_list_via_powershell(None)).unwrap_or_default()
-        })
-        .clone();
+    let mut devices = cached_listing(&CACHE, || {
+        if std::env::var("OPEN_SCANLINE_SKIP_WIA").ok().as_deref() == Some("1") {
+            return Vec::new();
+        }
+        std::panic::catch_unwind(|| try_list_via_powershell(None)).unwrap_or_default()
+    });
     if simulate_backends() && !devices.iter().any(|d| d.id == "wia:sim") {
         devices.push(DeviceInfo::new("wia:sim", "WIA Simulated Scanner", "wia"));
     }
     devices
 }
 
-fn list_devices_uncached(cancellation: Option<&CancellationToken>) -> Vec<DeviceInfo> {
+/// The cached listing, else a fresh one. An empty result (scanner off, slow
+/// PowerShell) is never kept, so the next call looks again.
+fn cached_listing(
+    cache: &Mutex<Option<Vec<DeviceInfo>>>,
+    list: impl FnOnce() -> Vec<DeviceInfo>,
+) -> Vec<DeviceInfo> {
+    if let Some(devices) = cache.lock().ok().and_then(|cached| cached.clone()) {
+        return devices;
+    }
+    let devices = list();
+    if !devices.is_empty() {
+        if let Ok(mut cached) = cache.lock() {
+            *cached = Some(devices.clone());
+        }
+    }
+    devices
+}
+
+pub(super) fn list_devices_uncached(cancellation: Option<&CancellationToken>) -> Vec<DeviceInfo> {
     if std::env::var("OPEN_SCANLINE_SKIP_WIA").ok().as_deref() == Some("1") {
         return Vec::new();
     }
@@ -210,6 +229,23 @@ fn list_devices_uncached(cancellation: Option<&CancellationToken>) -> Vec<Device
         std::panic::catch_unwind(|| try_list_via_powershell(cancellation)).unwrap_or_default();
     if simulate_backends() && !devices.iter().any(|device| device.id == "wia:sim") {
         devices.push(DeviceInfo::new("wia:sim", "WIA Simulated Scanner", "wia"));
+    }
+    devices
+}
+
+/// An uncached listing whose real (non-simulated) devices replace the cache,
+/// so a scanner found after a miss is not looked up again on the next call.
+pub(super) fn list_devices_refreshing_cache() -> Vec<DeviceInfo> {
+    let devices = list_devices_uncached(None);
+    let real: Vec<DeviceInfo> = devices
+        .iter()
+        .filter(|device| device.id != "wia:sim")
+        .cloned()
+        .collect();
+    if !real.is_empty() {
+        if let Ok(mut cached) = CACHE.lock() {
+            *cached = Some(real);
+        }
     }
     devices
 }
@@ -241,6 +277,21 @@ mod tests {
         assert_eq!(system_powershell_path(Some("D:\\Win")), expected("D:\\Win"));
         assert_eq!(system_powershell_path(None), expected("C:\\Windows"));
         assert_eq!(system_powershell_path(Some("  ")), expected("C:\\Windows"));
+    }
+
+    fn device(id: &str) -> DeviceInfo {
+        DeviceInfo::new(id, "scanner", "wia")
+    }
+
+    #[test]
+    fn an_empty_listing_is_not_cached() {
+        let cache = Mutex::new(None);
+        assert!(cached_listing(&cache, Vec::new).is_empty());
+        let found = cached_listing(&cache, || vec![device("wia:a")]);
+        assert_eq!(found.len(), 1);
+        // The non-empty listing is kept and answers without listing again.
+        let again = cached_listing(&cache, || panic!("must not list again"));
+        assert_eq!(again[0].id, "wia:a");
     }
 
     #[test]

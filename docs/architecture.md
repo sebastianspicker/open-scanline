@@ -59,8 +59,9 @@ naming), `process`, `publication` (validation, OCR, profile correction and
 atomic output), `maintenance` (calibration, focus, exposure, and IT8 scanner
 profiling), and `settings` (resolving configured defaults). Each use case has one
 canonical entry that takes its arguments plus an options struct.
-`workflows::compat` holds the documented public permutations of the scan, batch,
-and process entry points and nothing else.
+`workflows::compat` holds only the one-argument public entries that run the scan,
+batch, and process use cases with default options; the facades export each
+canonical entry as `*_with_options` with its public options struct.
 
 `src/inbound/` translates external requests: CLI parsing and output, the optional
 GUI, diagnostics, plugin mode, host integration, and UI translations (loaded from
@@ -116,7 +117,9 @@ deterministic, hardware-free sources; physical backends provide the same contrac
 Batch limits count logical image sides, from 1 through 1,000, and a single-image
 duplex request is rejected rather than losing a side.
 
-SANE needs `scanimage`; WIA needs Windows PowerShell/COM and compatible hardware;
+SANE needs `scanimage`; a SANE batch publishes each side as soon as `scanimage`
+renames it from its `.part` name, so the private artifact quota bounds only the
+sides not yet published. WIA needs Windows PowerShell/COM and compatible hardware;
 eSCL uses bounded HTTP(S) discovery or an explicit endpoint. An unlisted eSCL
 endpoint requires the strict `--allow-unlisted-escl` opt-in. TWAIN support starts a
 separate host integration — it is not a native TWAIN Data Source or an acquisition
@@ -132,8 +135,8 @@ Template OCR is built in. OCRS uses an explicitly installed local RTen model pac
 while Tesseract OCR and JPEG XL depend on explicitly selected optional executables.
 User ONNX models run locally in a supervised, explicitly selected, version-matched
 Open Scanline worker with resource limits — not in a filesystem or syscall
-sandbox. Deprecated library helpers without an explicit worker fail closed and
-never search for a sibling executable.
+sandbox. There is no worker discovery: library callers always name the worker
+executable.
 
 The CLI (subcommands, output, exit codes 0/1/2/130), the plugin status JSON, the
 configuration file, scanner-profile JSON, the OCRS model-pack manifest, and the

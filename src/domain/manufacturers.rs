@@ -306,7 +306,15 @@ fn resolve_by_name(
 
 fn token_matches(lower_query: &str, token: &str) -> bool {
     let lower_token = token.to_ascii_lowercase();
-    if lower_token.len() > 3 {
+    if lower_token.chars().any(|c| !c.is_alphanumeric()) {
+        // Punctuated tokens like "fi-" must start a word ("fi-7160", not "wifi-x").
+        lower_query.match_indices(&lower_token).any(|(at, _)| {
+            !lower_query[..at]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric)
+        })
+    } else if lower_token.len() > 3 {
         lower_query.contains(&lower_token)
     } else {
         lower_query
@@ -343,4 +351,18 @@ pub fn format_manufacturers_text(entries: &[ManufacturerEntry]) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fujitsu_fi_prefix_matches_model_names() {
+        let result = resolve_manufacturer("fi-7160");
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.manufacturer.unwrap().id, "fujitsu");
+        assert_eq!(resolve_manufacturer("Fujitsu fi-7160").status, "ok");
+        assert!(!token_matches("wifi-x", "fi-"));
+    }
 }

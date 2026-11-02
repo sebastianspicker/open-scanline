@@ -12,6 +12,11 @@ use std::path::Path;
 pub struct SaneCapabilities {
     pub(super) source_values: Vec<String>,
     pub(super) mode_values: Vec<String>,
+    /// The source the help text was read with (the `[default]` of `--source`).
+    pub(super) default_source: Option<String>,
+    /// Page-width, page-height or duplex was listed (active or `[inactive]`),
+    /// so another source may change it.
+    pub(super) source_dependent_options: bool,
     pub(super) source_option: bool,
     pub(super) mode_option: bool,
     pub(super) duplex_option: Option<String>,
@@ -129,6 +134,17 @@ pub fn parse_scanimage_help(text: &str) -> SaneCapabilities {
 fn parse_scanimage_option_line(capabilities: &mut SaneCapabilities, line: &str) {
     // scanimage marks options that the current settings disable; setting one
     // fails, so they are treated as not advertised.
+    // Page size and duplex often depend on the source; remember that so the
+    // session can re-read the help for the source it will use.
+    capabilities.source_dependent_options |= [
+        "--page-width",
+        "--page-height",
+        "--duplex",
+        "--adf-duplex",
+        "--source-duplex",
+    ]
+    .iter()
+    .any(|option| option_line(line, option));
     if line.contains("[inactive]") {
         return;
     }
@@ -148,6 +164,7 @@ fn parse_source_option(capabilities: &mut SaneCapabilities, line: &str) {
     if option_line(line, "--source") {
         capabilities.source_option = true;
         capabilities.source_values = option_values(line, "--source");
+        capabilities.default_source = option_default(line, "--source");
     }
 }
 
@@ -198,11 +215,11 @@ pub fn parse_scanimage_maintenance_options(text: &str) -> SaneMaintenanceOptions
 }
 
 fn zero_arg_option_line(line: &str, option: &str) -> bool {
-    maintenance_option_tail(line, option).is_some_and(|tail| tail.trim().is_empty())
+    option_tail(line, option).is_some_and(|tail| tail.trim().is_empty())
 }
 
 fn focus_range(line: &str, option: &str) -> Option<(f64, f64)> {
-    let tail = maintenance_option_tail(line, option)?.trim_start();
+    let tail = option_tail(line, option)?.trim_start();
     let tail = tail.strip_prefix('=').unwrap_or(tail).trim_start();
     let candidate = tail
         .strip_prefix('[')
@@ -212,19 +229,6 @@ fn focus_range(line: &str, option: &str) -> Option<(f64, f64)> {
     let minimum = minimum.trim().parse::<f64>().ok()?;
     let maximum = maximum.trim().parse::<f64>().ok()?;
     (minimum.is_finite() && maximum.is_finite() && minimum <= maximum).then_some((minimum, maximum))
-}
-
-/// Maintenance discovery accepts only an option declaration at the start of
-/// the trimmed line. This prevents descriptive prose from advertising an
-/// operation merely because it mentions an allowlisted spelling.
-fn maintenance_option_tail<'a>(line: &'a str, option: &str) -> Option<&'a str> {
-    let after = line.trim_start().strip_prefix(option)?;
-    if !after.chars().next().is_none_or(|character| {
-        character.is_whitespace() || matches!(character, '=' | '[' | '(' | '{')
-    }) {
-        return None;
-    }
-    Some(after)
 }
 
 /// Construct the bounded SANE option-inspection command. Device names are an
@@ -346,24 +350,45 @@ fn option_line(line: &str, option: &str) -> bool {
     option_tail(line, option).is_some()
 }
 
+/// Alternatives of a source or mode option: split on `|` first, so brackets
+/// and parentheses inside a value (`Automatic Document Feeder(left aligned)`,
+/// `Gray[Error Diffusion]`) survive. Only a group wrapping the whole list is
+/// removed.
 fn option_values(line: &str, option: &str) -> Vec<String> {
-    option_constraint(line, option)
-        .map(alternative_values)
-        .unwrap_or_default()
+    let Some(constraint) = option_constraint(line, option) else {
+        return Vec::new();
+    };
+    let constraint = strip_leading_placeholder(constraint);
+    let bytes = constraint.as_bytes();
+    let list = match bytes.first() {
+        Some(&opening) if matching_group_end(bytes, 0, opening) == Some(constraint.len() - 1) => {
+            &constraint[1..constraint.len() - 1]
+        }
+        _ => constraint,
+    };
+    if !list.contains('|') {
+        return Vec::new();
+    }
+    list.split('|')
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && !value.contains(['<', '>'])
+                && !value.eq_ignore_ascii_case("string")
+                && !value.eq_ignore_ascii_case("mode")
+        })
+        .map(str::to_string)
+        .collect()
 }
 
-/// Return the text immediately after an exact option spelling.  Matching the
-/// spelling rather than using `find` keeps `--source` distinct from options
-/// such as `--source-duplex`.
+/// Return the text immediately after an exact option spelling at the start of
+/// the trimmed line. Anchoring keeps `--source` distinct from `--source-duplex`
+/// and stops descriptive prose that mentions an option from advertising it.
 fn option_tail<'a>(line: &'a str, option: &str) -> Option<&'a str> {
-    let position = line.find(option)?;
-    let before = &line[..position];
-    let after = &line[position + option.len()..];
-    if !before.chars().last().is_none_or(char::is_whitespace)
-        || !after.chars().next().is_none_or(|character| {
-            character.is_whitespace() || matches!(character, '=' | '[' | '(' | '{')
-        })
-    {
+    let after = line.trim_start().strip_prefix(option)?;
+    if !after.chars().next().is_none_or(|character| {
+        character.is_whitespace() || matches!(character, '=' | '[' | '(' | '{')
+    }) {
         return None;
     }
     Some(after)
@@ -372,19 +397,46 @@ fn option_tail<'a>(line: &'a str, option: &str) -> Option<&'a str> {
 /// Remove only a terminal `[default]` group.  A leading `[one|two]` group is
 /// itself a constraint, so it must remain available to the alternatives parser.
 fn option_constraint<'a>(line: &'a str, option: &str) -> Option<&'a str> {
-    let mut value = option_tail(line, option)?.trim();
-    if let Some(stripped) = value.strip_prefix('=') {
-        value = stripped.trim_start();
+    Some(split_default(option_body(line, option)?).0.trim())
+}
+
+/// The terminal `[default]` of an option line, e.g. `ADF Front` for
+/// `--source ADF Front|ADF Duplex [ADF Front]`.
+fn option_default(line: &str, option: &str) -> Option<String> {
+    split_default(option_body(line, option)?)
+        .1
+        .map(str::to_string)
+}
+
+fn option_body<'a>(line: &'a str, option: &str) -> Option<&'a str> {
+    let value = option_tail(line, option)?.trim();
+    Some(value.strip_prefix('=').map_or(value, str::trim_start))
+}
+
+/// Split a terminal `[default]` group off `value`. The group must follow
+/// whitespace, so a value such as `Gray[Error Diffusion]` stays whole.
+fn split_default(value: &str) -> (&str, Option<&str>) {
+    let mut trimmed = value.trim_end();
+    // Trailing flags such as `[advanced]` are not the default.
+    while let Some(rest) = ["[advanced]", "[hardware]", "[software]", "[read-only]"]
+        .iter()
+        .find_map(|marker| trimmed.strip_suffix(marker))
+        .filter(|rest| rest.ends_with(char::is_whitespace))
+    {
+        trimmed = rest.trim_end();
     }
-    let trimmed = value.trim_end();
     if trimmed.ends_with(']') {
         if let Some(start) = trailing_square_group_start(trimmed) {
-            if start > 0 {
-                value = trimmed[..start].trim_end();
+            let before = &trimmed[..start];
+            if before.ends_with(char::is_whitespace) {
+                return (
+                    before.trim_end(),
+                    Some(trimmed[start + 1..trimmed.len() - 1].trim()),
+                );
             }
         }
     }
-    Some(value.trim())
+    (value, None)
 }
 
 fn trailing_square_group_start(value: &str) -> Option<usize> {
@@ -515,4 +567,70 @@ fn parse_resolution_range(value: &str) -> Option<(u32, u32)> {
     let minimum = before.chars().rev().collect::<String>().parse().ok()?;
     let maximum = after.parse().ok()?;
     (minimum <= maximum).then_some((minimum, maximum))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brackets_and_parentheses_inside_values_are_kept() {
+        let capabilities = parse_scanimage_help(
+            "    --source Flatbed|Automatic Document Feeder(left aligned)|Automatic Document Feeder(centrally aligned) [Automatic Document Feeder(left aligned)]\n\
+             \x20   --mode Black & White|Gray[Error Diffusion]|True Gray|24bit Color [24bit Color]\n",
+        );
+        assert_eq!(
+            capabilities.source_values,
+            [
+                "Flatbed",
+                "Automatic Document Feeder(left aligned)",
+                "Automatic Document Feeder(centrally aligned)"
+            ]
+        );
+        assert_eq!(
+            capabilities.default_source.as_deref(),
+            Some("Automatic Document Feeder(left aligned)")
+        );
+        assert_eq!(
+            capabilities.mode_values,
+            [
+                "Black & White",
+                "Gray[Error Diffusion]",
+                "True Gray",
+                "24bit Color"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_default_that_contains_brackets_is_removed_whole() {
+        let capabilities = parse_scanimage_help(
+            "    --mode Lineart|Gray[Error Diffusion] [Gray[Error Diffusion]]\n",
+        );
+        assert_eq!(
+            capabilities.mode_values,
+            ["Lineart", "Gray[Error Diffusion]"]
+        );
+    }
+
+    #[test]
+    fn option_names_in_descriptions_do_not_clear_the_values() {
+        let capabilities = parse_scanimage_help(
+            "    --source ADF Front|ADF Duplex [ADF Front]\n        Selects the source; use --source ADF Duplex for both sides.\n",
+        );
+        assert_eq!(capabilities.source_values, ["ADF Front", "ADF Duplex"]);
+    }
+
+    #[test]
+    fn trailing_markers_are_not_the_default() {
+        let capabilities = parse_scanimage_help(
+            "    --mode Lineart|Gray|Color [Color] [advanced]\n\
+             \x20   --source Flatbed|ADF Front [ADF Front] [hardware] [read-only]\n\
+             \x20   --page-width 0..215.9mm [215.9] [inactive]\n",
+        );
+        assert_eq!(capabilities.mode_values, ["Lineart", "Gray", "Color"]);
+        assert_eq!(capabilities.default_source.as_deref(), Some("ADF Front"));
+        assert_eq!(capabilities.source_values, ["Flatbed", "ADF Front"]);
+        assert!(!capabilities.page_width_option && capabilities.source_dependent_options);
+    }
 }

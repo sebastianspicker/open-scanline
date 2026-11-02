@@ -17,6 +17,9 @@ use ffi::*;
 pub(in crate::infrastructure::runtime::supervision) fn spawn_contained_command(
     spec: &CommandSpec,
 ) -> std::io::Result<(PlatformChild, ProcessContainment)> {
+    // The pipe ends are inheritable until `pipes` drops at the end of this
+    // function; hold the process-wide spawn lock so no other spawn inherits them.
+    let _spawn_guard = crate::infrastructure::runtime::lock_process_spawn();
     let job = WindowsJob::create()?;
     let pipes = ChildPipes::create()?;
     let suspended = create_suspended_process(spec, &pipes)?;

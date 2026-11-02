@@ -135,15 +135,24 @@ impl ContactSheetLayout {
         for (index, path) in images.iter().enumerate() {
             check_contact_sheet_cancellation(cancellation)?;
             let source = super::pixels::into_rgb_image(load(path)?, "contact-sheet")?;
-            let thumb = image::imageops::resize(
-                &source,
+            let (width, height) = fit_within(
+                source.width(),
+                source.height(),
                 self.thumb_width,
                 self.thumb_height,
+            );
+            let thumb = image::imageops::resize(
+                &source,
+                width,
+                height,
                 image::imageops::FilterType::Triangle,
             );
             check_contact_sheet_cancellation(cancellation)?;
             let (column, row) = (index as u32 % self.cols, index as u32 / self.cols);
-            image::imageops::replace(sheet, &thumb, self.x(column), self.y(row));
+            // Centred in the cell; the white sheet shows around it.
+            let x = self.x(column) + i64::from((self.thumb_width - width) / 2);
+            let y = self.y(row) + i64::from((self.thumb_height - height) / 2);
+            image::imageops::replace(sheet, &thumb, x, y);
         }
         Ok(())
     }
@@ -153,6 +162,17 @@ impl ContactSheetLayout {
     }
     fn y(&self, row: u32) -> i64 {
         i64::from(self.margin + row * (self.thumb_height + self.margin))
+    }
+}
+
+/// Largest size with the source aspect ratio that fits the cell (at least 1x1).
+fn fit_within(src_width: u32, src_height: u32, cell_width: u32, cell_height: u32) -> (u32, u32) {
+    let (sw, sh) = (u64::from(src_width.max(1)), u64::from(src_height.max(1)));
+    let (cw, ch) = (u64::from(cell_width), u64::from(cell_height));
+    if sw * ch >= sh * cw {
+        (cell_width, ((sh * cw + sw / 2) / sw).clamp(1, ch) as u32)
+    } else {
+        (((sw * ch + sh / 2) / sh).clamp(1, cw) as u32, cell_height)
     }
 }
 
@@ -189,4 +209,17 @@ pub(crate) fn save_raw_image_with_cancellation(
         out.set_extension("tif");
     }
     save_image_with_cancellation(out, image, dpi, None, cancellation)
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::fit_within;
+
+    #[test]
+    fn thumbnails_keep_their_aspect_ratio_inside_the_cell() {
+        assert_eq!(fit_within(2480, 3508, 160, 120), (85, 120));
+        assert_eq!(fit_within(3508, 2480, 160, 120), (160, 113));
+        assert_eq!(fit_within(320, 240, 160, 120), (160, 120));
+        assert_eq!(fit_within(10_000, 1, 160, 120), (160, 1));
+    }
 }

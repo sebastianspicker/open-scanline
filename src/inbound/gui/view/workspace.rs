@@ -17,6 +17,26 @@ const BAR: &str = "workspace-action-bar-height";
 
 pub(super) use header::render_header;
 
+thread_local! {
+    // egui draws on one thread and these helpers have no state to hand;
+    // `render_header` refreshes the language each frame from the app's translator.
+    static LANGUAGE: std::cell::RefCell<String> = std::cell::RefCell::new("en".into());
+}
+
+fn set_language(language: &str) {
+    LANGUAGE.with(|current| *current.borrow_mut() = language.to_owned());
+}
+
+/// Translate a workspace key in the active UI language (English when missing).
+fn tr(key: &str) -> String {
+    LANGUAGE.with(|language| crate::inbound::i18n::translate(&language.borrow(), key))
+}
+
+fn tr_args(key: &str, arguments: &[(&str, &str)]) -> String {
+    LANGUAGE
+        .with(|language| crate::inbound::i18n::translate_args(&language.borrow(), key, arguments))
+}
+
 pub(super) fn render(ctx: &egui::Context, app: &mut OpenScanlineApp) {
     let mut batch = ctx
         .data_mut(|data| data.get_temp::<bool>(egui::Id::new(BATCH)))
@@ -118,8 +138,8 @@ fn action_bar(ctx: &egui::Context, content: impl FnOnce(&mut egui::Ui)) {
 }
 
 fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
-    stage(ui, "New job", false);
-    title(ui, &app.state.output_name, "Untitled scan");
+    stage(ui, &tr("ws.new_job"), false);
+    title(ui, &app.state.output_name, &tr("ws.untitled_scan"));
     lead(ui, plan::sentence(&app.state, *batch));
     banners(ui, app);
     ui.add_space(space::XXL);
@@ -148,16 +168,15 @@ fn prepare(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: &mut bool) {
 fn banners(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
     if let Some(error) = &app.state.error_message {
         ui.add_space(space::L);
-        banner(ui, "The last job did not finish", error);
+        banner(ui, &tr("ws.job_not_finished"), error);
     }
     if let Some(error) = app.state.config_load_error.clone() {
         ui.add_space(space::L);
-        banner(
-            ui,
-            "Settings could not be loaded; defaults are in use",
-            &error,
-        );
-        if ui.add(secondary("Open settings recovery")).clicked() {
+        banner(ui, &tr("ws.settings_not_loaded"), &error);
+        if ui
+            .add(secondary(&tr("ws.open_settings_recovery")))
+            .clicked()
+        {
             app.state.active_tab = 5;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(egui::Id::new(TOOLS), true));
@@ -190,12 +209,14 @@ fn columns(ui: &mut egui::Ui, mut content: impl FnMut(&mut egui::Ui, bool)) {
 
 /// Why Start is unavailable, in the order a person would fix it.
 fn blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
-    if state.device.trim().is_empty() {
-        Some("Choose a scanner to start.")
+    if state.discovery_loading {
+        Some("ws.looking_for_scanners")
+    } else if state.device.trim().is_empty() {
+        Some("ws.blocker_scanner")
     } else if crate::domain::settings::validate_output_name(&state.output_name).is_err() {
-        Some("Fix the file name to start.")
+        Some("ws.blocker_name")
     } else if state.output_dir.trim().is_empty() {
-        Some("Choose a folder to start.")
+        Some("ws.blocker_folder")
     } else {
         output_blocker(state, batch).or_else(|| duplex_blocker(state, batch))
     }
@@ -204,9 +225,9 @@ fn blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
 fn output_blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
     let pdf = plan::writes_pdf(state, batch);
     if !pdf && (state.searchable_pdf || !state.pdf_password.is_empty()) {
-        Some("Searchable text and passwords need PDF output.")
+        Some("ws.needs_pdf")
     } else if batch && state.output_fmt == "jxl" {
-        Some("JPEG XL holds one image. Choose another format.")
+        Some("ws.blocker_jxl")
     } else {
         None
     }
@@ -216,9 +237,9 @@ fn duplex_blocker(state: &GuiState, batch: bool) -> Option<&'static str> {
     if !state.duplex {
         None
     } else if !batch || state.scan_mode() != crate::domain::acquisition::ScanMode::Document {
-        Some("Duplex needs the document feeder and multiple sides.")
+        Some("ws.duplex_needs_feeder")
     } else if !state.batch_pages.is_multiple_of(2) {
-        Some("Duplex needs an even side limit.")
+        Some("ws.blocker_duplex_even")
     } else {
         None
     }
@@ -243,7 +264,7 @@ fn prepare_actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp, batch: bool) {
 }
 
 fn destination(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
-    let label = ui.label(label_text("Save to"));
+    let label = ui.label(label_text(&tr("ws.save_to")));
     ui.add_enabled_ui(!app.job_active(), |ui| {
         let width = (ui.available_width() - 330.0).clamp(160.0, 380.0);
         ui.add(
@@ -253,7 +274,7 @@ fn destination(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
                 .margin(egui::Margin::symmetric(10, 10)),
         )
         .labelled_by(label.id);
-        if ui.add(secondary("Choose…")).clicked() {
+        if ui.add(secondary(&tr("ws.choose"))).clicked() {
             if let Some(folder) = rfd::FileDialog::new()
                 .set_directory(&app.state.output_dir)
                 .pick_folder()
@@ -273,7 +294,7 @@ fn start_action(
     let reason = blocker(&app.state, batch);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let response = ui
-            .add_enabled(valid && !app.job_active(), primary("Start scan"))
+            .add_enabled(valid && !app.job_active(), primary(&tr("ws.start_scan")))
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
             if batch {
@@ -284,7 +305,7 @@ fn start_action(
         }
         if let Some(reason) = reason {
             ui.label(
-                RichText::new(reason)
+                RichText::new(tr(reason))
                     .font(theme::body(size::SMALL))
                     .color(color::LAMP_INK),
             );

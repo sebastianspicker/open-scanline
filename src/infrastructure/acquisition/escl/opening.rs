@@ -252,12 +252,30 @@ fn authorize_listed_or_allowed(
 /// Callers must opt in through the device-opening policy; [`open`] remains
 /// discovery/allow-list restricted.
 pub fn open_explicit_id(device_id: &str) -> Result<EsclDeviceSession> {
+    open_explicit_id_with(
+        device_id,
+        crate::infrastructure::acquisition::simulate_backends(),
+    )
+}
+
+fn open_explicit_id_with(device_id: &str, simulate: bool) -> Result<EsclDeviceSession> {
+    // Simulated ids open only on request, as in [`open`].
+    if crate::infrastructure::acquisition::opens_simulated_session(device_id, "escl:sim", simulate)
+    {
+        return Ok(simulated_session(device_id));
+    }
+    if device_id == "escl:sim" {
+        return Err(ScanError::DeviceNotFound(format!(
+            "{device_id} is the simulated eSCL scanner; set OPEN_SCANLINE_SIMULATE_BACKENDS=1 to use it"
+        )));
+    }
     let endpoint = parse_escl_id(device_id)
         .ok_or_else(|| ScanError::DeviceNotFound(format!("bad eSCL id: {device_id}")))?;
+    let simulated = simulate && endpoint.host == "sim";
     Ok(EsclDeviceSession::new(
         device_id.into(),
-        endpoint.clone(),
-        endpoint.host == "sim",
+        endpoint,
+        simulated,
     ))
 }
 
@@ -276,6 +294,19 @@ pub fn open_unlisted_endpoint(endpoint: &str) -> Result<EsclDeviceSession> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn explicit_sim_id_needs_the_simulation_opt_in() {
+        assert!(open_explicit_id_with("escl:sim", true).is_ok());
+        let error = open_explicit_id_with("escl:sim", false)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("OPEN_SCANLINE_SIMULATE_BACKENDS=1"),
+            "{error}"
+        );
+    }
+
     use super::*;
 
     fn endpoint() -> Endpoint {

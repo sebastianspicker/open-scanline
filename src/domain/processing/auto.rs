@@ -132,21 +132,24 @@ fn refine_horizontal_orientation(
     if degrees != 0 {
         return (degrees, confidence);
     }
-    let top = row_average(gray, 0, width);
-    let bottom = row_average(gray, height - 1, width);
+    let band = (height / 20).max(1);
+    let top = band_average(gray, 0, band, width);
+    let bottom = band_average(gray, height - band, band, width);
     if top < bottom - 8.0 {
         return (180, (confidence + 0.1).min(1.0));
     }
     (degrees, confidence)
 }
 
-fn row_average(gray: &[u8], row: u32, width: u32) -> f64 {
-    let start = (row * width) as usize;
-    gray[start..start + width as usize]
+/// Mean of `rows` rows starting at `first_row` (about 5% of the height, so one noisy row can't decide).
+fn band_average(gray: &[u8], first_row: u32, rows: u32, width: u32) -> f64 {
+    let start = first_row as usize * width as usize;
+    let len = rows as usize * width as usize;
+    gray[start..start + len]
         .iter()
         .map(|&value| value as f64)
         .sum::<f64>()
-        / width as f64
+        / len as f64
 }
 
 pub fn apply_orientation(image: &ImageBuffer) -> Result<ImageBuffer> {
@@ -157,14 +160,45 @@ pub fn apply_orientation_with_degrees(
     image: &ImageBuffer,
     degrees: Option<i32>,
 ) -> Result<ImageBuffer> {
-    let degrees = degrees
-        .map(|value| value.rem_euclid(360))
-        .unwrap_or(detect_orientation(image)?.degrees.rem_euclid(360));
+    let degrees = match degrees {
+        Some(value) => value.rem_euclid(360),
+        None => detect_orientation(image)?.degrees.rem_euclid(360),
+    };
     match degrees {
         0 => Ok(image.clone()),
         90 => super::geometry::rotate(image, Rotate::R90),
         180 => super::geometry::rotate(image, Rotate::R180),
         270 => super::geometry::rotate(image, Rotate::R270),
         _ => Ok(image.clone()),
+    }
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::*;
+    use crate::domain::image::PixelFormat;
+
+    fn striped(top_rows_dark: bool) -> ImageBuffer {
+        let (w, h) = (40u32, 40u32);
+        let mut data = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let high = (x / 2) % 2 == 0;
+                let dark_band = (top_rows_dark && y < 2) || (!top_rows_dark && y >= h - 2);
+                data.push(match (dark_band, high) {
+                    (true, true) => 60,
+                    (true, false) => 0,
+                    (false, true) => 200,
+                    (false, false) => 100,
+                });
+            }
+        }
+        ImageBuffer::new(w, h, PixelFormat::Gray8, data).unwrap()
+    }
+
+    #[test]
+    fn dark_top_band_is_detected_as_upside_down() {
+        assert_eq!(detect_orientation(&striped(true)).unwrap().degrees, 180);
+        assert_eq!(detect_orientation(&striped(false)).unwrap().degrees, 0);
     }
 }

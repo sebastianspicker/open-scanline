@@ -81,7 +81,7 @@ pub(super) struct FilterOverrides {
     pub(super) colorize_mode: Option<String>,
 }
 
-pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 {
+pub(super) fn run(request: Request, cancellation: CancellationToken) -> i32 {
     let mut pipeline = pipeline_with_overrides(&request.config, &request.overrides);
     apply_explicit_bool(&mut pipeline.auto_crop, request.auto_crop);
     apply_explicit_bool(&mut pipeline.auto_orient, request.auto_orient);
@@ -91,16 +91,18 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
     let result = single::run_scan_to_file(
         args,
         CaptureOptions {
-            export: request.export.clone(),
+            export: request.export,
             cancellation,
             policy: DeviceOpenPolicy {
                 allow_unlisted_escl,
             },
         },
     );
-    super::router::clear_pdf_password(&mut request.export.pdf_password);
     match result {
-        Ok(path) => finish_scan(path),
+        Ok(path) => {
+            print_wrote(&path);
+            0
+        }
         Err(error) => report_scan_error(error),
     }
 }
@@ -263,11 +265,6 @@ pub(super) fn apply_explicit_bool(target: &mut bool, value: Option<bool>) {
     if let Some(value) = value {
         *target = value;
     }
-}
-
-fn finish_scan(path: PathBuf) -> i32 {
-    print_wrote(&path);
-    0
 }
 
 fn report_scan_error(error: crate::error::ScanError) -> i32 {

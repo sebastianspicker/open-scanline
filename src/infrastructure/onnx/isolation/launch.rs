@@ -135,6 +135,7 @@ fn spawn_worker(
     working_directory: &Path,
     args: &[String],
 ) -> Result<std::process::Child> {
+    let _spawn_guard = crate::infrastructure::runtime::lock_process_spawn();
     Command::new(executable)
         .args(args)
         .current_dir(working_directory)

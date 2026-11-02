@@ -7,6 +7,7 @@ pub(in crate::inbound::gui::view) fn render_header(
     ctx: &egui::Context,
     app: &mut OpenScanlineApp,
 ) -> bool {
+    set_language(app.state.translator.language());
     let mut tools =
         ctx.data_mut(|data| data.get_temp::<bool>(egui::Id::new(TOOLS)).unwrap_or(false));
     egui::TopBottomPanel::top("workspace-header")
@@ -26,10 +27,10 @@ pub(in crate::inbound::gui::view) fn render_header(
 fn navigation(ui: &mut egui::Ui, app: &mut OpenScanlineApp, tools: &mut bool) {
     wordmark(ui);
     ui.add_space(space::XXL);
-    if tab(ui, "Scan", !*tools, true).clicked() {
+    if tab(ui, &tr("ws.tab_scan"), !*tools, true).clicked() {
         *tools = false;
     }
-    if tab(ui, "Image tools", *tools, !app.job_active()).clicked() {
+    if tab(ui, &tr("ws.tab_tools"), *tools, !app.job_active()).clicked() {
         *tools = true;
     }
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -85,10 +86,10 @@ fn actions(ui: &mut egui::Ui, app: &mut OpenScanlineApp, tools: &mut bool) {
     let widgets = &mut ui.visuals_mut().widgets;
     widgets.inactive.bg_stroke = Stroke::NONE;
     widgets.inactive.weak_bg_fill = color::PLATEN;
-    ui.menu_button("More", |ui| advanced_actions(ui, app));
+    ui.menu_button(tr("ws.more"), |ui| advanced_actions(ui, app));
     if app.job_active() && (*tools || app.job_report().is_none()) {
         cancel(ui, app);
-    } else if quiet(ui, "Open image…", !app.job_active()).clicked() {
+    } else if quiet(ui, &tr("ws.open_image"), !app.job_active()).clicked() {
         open_file(app, tools);
     }
 }
@@ -98,12 +99,12 @@ fn cancel(ui: &mut egui::Ui, app: &mut OpenScanlineApp) {
         .state
         .cancel_requested
         .load(std::sync::atomic::Ordering::Relaxed);
-    let label = if cancelling {
-        "Cancelling…"
+    let label = tr(if cancelling {
+        "ws.cancelling"
     } else {
-        "Cancel"
-    };
-    if ui.add_enabled(!cancelling, secondary(label)).clicked() {
+        "ws.cancel"
+    });
+    if ui.add_enabled(!cancelling, secondary(&label)).clicked() {
         app.cancel_job();
     }
 }

@@ -64,15 +64,6 @@ impl FileDeviceSession {
         }
         Ok(source.as_ref().expect("source was initialized").clone())
     }
-
-    /// Nearest-neighbor resize to request width/height.
-    ///
-    /// Kept as a delegating associated function because it is reachable
-    /// through the `device` facade; the pure algorithm now lives in
-    /// [`crate::domain::processing::resize_nearest`].
-    pub fn resize_nearest(image: &ImageBuffer, width: u32, height: u32) -> Result<ImageBuffer> {
-        crate::domain::processing::resize_nearest(image, width, height)
-    }
 }
 
 impl DeviceSession for FileDeviceSession {

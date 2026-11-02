@@ -65,7 +65,8 @@ file names and still replace files. New files get your normal permissions (for
 example `0644` with umask `022`); a replaced file keeps its mode.
 
 `--crop x,y,w,h` needs a positive width and height (exit 2 otherwise). A crop
-outside the scan area is an error that names the crop and the scan size.
+outside the scan area is an error that names the crop and the scan size. The
+desktop app applies the same check before it starts a scan or batch.
 
 Run `devices` to see the sources and backends available before you pick WIA, SANE,
 or eSCL hardware:
@@ -87,7 +88,13 @@ cargo run -- process --in scan.png --out corrected.png \
 ```
 
 Curve coordinates must be in 0 through 255, and their x coordinates must increase
-strictly.
+strictly. `--rotate` takes multiples of 90 degrees, `--deskew` an angle from -45
+to 45 degrees, and `--levels-gamma` a value above 0; anything else, including
+`nan` or `inf`, exits 2. The same limits apply to `rotate`, `deskew_angle`, and
+`levels_gamma` in `config.json`, and a configured `film_type` must name a known
+profile (or be empty, `off`, or `none`). An unknown `--film-type` is rejected
+before the scanner starts. `--quality` applies to JPEG and JPEG XL output; for
+other formats it is ignored with a warning.
 
 `scan`, `batch`, and `process` start from the selected JSON configuration, and any
 value you pass replaces the configured one. Configuration-aware switches accept
@@ -115,7 +122,10 @@ adapter keeps one native feeder session or job open and emits sides in device
 order. If the feeder empties after at least one complete simplex page or duplex
 pair, the batch succeeds with fewer pages. If a SANE or WIA batch fails for
 another reason, such as a jam, the pages already scanned are kept and the error
-says how many were saved. On a scanner that only has a feeder, a batch without
+says how many were saved; the same holds when the final PDF or TIFF cannot be
+written. A SANE batch saves each side as soon as `scanimage` finishes it, so
+cancelling keeps the sides already saved (a WIA batch reads its sides when the
+job ends). On a scanner that only has a feeder, a batch without
 `--source` already runs as one feeder job; duplex still needs `--source adf`. An
 empty feeder or an incomplete
 duplex pair is an error.
@@ -125,6 +135,14 @@ from its extension. The final container is assembled only after acquisition
 succeeds, so page images already written before a later error stay in the output
 directory. JPEG XL output requires the optional `cjxl` executable. See
 [backend requirements](backends.md) for tool requirements.
+
+Page files are named `page_001`, `page_002`, and so on; a batch of 1,000 sides
+uses four digits (`page_0001` to `page_1000`) so the names sort in page order.
+PNG, JPEG, and TIFF files record the scan resolution; BMP, WebP, and GIF carry
+none. In PDFs, grey pages are stored losslessly as greyscale and colour pages as
+JPEG at quality 90. TIFFs use Deflate compression and switch to BigTIFF when the
+pages would pass 4 GiB. One PDF holds at most 256 MiB of page images, so a very
+long colour batch can still fail at the document step; its page files remain.
 
 An eSCL id selected from `devices`, or one matching `OPEN_SCANLINE_ESCL_HOSTS`,
 uses the secure default open policy. A strict direct `escl:` id that is in
@@ -267,8 +285,8 @@ workloads.
 - The runtime executes a private read-only copy of the validated bytes, so
   replacing the pathname after the final check cannot substitute a different
   worker image. `run_user_onnx_with_worker` gives one call the same behavior.
-- The deprecated no-worker helpers stay source-compatible but fail closed, and
-  never discover or execute a sibling program.
+- The former no-worker helpers `run_user_onnx` and `run_user_onnx_with_options`
+  were removed; there is no automatic worker discovery.
 - The CLI trusts only its own current-executable path, and still performs the
   worker identity, version, replacement, and containment checks.
 
@@ -350,6 +368,11 @@ window; if Start is unavailable, the bar says which setting to fix. The
 progress and result views list published page files as they are written,
 distinguish them from pending document outputs, and state why capture stopped.
 Cancelling a batch can leave completed page files without a final PDF or TIFF.
+Scanner maintenance (calibrate, focus, brightness) runs in the background, and
+Start stays disabled while scanners are still being listed. A saved scanner that
+is not found stays selected and is marked as not found instead of switching to
+the mock source. Large images are previewed at reduced size. The main workspace
+is English for now; the Image tools panels follow the configured language.
 
 Without a configured `output_dir`, the desktop app saves to
 `Pictures/Open Scanline` in your home folder (Documents, then the home folder,
@@ -374,7 +397,10 @@ cargo run --no-default-features -- plugin --device mock --out plugin-scan.png
 Status output includes the application version, configuration path, platform,
 device list, backend availability, and an `ok` field. With `--out`, plugin mode
 performs one scan through the shared scan workflow and adds the selected device,
-output path, and byte count. `--quiet` suppresses JSON output. Success exits 0,
+output path, and byte count. Without `--device` it scans the configured
+`last_device_id` (the built-in mock source if none is set) with the configured
+processing settings. A configuration that cannot be loaded makes the status
+report `ok: false` with an `error` field and exit 1. `--quiet` suppresses JSON output. Success exits 0,
 ordinary failures exit 1, invalid CLI arguments exit 2, and an interrupted plugin
 operation exits 130.
 

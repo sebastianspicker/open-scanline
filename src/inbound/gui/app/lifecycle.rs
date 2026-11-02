@@ -121,6 +121,7 @@ impl OpenScanlineApp {
                 self.state.status =
                     format!("{} ({}): {}", self.state.translator.t("ocr"), engine, text)
             }
+            Some(GuiJobEvent::DeviceFinished(status)) => self.state.status = status,
             Some(GuiJobEvent::Cancelled) => {
                 self.update_job_report(report::JobReport::cancel);
                 self.state.restore_export_password(password);

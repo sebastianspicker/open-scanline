@@ -13,54 +13,75 @@ fn duplex_sheets(state: &GuiState, batch: bool) -> Option<u32> {
         .then_some(state.batch_pages / 2)
 }
 
+/// `one` and `many` are catalog keys whose text holds a `{count}` placeholder.
 fn plural(count: u32, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
+    tr_args(
+        if count == 1 { one } else { many },
+        &[("count", &count.to_string())],
+    )
+}
+
+fn up_to(amount: String) -> String {
+    tr_args("ws.up_to", &[("amount", &amount)])
 }
 
 /// One sentence that says what the job produces.
 pub(super) fn sentence(state: &GuiState, batch: bool) -> String {
     if !batch {
-        return format!(
-            "One image from the {}, saved as {}.",
-            source_phrase(&state.media),
-            state.output_fmt.to_uppercase()
+        return tr_args(
+            "ws.plan_single",
+            &[
+                ("source", &tr(source_phrase(&state.media))),
+                ("format", &state.output_fmt.to_uppercase()),
+            ],
         );
     }
     let pages = match duplex_sheets(state, batch) {
-        Some(sheets) => format!(
-            "Up to {}",
-            plural(sheets, "double-sided sheet", "double-sided sheets")
-        ),
-        None => format!("Up to {}", plural(state.batch_pages, "side", "sides")),
+        Some(sheets) => up_to(plural(sheets, "ws.sheet_one", "ws.sheet_many")),
+        None => up_to(plural(state.batch_pages, "ws.side_one", "ws.side_many")),
     };
-    format!("{pages}, saved as {}.", document_phrase(state, batch))
+    tr_args(
+        "ws.plan_batch",
+        &[
+            ("pages", &pages),
+            ("output", &document_phrase(state, batch)),
+        ],
+    )
 }
 
 fn document_phrase(state: &GuiState, batch: bool) -> String {
     let pages = page_format(state).map_or_else(
-        || "page images".to_owned(),
-        |format| format!("{} page images", format.to_uppercase()),
+        || tr("ws.page_images"),
+        |format| {
+            tr_args(
+                "ws.page_images_format",
+                &[("format", &format.to_uppercase())],
+            )
+        },
     );
     if writes_pdf(state, batch) {
         let kind = match (state.searchable_pdf, !state.pdf_password.is_empty()) {
-            (true, true) => "a searchable, password-protected PDF",
-            (true, false) => "a searchable PDF",
-            (false, true) => "a password-protected PDF",
-            (false, false) => "one PDF",
+            (true, true) => "ws.pdf_searchable_protected",
+            (true, false) => "ws.pdf_searchable",
+            (false, true) => "ws.pdf_protected",
+            (false, false) => "ws.pdf_one",
         };
-        format!("{kind} plus {pages}")
+        tr_args(
+            "ws.kind_plus_pages",
+            &[("kind", &tr(kind)), ("pages", &pages)],
+        )
     } else if state.multipage {
-        format!("one multipage TIFF plus {pages}")
+        tr_args("ws.tiff_plus_pages", &[("pages", &pages)])
     } else {
-        format!("separate {pages}")
+        tr_args("ws.separate_pages", &[("pages", &pages)])
     }
 }
 
 fn source_phrase(media: &str) -> &'static str {
     match media {
-        "film" => "film holder",
-        "document" | "adf" => "document feeder",
-        _ => "flatbed",
+        "film" => "ws.source_film",
+        "document" | "adf" => "ws.source_feeder",
+        _ => "ws.source_flatbed",
     }
 }
 
@@ -78,78 +99,68 @@ fn page_format(state: &GuiState) -> Option<String> {
 pub(super) fn name_problem(error: &str) -> String {
     if error.contains("UTF-8 bytes") {
         let limit = crate::domain::settings::MAX_OUTPUT_NAME_BYTES;
-        return format!("Enter a file name of 1 to {limit} bytes.");
+        return tr_args("ws.name_length", &[("limit", &limit.to_string())]);
     }
     let rules = [
-        ("normal file name", "Use a real name, not . or ..."),
-        (
-            "dot or space",
-            "File names can't end with a dot or a space.",
-        ),
-        (
-            "path separator",
-            "File names can't contain / \\ : * ? \" < > | or control characters.",
-        ),
-        (
-            "device name",
-            "That name is reserved on Windows (CON, PRN, NUL, COM1…). Choose another.",
-        ),
+        ("normal file name", "ws.name_real"),
+        ("dot or space", "ws.name_trailing"),
+        ("path separator", "ws.name_chars"),
+        ("device name", "ws.name_reserved"),
     ];
     rules
         .iter()
         .find(|(needle, _)| error.contains(needle))
-        .map_or_else(|| error.to_owned(), |(_, text)| (*text).to_owned())
+        .map_or_else(|| error.to_owned(), |(_, key)| tr(key))
 }
 
 pub(super) fn limit_label(state: &GuiState, batch: bool) -> String {
     if batch {
-        format!("Up to {}", plural(state.batch_pages, "side", "sides"))
+        up_to(plural(state.batch_pages, "ws.side_one", "ws.side_many"))
     } else {
-        "One image".into()
+        tr("ws.one_image")
     }
 }
 
 /// Ledger of the files this job will write, relative to the chosen folder.
 pub(super) fn ledger(ui: &mut egui::Ui, state: &GuiState, batch: bool) {
     ui.add_space(space::M);
-    ui.label(label_text("Files this scan writes"));
+    ui.label(label_text(&tr("ws.files_this_scan_writes")));
     ui.add_space(space::XS);
     let root = Path::new(&state.output_dir);
     if !batch {
         match single_outputs(state) {
             Ok(outputs) => {
                 for (path, role) in outputs {
-                    row(ui, &relative(&path, root), role);
+                    row(ui, &relative(&path, root), &tr(role));
                 }
             }
-            Err(_) => note(ui, "Enter a valid file name to see the plan."),
+            Err(_) => note(ui, tr("ws.plan_needs_name")),
         }
         return;
     }
     let Ok(args) = state.batch_args(root.join("batch"), state.batch_pages) else {
-        note(ui, "Enter a valid file name to see the plan.");
+        note(ui, tr("ws.plan_needs_name"));
         return;
     };
     if let Some(path) = &args.multipage_out {
-        row(
-            ui,
-            &relative(path, root),
-            "Document, written after the last side",
-        );
+        row(ui, &relative(path, root), &tr("ws.document_after_last"));
     }
-    let last = format!("page_{:03}.{}", state.batch_pages, args.format);
+    let page_name = |page| {
+        crate::workflows::capture::batch::page_file_name(page, state.batch_pages, &args.format)
+    };
+    let last = page_name(state.batch_pages);
     let pages = if state.batch_pages == 1 {
         format!("batch/{last}")
     } else {
-        format!("batch/page_001.{} … {last}", args.format)
+        format!("batch/{} … {last}", page_name(1))
     };
     row(
         ui,
         &pages,
-        &plural(state.batch_pages, "page image", "page images"),
+        &plural(state.batch_pages, "ws.page_image_one", "ws.page_image_many"),
     );
     if let Some(path) = &args.contact_sheet {
-        row(ui, &relative(path, root), "Contact sheet");
+        row(ui, &relative(path, root), &tr("ws.contact_sheet"));
     }
 }
 
@@ -165,13 +176,13 @@ pub(super) fn single_outputs(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
     {
-        "Document"
+        "ws.role_document"
     } else {
-        "Image"
+        "ws.role_image"
     };
     let mut outputs = vec![(args.out, role)];
     if let Some(path) = args.raw_out {
-        outputs.push((path, "Unprocessed TIFF copy"));
+        outputs.push((path, "ws.role_raw_tiff"));
     }
     Ok(outputs)
 }

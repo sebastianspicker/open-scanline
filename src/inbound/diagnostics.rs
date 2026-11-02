@@ -201,7 +201,6 @@ pub fn ml_module_info() -> Value {
     json!({
         "auto_crop": true,
         "orientation": true,
-        "run_user_onnx": cfg!(feature = "onnx"),
         "onnxruntime_available": false,
         "tract_onnx_available": cfg!(feature = "onnx"),
         "cli_worker_isolation": true,

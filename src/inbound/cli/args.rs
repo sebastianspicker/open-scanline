@@ -24,6 +24,30 @@ fn parse_hue(value: &str) -> Result<f64, String> {
     crate::domain::settings::validate_hue(value).map_err(|error| error.to_string())
 }
 
+fn parse_rotate(value: &str) -> Result<i32, String> {
+    let degrees = value
+        .parse::<i32>()
+        .map_err(|_| "rotate must be a whole number of degrees".to_string())?;
+    if degrees % 90 != 0 {
+        return Err("rotate must be a multiple of 90 degrees".into());
+    }
+    Ok(degrees)
+}
+
+fn parse_levels_gamma(value: &str) -> Result<f64, String> {
+    match value.parse::<f64>() {
+        Ok(gamma) if gamma.is_finite() && gamma > 0.0 => Ok(gamma),
+        _ => Err("levels gamma must be a finite number greater than 0".into()),
+    }
+}
+
+fn parse_deskew(value: &str) -> Result<f64, String> {
+    match value.parse::<f64>() {
+        Ok(angle) if angle.is_finite() && angle.abs() <= 45.0 => Ok(angle),
+        _ => Err("deskew must be a number of degrees from -45 to 45".into()),
+    }
+}
+
 fn parse_crop(value: &str) -> Result<[i32; 4], String> {
     let crop = crate::domain::image::parse_crop_components(value).map_err(|error| match error {
         crate::domain::image::CropParseError::ComponentCount => "crop must be x,y,w,h".to_string(),
@@ -398,6 +422,39 @@ mod ocr_contract_tests {
 #[cfg(test)]
 mod crop_and_overwrite_tests {
     use super::*;
+
+    #[test]
+    fn rotate_gamma_and_deskew_are_validated_by_the_parser() {
+        let parse = |flag: &str, value: &str| {
+            Cli::try_parse_from([
+                "open-scanline",
+                "process",
+                "--in",
+                "a.png",
+                "--out",
+                "b.png",
+                flag,
+                value,
+            ])
+        };
+        for (flag, good) in [
+            ("--rotate", "-270"),
+            ("--levels-gamma", "1.5"),
+            ("--deskew", "-45"),
+        ] {
+            assert!(parse(flag, good).is_ok(), "{flag} {good}");
+        }
+        for (flag, bad) in [
+            ("--rotate", "45"),
+            ("--levels-gamma", "nan"),
+            ("--levels-gamma", "0"),
+            ("--levels-gamma", "-1"),
+            ("--deskew", "inf"),
+            ("--deskew", "46"),
+        ] {
+            assert!(parse(flag, bad).is_err(), "{flag} {bad} must be rejected");
+        }
+    }
 
     #[test]
     fn crop_is_validated_by_the_parser() {

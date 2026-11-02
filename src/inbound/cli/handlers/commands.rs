@@ -8,8 +8,6 @@ use crate::domain::manufacturers::{
 use crate::domain::settings::strip_banned;
 use crate::inbound::cli::args::{OnnxLayout, OnnxNormalization, ScanSource};
 use crate::inbound::cli::handlers::scan;
-use crate::inbound::gui::run_gui;
-use crate::inbound::plugin::run_plugin_mode_with_token;
 use crate::infrastructure::acquisition::{list_all_devices, list_backends};
 use crate::infrastructure::config::json::{default_config_path, load_config, save_config};
 use crate::infrastructure::config::AppConfig;
@@ -163,26 +161,6 @@ fn show_config(path: &Path) -> i32 {
             1
         }
     }
-}
-
-pub(super) fn gui(config_path: Option<&Path>) -> i32 {
-    run_gui(config_path)
-}
-
-pub(super) fn plugin(
-    config_path: Option<&Path>,
-    out: Option<PathBuf>,
-    device: Option<String>,
-    quiet: bool,
-    cancellation: CancellationToken,
-) -> i32 {
-    run_plugin_mode_with_token(
-        config_path,
-        out.as_deref(),
-        quiet,
-        device.as_deref(),
-        cancellation,
-    )
 }
 
 pub(super) fn convert(
@@ -344,7 +322,7 @@ pub(super) struct BatchRequest {
     pub(super) overwrite: bool,
 }
 
-pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) -> i32 {
+pub(super) fn batch(request: BatchRequest, cancellation: CancellationToken) -> i32 {
     let args = request.scan_args(&request.config);
     let requested_outputs = [
         args.multipage_tiff.clone(),
@@ -355,7 +333,7 @@ pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) 
     let result = batch::run_batch_scan(
         args,
         BatchCaptureOptions {
-            export: request.export.clone(),
+            export: request.export,
             token: Some(cancellation),
             policy: DeviceOpenPolicy {
                 allow_unlisted_escl: request.allow_unlisted_escl,
@@ -363,7 +341,6 @@ pub(super) fn batch(mut request: BatchRequest, cancellation: CancellationToken) 
             ..BatchCaptureOptions::default()
         },
     );
-    super::router::clear_pdf_password(&mut request.export.pdf_password);
     match result {
         Ok(paths) => {
             report_batch_outputs(&paths, &requested_outputs);

@@ -19,10 +19,12 @@ fn reconcile_inventory(
     if token.is_cancelled() {
         return Err(ScanError::Cancelled("discovery cancelled".into()));
     }
-    let selected = if devices.iter().any(|device| device == requested) {
-        requested.to_owned()
-    } else {
+    // Keep a saved scanner that is not listed (unplugged, still waking up); the UI
+    // marks it "not found" and Save Config must never persist a silent fallback.
+    let selected = if requested.trim().is_empty() {
         devices.first().cloned().unwrap_or_else(|| "mock".into())
+    } else {
+        requested.to_owned()
     };
     let capabilities = inspect(&selected).unwrap_or_else(|error| {
         DeviceMaintenanceCapabilities::unsupported(format!(

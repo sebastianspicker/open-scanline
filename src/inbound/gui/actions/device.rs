@@ -7,6 +7,35 @@ use crate::workflows::maintenance::{
 use serde_json::Value;
 use std::path::Path;
 
+/// A maintenance action queued by the UI and run on a background job.
+#[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
+pub(in super::super) enum DeviceJob {
+    Calibrate(String),
+    Focus(String),
+    Exposure(String, Box<ScanRequest>),
+}
+
+#[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
+impl DeviceJob {
+    /// Blocks on the scanner; call from a worker thread. Returns the status line.
+    pub(in super::super) fn run(self) -> String {
+        match self {
+            Self::Calibrate(device) => {
+                let value = calibrate_device(&device);
+                device_result_status("calibrate", &device, &value)
+            }
+            Self::Focus(device) => {
+                let value = focus_device(&device, 0.5, 0.5);
+                device_result_status("focus", &device, &value)
+            }
+            Self::Exposure(device, request) => {
+                let value = exposure_from_preview(&device, &request);
+                exposure_status(&device, &value)
+            }
+        }
+    }
+}
+
 #[cfg_attr(all(test, not(feature = "gui")), allow(dead_code))]
 impl GuiState {
     pub(in super::super) fn do_calibrate(&mut self) {
@@ -18,7 +47,7 @@ impl GuiState {
             );
             return;
         }
-        self.set_device_result("calibrate", calibrate_device(&self.device));
+        self.device_job = Some(DeviceJob::Calibrate(self.device.clone()));
     }
 
     pub(in super::super) fn do_focus(&mut self) {
@@ -30,7 +59,7 @@ impl GuiState {
             );
             return;
         }
-        self.set_device_result("focus", focus_device(&self.device, 0.5, 0.5));
+        self.device_job = Some(DeviceJob::Focus(self.device.clone()));
     }
 
     pub(in super::super) fn do_exposure(&mut self) {
@@ -46,12 +75,7 @@ impl GuiState {
             pixel_format: PixelFormat::Rgb8,
             ..Default::default()
         };
-        let value = exposure_from_preview(&self.device, &request);
-        self.status = format!(
-            "exposure {}: {}",
-            self.device,
-            serde_json::to_string(&value).unwrap_or_else(|_| value.to_string())
-        );
+        self.device_job = Some(DeviceJob::Exposure(self.device.clone(), Box::new(request)));
     }
 
     pub(in super::super) fn do_profile_scanner(&mut self) {
@@ -75,15 +99,22 @@ impl GuiState {
         self.discovery_refresh = true;
         self.refresh_maintenance_capabilities();
     }
+}
 
-    fn set_device_result(&mut self, action: &str, value: Value) {
-        let outcome = value
-            .get("status")
-            .and_then(|status| status.as_str())
-            .or_else(|| value.get("ok").map(device_action_outcome))
-            .unwrap_or("done");
-        self.status = format!("{action} {}: {outcome}", self.device);
-    }
+fn device_result_status(action: &str, device: &str, value: &Value) -> String {
+    let outcome = value
+        .get("status")
+        .and_then(|status| status.as_str())
+        .or_else(|| value.get("ok").map(device_action_outcome))
+        .unwrap_or("done");
+    format!("{action} {device}: {outcome}")
+}
+
+fn exposure_status(device: &str, value: &Value) -> String {
+    format!(
+        "exposure {device}: {}",
+        serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+    )
 }
 
 fn device_action_outcome(ok: &Value) -> &'static str {
@@ -91,5 +122,39 @@ fn device_action_outcome(ok: &Value) -> &'static str {
         "ok"
     } else {
         "error"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn device_status_prefers_status_then_ok() {
+        assert_eq!(
+            device_result_status("calibrate", "d", &json!({"status": "busy"})),
+            "calibrate d: busy"
+        );
+        assert_eq!(
+            device_result_status("focus", "d", &json!({"ok": true})),
+            "focus d: ok"
+        );
+        assert_eq!(
+            device_result_status("focus", "d", &json!({"ok": false})),
+            "focus d: error"
+        );
+        assert_eq!(
+            device_result_status("focus", "d", &json!({})),
+            "focus d: done"
+        );
+    }
+
+    #[test]
+    fn exposure_status_embeds_the_json() {
+        assert_eq!(
+            exposure_status("d", &json!({"ok": true})),
+            "exposure d: {\"ok\":true}"
+        );
     }
 }

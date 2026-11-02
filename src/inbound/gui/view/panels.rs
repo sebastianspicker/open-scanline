@@ -61,12 +61,20 @@ fn render_device_controls(ui: &mut egui::Ui, state: &mut super::super::state::Gu
     ui.label(state.translator.t("input.device"));
     let selected_device = state.device.clone();
     egui::ComboBox::from_id_salt("device")
-        .selected_text(&state.device)
+        .selected_text(state.device_label(&state.device))
         .show_ui(ui, |ui| {
+            if state.device_missing() {
+                let device = state.device.clone();
+                let label = state.device_label(&device);
+                ui.selectable_value(&mut state.device, device, label);
+            }
             for device in state.devices.clone() {
                 ui.selectable_value(&mut state.device, device.clone(), device);
             }
         });
+    if state.device_missing() {
+        ui.weak(state.translator.t("ws.scanner_missing"));
+    }
     if state.discovery_loading {
         ui.weak("Looking for scanners…");
     }
@@ -117,7 +125,7 @@ fn render_batch_controls(
 ) -> bool {
     let mut start_batch = false;
     ui.horizontal(|ui| {
-        render_maintenance_actions(ui, state);
+        ui.add_enabled_ui(batch_enabled, |ui| render_maintenance_actions(ui, state));
         if ui
             .add_enabled(
                 batch_enabled,

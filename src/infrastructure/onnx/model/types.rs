@@ -41,7 +41,8 @@ pub struct OnnxOutputSummary {
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub mean: Option<f64>,
-    pub sample: Vec<f64>,
+    /// First output values; non-finite values are `None` so the report stays valid JSON.
+    pub sample: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,5 +60,28 @@ pub struct OnnxReport {
 impl OnnxReport {
     pub fn as_dict(&self) -> Value {
         serde_json::to_value(self).expect("ONNX inference report is serializable")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_sample_round_trips() {
+        let summary = OnnxOutputSummary {
+            shape: vec![2],
+            datum_type: "F32".into(),
+            size: 2,
+            min: None,
+            max: None,
+            mean: None,
+            sample: vec![Some(1.0), None],
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert_eq!(
+            serde_json::from_str::<OnnxOutputSummary>(&json).unwrap(),
+            summary
+        );
     }
 }

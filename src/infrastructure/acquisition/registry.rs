@@ -132,18 +132,15 @@ pub fn open_device_with_policy(device_id: &str, policy: DeviceOpenPolicy) -> Res
     if let Some(session) = open_prefixed_device(&id, policy)? {
         return Ok(session);
     }
-    if let Some(session) = open_enumerated_device(&id)? {
-        return Ok(session);
-    }
     Err(ScanError::DeviceNotFound(id))
 }
 
 /// Route ids with an explicit backend prefix before matching enumerated ids.
 fn open_prefixed_device(id: &str, policy: DeviceOpenPolicy) -> Result<Option<AnySession>> {
-    if id == "mock" || id.starts_with("mock") {
+    if id == MockDevice::DEVICE_ID {
         return Ok(Some(AnySession::Mock(MockDeviceSession::new())));
     }
-    if id.starts_with("file:") || id.starts_with("file://") {
+    if id.starts_with("file:") {
         let path = parse_file_device_id(id);
         return if path.is_file() {
             Ok(Some(AnySession::File(FileDeviceSession::new(path))))
@@ -196,42 +193,14 @@ fn open_escl(id: &str, policy: DeviceOpenPolicy) -> Result<escl::EsclDeviceSessi
     escl::open(id)
 }
 
-/// Match a listed id and dispatch according to its advertised backend kind.
-fn open_enumerated_device(id: &str) -> Result<Option<AnySession>> {
-    let Some(device) = list_all_devices().into_iter().find(|device| {
-        device.id == id
-            && matches!(
-                device.kind.as_str(),
-                "mock" | "file" | "wia" | "sane" | "escl"
-            )
-    }) else {
-        return Ok(None);
-    };
-    let session = match device.kind.as_str() {
-        "mock" => Some(AnySession::Mock(MockDeviceSession::new())),
-        "file" => Some(AnySession::File(FileDeviceSession::new(
-            parse_file_device_id(&device.id),
-        ))),
-        "wia" => Some(AnySession::Wia(wia::open(&device.id)?)),
-        "sane" => Some(AnySession::Sane(sane::open(&device.id)?)),
-        "escl" => Some(AnySession::Escl(escl::open(&device.id)?)),
-        _ => None,
-    };
-    Ok(session)
-}
-
-/// Pick a usable device id; prefer explicit, else first from list_all_devices.
+/// Pick a usable device id: the explicit one, else `mock` (no discovery).
 pub fn resolve_device_id(device: Option<&str>) -> String {
     if let Some(d) = device {
         if !d.trim().is_empty() {
             return d.trim().to_string();
         }
     }
-    let devices = list_all_devices();
-    if devices.is_empty() {
-        return MockDevice::DEVICE_ID.to_string();
-    }
-    devices[0].id.clone()
+    MockDevice::DEVICE_ID.to_string()
 }
 
 /// Registered backends with availability flags.
@@ -317,4 +286,25 @@ pub fn find_scanners_with_cancellation(
         );
     }
     list_all_devices_with_cancellation(cancellation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_device_resolves_to_mock_without_discovery() {
+        assert_eq!(resolve_device_id(None), "mock");
+        assert_eq!(resolve_device_id(Some("  ")), "mock");
+        assert_eq!(resolve_device_id(Some(" sane:x ")), "sane:x");
+    }
+
+    #[test]
+    fn only_the_exact_mock_id_opens_the_synthetic_scanner() {
+        assert!(matches!(open_device("mock"), Ok(AnySession::Mock(_))));
+        assert!(matches!(
+            open_device("mockingbird"),
+            Err(ScanError::DeviceNotFound(_))
+        ));
+    }
 }

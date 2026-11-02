@@ -25,16 +25,13 @@ pub struct ProcessOptions {
 
 /// Runtime controls for the canonical process entry.
 #[derive(Default)]
-pub(crate) struct ProcessRunOptions {
-    pub(crate) export: ExportOptions,
-    pub(crate) cancellation: Option<CancellationToken>,
+pub struct ProcessRunOptions {
+    pub export: ExportOptions,
+    pub cancellation: Option<CancellationToken>,
 }
 
 /// Run a typed load, process, and save request against the native adapters.
-pub(crate) fn process_image_file(
-    options: &ProcessOptions,
-    run: ProcessRunOptions,
-) -> Result<PathBuf> {
+pub fn process_image_file(options: &ProcessOptions, run: ProcessRunOptions) -> Result<PathBuf> {
     // Validate destination semantics and profile before writing any output.
     validate_supported_output_path(&options.dst, "process output")?;
     crate::infrastructure::runtime::atomic_publish::ensure_output_absent(

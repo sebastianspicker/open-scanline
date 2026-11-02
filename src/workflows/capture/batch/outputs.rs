@@ -17,7 +17,7 @@ pub(super) fn write_requested_outputs_with_observer(
     searchable_pages: Vec<String>,
     hooks: BatchRunHooks<'_>,
 ) -> Result<()> {
-    let mut session = begin_session(args, paths);
+    let mut session = begin_session(args);
     write_multipage_output(args, paths, export, &searchable_pages, &mut session, hooks)?;
     write_tiff_output(args, paths, &mut session, hooks)?;
     write_pdf_output(args, paths, export, &searchable_pages, &mut session, hooks)?;
@@ -37,7 +37,7 @@ fn report_published(
     }
 }
 
-fn begin_session(args: &BatchScanArgs, _paths: &[PathBuf]) -> Option<NativeAggregateSession> {
+fn begin_session(args: &BatchScanArgs) -> Option<NativeAggregateSession> {
     (aggregate_output_count(args) > 1).then(NativeAggregateSession::new)
 }
 
@@ -184,34 +184,18 @@ fn write_multipage(
     token: Option<&CancellationToken>,
     session: &mut Option<NativeAggregateSession>,
 ) -> Result<PathBuf> {
-    let extension = output_extension(output);
-    if extension == "pdf" {
-        return write_plain_pdf(paths, output, dpi, token, session);
+    // Callers validated the extension (`.tif`, `.tiff` or none) and routed `.pdf` to `write_pdf`.
+    let destination = output_with_tiff_extension(output);
+    match session.as_mut() {
+        Some(session) => session.publish_tiff(paths, &destination, Some(dpi), None, token),
+        None => crate::infrastructure::media::publish_tiff_from_paths(
+            paths,
+            &destination,
+            Some(dpi),
+            None,
+            token,
+        ),
     }
-    if matches!(extension.as_str(), "tif" | "tiff") || output.extension().is_none() {
-        let destination = output_with_tiff_extension(output);
-        return match session.as_mut() {
-            Some(session) => session.publish_tiff(paths, &destination, Some(dpi), None, token),
-            None => crate::infrastructure::media::publish_tiff_from_paths(
-                paths,
-                &destination,
-                Some(dpi),
-                None,
-                token,
-            ),
-        };
-    }
-    Err(ScanError::Invalid(format!(
-        "multipage output must use .pdf, .tif, or .tiff, not '.{extension}'"
-    )))
-}
-
-fn output_extension(output: &Path) -> String {
-    output
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or("tif")
-        .to_ascii_lowercase()
 }
 
 fn output_with_tiff_extension(output: &Path) -> PathBuf {
@@ -219,29 +203,6 @@ fn output_with_tiff_extension(output: &Path) -> PathBuf {
         output.with_extension("tif")
     } else {
         output.to_path_buf()
-    }
-}
-
-fn write_plain_pdf(
-    paths: &[PathBuf],
-    output: &Path,
-    dpi: u32,
-    token: Option<&CancellationToken>,
-    session: &mut Option<NativeAggregateSession>,
-) -> Result<PathBuf> {
-    let request = PdfPathPublication {
-        paths,
-        destination: output,
-        dpi,
-        title: "open-scanline multipage",
-        password: None,
-        searchable_pages: None,
-        transform: None,
-        cancellation: token,
-    };
-    match session.as_mut() {
-        Some(session) => session.publish_pdf(request),
-        None => crate::infrastructure::media::publish_pdf_from_paths(request),
     }
 }
 

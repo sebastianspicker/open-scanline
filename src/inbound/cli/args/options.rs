@@ -1,6 +1,6 @@
 use super::{
-    parse_crop, parse_curves, parse_hue, parse_paper, parse_saturation, CurvePoints, OcrEngineArg,
-    ScanSource,
+    parse_crop, parse_curves, parse_deskew, parse_hue, parse_levels_gamma, parse_paper,
+    parse_rotate, parse_saturation, CurvePoints, OcrEngineArg, ScanSource,
 };
 use crate::domain::acquisition::PaperSize;
 use clap::Args;
@@ -37,7 +37,7 @@ pub(in crate::inbound::cli) struct ExportOptions {
 
 #[derive(Debug, Args)]
 pub(in crate::inbound::cli) struct Adjustments {
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, value_parser = parse_rotate, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) rotate: Option<i32>,
     #[arg(long = "flip-h", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) flip_h: Option<bool>,
@@ -65,7 +65,7 @@ pub(in crate::inbound::cli) struct Adjustments {
     pub(in crate::inbound::cli) levels_black: Option<i32>,
     #[arg(long = "levels-white", allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_white: Option<i32>,
-    #[arg(long = "levels-gamma", allow_negative_numbers = true)]
+    #[arg(long = "levels-gamma", value_parser = parse_levels_gamma, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_gamma: Option<f64>,
 }
 
@@ -136,7 +136,7 @@ pub(in crate::inbound::cli) struct ScanOptions {
     pub(in crate::inbound::cli) adjustments: Adjustments,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, value_parser = parse_deskew, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) white_balance: Option<bool>,
@@ -178,7 +178,7 @@ pub(in crate::inbound::cli) struct ProcessOptions {
     pub(in crate::inbound::cli) auto_orient: Option<bool>,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, value_parser = parse_deskew, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "white-balance", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) white_balance: Option<bool>,
@@ -210,7 +210,7 @@ pub(in crate::inbound::cli) struct BatchOptions {
     pub(in crate::inbound::cli) adjustments: Adjustments,
     #[arg(long = "auto-deskew", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_deskew: Option<bool>,
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, value_parser = parse_deskew, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) deskew: Option<f64>,
     #[arg(long = "auto-crop", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) auto_crop: Option<bool>,

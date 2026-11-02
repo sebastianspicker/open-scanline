@@ -1,3 +1,4 @@
+use crate::domain::export::clear_pdf_password;
 use crate::inbound::cli::args::ExportOptions;
 use crate::infrastructure::config::AppConfig;
 use std::fs::File;
@@ -40,8 +41,8 @@ pub(super) fn build(
 }
 
 pub(super) fn report_error(error: String) -> i32 {
-    eprintln!("PDF password error: {error}");
-    1
+    eprintln!("error: {error}");
+    2
 }
 
 fn ocr_engine_from_config(value: &str) -> Result<crate::OcrEngine, String> {
@@ -122,13 +123,4 @@ fn trim_one_line_ending(bytes: &mut Vec<u8>) {
     } else if matches!(bytes.last(), Some(b'\r' | b'\n')) {
         bytes.truncate(bytes.len() - 1);
     }
-}
-
-/// Overwrite a handler-held PDF password as soon as routing completes.
-pub(super) fn clear_pdf_password(pdf_password: &mut Option<String>) {
-    if let Some(password) = pdf_password {
-        password.replace_range(.., &"\0".repeat(password.len()));
-        password.clear();
-    }
-    *pdf_password = None;
 }

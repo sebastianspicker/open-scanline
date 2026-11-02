@@ -122,16 +122,16 @@ impl Default for BatchScanArgs {
 
 /// Runtime controls for the canonical batch-capture entry.
 #[derive(Default)]
-pub(crate) struct BatchCaptureOptions<'a> {
-    pub(crate) export: ExportOptions,
-    pub(crate) cancel_check: Option<&'a BatchCancelCheck>,
-    pub(crate) token: Option<CancellationToken>,
-    pub(crate) policy: DeviceOpenPolicy,
+pub struct BatchCaptureOptions<'a> {
+    pub export: ExportOptions,
+    pub cancel_check: Option<&'a BatchCancelCheck>,
+    pub token: Option<CancellationToken>,
+    pub policy: DeviceOpenPolicy,
     pub(crate) observer: Option<&'a BatchEventObserver>,
 }
 
 /// Run batch capture through the native acquisition and media adapters.
-pub(crate) fn run_batch_scan(
+pub fn run_batch_scan(
     args: BatchScanArgs,
     options: BatchCaptureOptions<'_>,
 ) -> Result<Vec<PathBuf>> {
@@ -168,7 +168,8 @@ pub(crate) fn run_batch_scan_with_report(
         &prepared.export,
         pages.searchable_text,
         hooks,
-    )?;
+    )
+    .map_err(|error| note_saved_pages(error, &pages.paths, &args.out_dir))?;
     report_batch_completion(&args, pages.paths.len());
     Ok(BatchScanReport {
         page_paths: pages.paths,
@@ -190,6 +191,10 @@ fn prepare_batch(args: &BatchScanArgs, export: &ExportOptions) -> Result<Prepare
     }
     let export = prepare_export_options_for_pdf(!pdf_destinations.is_empty(), export)?;
     validate_batch_args(args)?;
+    if let Some(crop) = args.pipeline.crop {
+        super::single::validate_crop(args.width, args.height, crop)?;
+    }
+    super::single::validate_film_type(&args.pipeline)?;
     let file_ext = batch_file_extension(&args.format)?;
     validate_batch_destinations(args, &file_ext)?;
     crate::infrastructure::media::prepare_output_directory(&args.out_dir)?;
@@ -311,6 +316,13 @@ fn scan_batch_pages_with_session_export(
     collector.finish(summary)
 }
 
+/// `page_001.png`; the number is zero-padded to at least 3 digits, and to as
+/// many digits as `total` needs, so names sort in page order.
+pub(crate) fn page_file_name(page: u32, total: u32, file_ext: &str) -> String {
+    let width = total.to_string().len().max(3);
+    format!("page_{page:0width$}.{file_ext}")
+}
+
 /// Published pages stay on disk when a later page fails; say so in the error.
 fn note_saved_pages(error: ScanError, saved: &[PathBuf], out_dir: &std::path::Path) -> ScanError {
     if saved.is_empty() {
@@ -324,7 +336,7 @@ fn note_saved_pages(error: ScanError, saved: &[PathBuf], out_dir: &std::path::Pa
         )
     };
     match error {
-        ScanError::Cancelled(_) => error,
+        ScanError::Cancelled(message) => ScanError::Cancelled(note(message)),
         ScanError::Unsupported(message) => ScanError::Unsupported(note(message)),
         ScanError::Invalid(message) => ScanError::Invalid(note(message)),
         ScanError::Image(message) => ScanError::Image(note(message)),
@@ -391,10 +403,10 @@ impl<'a, S: DeviceSession + ?Sized> BatchPageCollector<'a, S> {
         cancel_batch_if_requested(self.session, self.hooks.cancel_check, self.hooks.token)?;
         let index = self.paths.len() as u32;
         self.report_progress(index);
-        let page_path = self
-            .args
-            .out_dir
-            .join(format!("page_{:03}.{}", index + 1, self.file_ext));
+        let page_path =
+            self.args
+                .out_dir
+                .join(page_file_name(index + 1, self.args.pages, self.file_ext));
         let publication = process_and_publish_page(
             image,
             PageWorkflowRequest {
@@ -437,8 +449,9 @@ impl<'a, S: DeviceSession + ?Sized> BatchPageCollector<'a, S> {
     }
 
     fn finish(self, summary: ScanPagesResult) -> Result<BatchPages> {
-        cancel_batch_if_requested(self.session, self.hooks.cancel_check, self.hooks.token)?;
-        validate_scan_summary(self.args, &summary, self.paths.len())?;
+        cancel_batch_if_requested(self.session, self.hooks.cancel_check, self.hooks.token)
+            .and_then(|()| validate_scan_summary(self.args, &summary, self.paths.len()))
+            .map_err(|error| note_saved_pages(error, &self.paths, &self.args.out_dir))?;
         Ok(BatchPages {
             paths: self.paths,
             searchable_text: self.searchable_pages,
@@ -496,4 +509,83 @@ fn is_batch_cancelled(
     token: Option<&CancellationToken>,
 ) -> bool {
     token.is_some_and(CancellationToken::is_cancelled) || cancel_check.is_some_and(|check| check())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "open-scanline-batch-{label}-{}-{}",
+            std::process::id(),
+            u128::from_le_bytes(nonce)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn page_names_widen_only_past_999_pages() {
+        assert_eq!(page_file_name(1, 999, "png"), "page_001.png");
+        assert_eq!(page_file_name(999, 999, "png"), "page_999.png");
+        assert_eq!(page_file_name(1, 1000, "png"), "page_0001.png");
+        assert_eq!(page_file_name(1000, 1000, "png"), "page_1000.png");
+    }
+
+    #[test]
+    fn unknown_film_type_and_bad_crop_fail_before_any_device_is_opened() {
+        let dir = temp_dir("prepare");
+        let mut args = BatchScanArgs {
+            out_dir: dir.join("out"),
+            ..BatchScanArgs::default()
+        };
+        args.pipeline.film_type = Some("kodak_gold200".into());
+        let error = prepare_batch(&args, &ExportOptions::default())
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("film profile not found"));
+        args.pipeline.film_type = Some("off".into());
+        assert!(prepare_batch(&args, &ExportOptions::default()).is_ok());
+
+        args.pipeline.film_type = None;
+        args.pipeline.crop = Some(crate::domain::image::Rect::new(0, 0, 0, 0));
+        assert!(prepare_batch(&args, &ExportOptions::default()).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_aggregate_output_names_the_saved_pages() {
+        let dir = temp_dir("aggregate");
+        let target = dir.join("doc.tif");
+        let args = BatchScanArgs {
+            out_dir: dir.join("out"),
+            multipage_tiff: Some(target.clone()),
+            ..BatchScanArgs::default()
+        };
+        // Occupy the destination after validation, so only the final publication fails.
+        let blocked = target.clone();
+        let occupy = move |event: BatchWorkflowEvent| {
+            if event == BatchWorkflowEvent::PublishingOutputs {
+                std::fs::create_dir(&blocked).unwrap();
+            }
+        };
+        let error = run_batch_scan(
+            args,
+            BatchCaptureOptions {
+                observer: Some(&occupy),
+                ..BatchCaptureOptions::default()
+            },
+        )
+        .err()
+        .unwrap();
+        let text = error.to_string();
+        assert!(
+            text.contains("2 page(s) already scanned were saved in"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

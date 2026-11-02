@@ -28,7 +28,6 @@ fn open_for_inspection(id: &str, token: &CancellationToken) -> Result<AnySession
         "wia" => AnySession::Wia(wia::open_with_cancellation(id, Some(token))?),
         "escl" => AnySession::Escl(escl::open_with_cancellation(id, Some(token))?),
         "file" | "mock" => open_device(id)?,
-        _ if id.starts_with("mock") => open_device(id)?,
         _ => return Err(ScanError::DeviceNotFound(id.into())),
     };
     Ok(session)

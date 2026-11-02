@@ -20,7 +20,7 @@ pub(super) struct Request {
     pub(super) overwrite: bool,
 }
 
-pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 {
+pub(super) fn run(request: Request, cancellation: CancellationToken) -> i32 {
     let mut pipeline = scan::pipeline_with_overrides(&request.config, &request.overrides);
     pipeline.invert = request.config.invert_colors;
     scan::apply_explicit_bool(&mut pipeline.invert, request.invert);
@@ -35,20 +35,17 @@ pub(super) fn run(mut request: Request, cancellation: CancellationToken) -> i32 
             overwrite: request.overwrite,
         },
         ProcessRunOptions {
-            export: request.export.clone(),
+            export: request.export,
             cancellation: Some(cancellation),
         },
     );
-    super::router::clear_pdf_password(&mut request.export.pdf_password);
     match result {
-        Ok(path) => finish_processing(path),
+        Ok(path) => {
+            print_wrote(&path);
+            0
+        }
         Err(error) => report_process_error(error),
     }
-}
-
-fn finish_processing(path: PathBuf) -> i32 {
-    print_wrote(&path);
-    0
 }
 
 fn report_process_error(error: crate::error::ScanError) -> i32 {

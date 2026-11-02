@@ -14,7 +14,9 @@ pub(super) fn validate_batch_destinations(args: &BatchScanArgs, file_ext: &str) 
 fn generated_page_paths(args: &BatchScanArgs, file_ext: &str) -> Result<Vec<PathBuf>> {
     (1..=args.pages)
         .map(|page| {
-            let path = args.out_dir.join(format!("page_{page:03}.{file_ext}"));
+            let path = args
+                .out_dir
+                .join(super::page_file_name(page, args.pages, file_ext));
             crate::infrastructure::runtime::atomic_publish::validate_output_leaf(
                 &path,
                 &format!("generated page {page}"),

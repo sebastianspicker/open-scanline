@@ -14,7 +14,6 @@ pub use capabilities::{
     scanimage_maintenance_inspection_command, SaneCapabilities, SaneMaintenanceAction,
     SaneMaintenanceOptions,
 };
-pub use command::scanimage_command;
 pub(crate) use pages::{emit_simulated_pages, emit_single_pages};
 pub use probing::{
     available, available_with_cancellation, backend_info, backend_info_with_cancellation,

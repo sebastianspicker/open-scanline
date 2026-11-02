@@ -91,6 +91,17 @@ pub fn install_in(
     validator: &dyn ModelPairValidator,
 ) -> Result<InstalledModelPack> {
     require_compiled()?;
+    install_pack_in(root, detection, recognition, validator)
+}
+
+/// [`install_in`] without the compile-time feature gate, so the repair path is
+/// testable in every feature profile.
+fn install_pack_in(
+    root: &Path,
+    detection: &Path,
+    recognition: &Path,
+    validator: &dyn ModelPairValidator,
+) -> Result<InstalledModelPack> {
     let detection = checked_source(detection, "detection model")?;
     let recognition = checked_source(recognition, "recognition model")?;
     let id = format!(
@@ -99,7 +110,11 @@ pub fn install_in(
     );
     let destination = packs_dir_in(root).join(&id);
     if destination.is_dir() {
-        return activate_existing_pack(root, &destination, &id, validator);
+        if let Some(pack) = activate_existing_pack(root, &destination, &id, validator)? {
+            return Ok(pack);
+        }
+        // Damaged pack with the same content id: keep it as evidence and reinstall.
+        move_broken_pack_aside(&destination, &id)?;
     }
     install_new_pack(root, &destination, &id, &detection, &recognition, validator)
 }
@@ -123,16 +138,43 @@ fn install_new_pack(
     read_pack(destination, id)
 }
 
+/// `None` when the existing pack fails verification and must be replaced.
 fn activate_existing_pack(
     root: &Path,
     destination: &Path,
     id: &str,
     validator: &dyn ModelPairValidator,
-) -> Result<InstalledModelPack> {
-    let pack = read_pack(destination, id)?;
-    validate_installed_pack(&pack, validator)?;
+) -> Result<Option<InstalledModelPack>> {
+    let pack = match read_pack(destination, id) {
+        Ok(pack) => pack,
+        // A permission or I/O failure is not damage; report it instead of repairing.
+        Err(ScanError::Io(error))
+            if !matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            return Err(ScanError::Io(error));
+        }
+        Err(_) => return Ok(None),
+    };
+    if validate_installed_pack(&pack, validator).is_err() {
+        return Ok(None);
+    }
     publish_active_in(root, id)?;
-    Ok(pack)
+    Ok(Some(pack))
+}
+
+fn move_broken_pack_aside(destination: &Path, id: &str) -> Result<()> {
+    let packs = destination.parent().unwrap_or(destination);
+    for attempt in 0_u32.. {
+        let aside = packs.join(format!(".{id}.broken-{attempt}"));
+        if !aside.exists() {
+            fs::rename(destination, aside)?;
+            return Ok(());
+        }
+    }
+    unreachable!("u32 range exhausted")
 }
 
 fn staging_path(root: &Path, id: &str) -> PathBuf {
@@ -205,6 +247,13 @@ pub fn active() -> Result<Option<InstalledModelPack>> {
 /// Root-injectable active-pack lookup. It verifies the manifest and both
 /// model hashes every time selection is read.
 pub fn active_in(root: &Path) -> Result<Option<InstalledModelPack>> {
+    let Some(active) = read_active_pointer(root)? else {
+        return Ok(None);
+    };
+    read_pack(&packs_dir_in(root).join(&active.pack), &active.pack).map(Some)
+}
+
+fn read_active_pointer(root: &Path) -> Result<Option<ActivePack>> {
     let path = active_path_in(root);
     if !path.try_exists()? {
         return Ok(None);
@@ -216,7 +265,7 @@ pub fn active_in(root: &Path) -> Result<Option<InstalledModelPack>> {
             "OCR active model pointer is invalid".into(),
         ));
     }
-    read_pack(&packs_dir_in(root).join(&active.pack), &active.pack).map(Some)
+    Ok(Some(active))
 }
 
 pub fn status() -> Result<serde_json::Value> {
@@ -328,6 +377,54 @@ fn valid_pack_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    struct AcceptAll;
+    impl ModelPairValidator for AcceptAll {
+        fn validate(&self, _: &Path, _: &Path) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn temp_root() -> PathBuf {
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "open-scanline-model-repair-{}-{}",
+            std::process::id(),
+            u128::from_le_bytes(nonce)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn reinstall_replaces_a_damaged_pack_and_keeps_the_old_folder() {
+        let root = temp_root();
+        let detection = root.join("det.rten");
+        let recognition = root.join("rec.rten");
+        fs::write(&detection, b"detection").unwrap();
+        fs::write(&recognition, b"recognition").unwrap();
+        let store = root.join("store");
+        let first = install_pack_in(&store, &detection, &recognition, &AcceptAll).unwrap();
+        fs::write(first.root.join("recognition.rten"), b"truncated").unwrap();
+        assert!(read_pack(&first.root, &first.id).is_err());
+
+        let second = install_pack_in(&store, &detection, &recognition, &AcceptAll).unwrap();
+        assert_eq!(second.id, first.id);
+        assert!(read_pack(&second.root, &second.id).is_ok());
+        let kept = packs_dir_in(&store).join(format!(".{}.broken-0", first.id));
+        assert_eq!(
+            fs::read(kept.join("recognition.rten")).unwrap(),
+            b"truncated"
+        );
+        assert!(active_in(&store).unwrap().is_some());
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[cfg(all(test, not(feature = "ocrs")))]

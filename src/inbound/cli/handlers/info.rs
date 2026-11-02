@@ -39,7 +39,6 @@ pub(super) fn run(module: InfoModule) -> i32 {
     if matches!(module, InfoModule::All | InfoModule::Manufacturers) {
         obj.insert("manufacturers".into(), manufacturer_support_summary());
     }
-    replace_single_module_payload(obj, module);
     println!(
         "{}",
         serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
@@ -72,33 +71,4 @@ fn insert_backends(obj: &mut serde_json::Map<String, serde_json::Value>) {
         .collect();
     obj.insert("backends".into(), json!(backends));
     obj.insert("devices".into(), json!(devices));
-}
-
-fn replace_single_module_payload(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    module: InfoModule,
-) {
-    match module {
-        InfoModule::Platform => replace_payload(obj, "platform", platform_summary()),
-        InfoModule::Ocr => replace_payload(obj, "ocr", ocr_module_info()),
-        InfoModule::Ml => replace_payload(obj, "ml", ml_module_info()),
-        InfoModule::Twain => replace_payload(obj, "twain", twain_shim_info()),
-        InfoModule::Features => replace_payload(obj, "features", feature_matrix()),
-        InfoModule::Manufacturers => {
-            replace_payload(obj, "manufacturers", manufacturer_support_summary())
-        }
-        InfoModule::Backends | InfoModule::All => {}
-    }
-}
-
-fn replace_payload(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    value: serde_json::Value,
-) {
-    *obj = serde_json::Map::from_iter([
-        ("app".into(), json!(APP_NAME)),
-        ("version".into(), json!(VERSION)),
-        (key.into(), value),
-    ]);
 }

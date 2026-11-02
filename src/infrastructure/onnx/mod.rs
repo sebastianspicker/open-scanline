@@ -9,10 +9,9 @@ use disabled as isolation;
 mod model;
 
 pub(crate) use isolation::{run_isolated_onnx_with_executable, run_onnx_worker, OnnxWorker};
-#[allow(deprecated)]
 pub use model::{
-    run_user_onnx, run_user_onnx_with_options, run_user_onnx_with_worker, OnnxInferenceOptions,
-    OnnxInputLayout, OnnxNormalization, OnnxOutputSummary, OnnxReport, OnnxRuntime,
+    run_user_onnx_with_worker, OnnxInferenceOptions, OnnxInputLayout, OnnxNormalization,
+    OnnxOutputSummary, OnnxReport, OnnxRuntime,
 };
 
 fn ensure_enabled() -> crate::error::Result<()> {

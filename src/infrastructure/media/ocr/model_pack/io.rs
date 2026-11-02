@@ -121,17 +121,9 @@ pub(crate) fn active_verified_model_pair_in(
 }
 
 fn selected_manifest_in(root: &Path) -> Result<Option<(PathBuf, ModelPackManifest)>> {
-    let path = active_path_in(root);
-    if !path.try_exists()? {
+    let Some(active) = read_active_pointer(root)? else {
         return Ok(None);
-    }
-    let bytes = read_bounded_regular(&path, 64 * 1024, "OCR active model pointer")?;
-    let active: ActivePack = serde_json::from_slice(&bytes)?;
-    if active.format_version != MODEL_PACK_FORMAT_VERSION || !valid_pack_id(&active.pack) {
-        return Err(ScanError::Invalid(
-            "OCR active model pointer is invalid".into(),
-        ));
-    }
+    };
     let pack_root = packs_dir_in(root).join(&active.pack);
     let manifest = read_pack_manifest(&pack_root)?;
     Ok(Some((pack_root, manifest)))

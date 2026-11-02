@@ -125,19 +125,15 @@ fn source_is_executable(metadata: &fs::Metadata) -> bool {
     }
 }
 
-fn copy_binary_and_fingerprint<F>(
+fn copy_binary_and_fingerprint(
     zip: &mut ZipWriter<File>,
     binary: &Path,
     binary_name: &str,
     executable: SimpleFileOptions,
-    on_snapshot_chunk: &mut F,
-) -> Result<BinaryFingerprint>
-where
-    F: FnMut(u64),
-{
+) -> Result<BinaryFingerprint> {
     let (mut source, before, mut snapshot) =
         prepare_binary_snapshot(zip, binary, binary_name, executable)?;
-    let fingerprint = copy_source_to_snapshot(&mut source, &mut snapshot, on_snapshot_chunk)?;
+    let fingerprint = copy_source_to_snapshot(&mut source, &mut snapshot)?;
     verify_stable_binary(binary, &source, before, &fingerprint)?;
     snapshot.file_mut().rewind()?;
     std::io::copy(snapshot.file_mut(), zip)?;
@@ -176,19 +172,14 @@ fn open_packaged_binary(binary: &Path) -> Result<(File, SourceStamp)> {
     Ok((source, source_stamp(&metadata)))
 }
 
-fn copy_source_to_snapshot<F>(
+fn copy_source_to_snapshot(
     source: &mut File,
     snapshot: &mut PrivateSnapshot,
-    on_snapshot_chunk: &mut F,
-) -> Result<BinaryFingerprint>
-where
-    F: FnMut(u64),
-{
+) -> Result<BinaryFingerprint> {
     let mut copied = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     while let Some(read) = read_snapshot_chunk(source, &mut buffer)? {
         copied = write_snapshot_chunk(snapshot, &buffer[..read], copied)?;
-        on_snapshot_chunk(copied);
     }
     snapshot.file_mut().flush()?;
     snapshot.file_mut().rewind()?;
@@ -248,19 +239,14 @@ fn binary_snapshot_changed(
         || fingerprint != verified
 }
 
-pub(super) fn write_binary_and_launchers<F>(
+pub(super) fn write_binary_and_launchers(
     zip: &mut ZipWriter<File>,
     binary: &Path,
     binary_name: &str,
     regular: SimpleFileOptions,
-    on_snapshot_chunk: &mut F,
-) -> Result<BinaryFingerprint>
-where
-    F: FnMut(u64),
-{
+) -> Result<BinaryFingerprint> {
     let executable = regular.unix_permissions(0o755);
-    let fingerprint =
-        copy_binary_and_fingerprint(zip, binary, binary_name, executable, on_snapshot_chunk)?;
+    let fingerprint = copy_binary_and_fingerprint(zip, binary, binary_name, executable)?;
 
     let run_sh = format!(
         "#!/usr/bin/env sh\nROOT=$(CDPATH='' cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$ROOT/{binary_name}\" \"$@\"\n"
@@ -278,7 +264,6 @@ where
 
 pub(super) fn write_documentation_and_manifest(
     zip: &mut ZipWriter<File>,
-    _root: &Path,
     binary_name: &str,
     regular: SimpleFileOptions,
 ) -> Result<()> {

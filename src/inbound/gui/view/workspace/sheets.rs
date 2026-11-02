@@ -21,9 +21,12 @@ enum Slot {
 }
 
 pub(super) fn rail(ui: &mut egui::Ui, report: &JobReport) {
-    let label = format!(
-        "{} of up to {} sides saved",
-        report.sides_complete, report.side_limit
+    let label = tr_args(
+        "ws.sides_saved_label",
+        &[
+            ("done", &report.sides_complete.to_string()),
+            ("limit", &report.side_limit.to_string()),
+        ],
     );
     let response = if report.side_limit > MAX_SLOTS {
         bar(ui, report)
@@ -39,11 +42,17 @@ pub(super) fn rail(ui: &mut egui::Ui, report: &JobReport) {
 
 fn caption(report: &JobReport) -> String {
     if report.duplex && report.side_limit.is_multiple_of(2) {
-        format!("Front and back of up to {} sheets", report.side_limit / 2)
+        tr_args(
+            "ws.caption_sheets",
+            &[("count", &(report.side_limit / 2).to_string())],
+        )
     } else if report.side_limit == 1 {
-        "One image".into()
+        tr("ws.one_image")
     } else {
-        format!("Up to {} sides", report.side_limit)
+        tr_args(
+            "ws.caption_sides",
+            &[("count", &report.side_limit.to_string())],
+        )
     }
 }
 

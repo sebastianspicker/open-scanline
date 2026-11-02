@@ -8,4 +8,6 @@ mod helpers;
 mod scan;
 
 #[cfg(feature = "gui")]
+pub(in crate::inbound::gui) use device::DeviceJob;
+#[cfg(feature = "gui")]
 pub(in crate::inbound::gui) use files::{ReprocessAction, SaveAction};

@@ -9,50 +9,26 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 pub fn build_portable(options: &PackagingOptions) -> Result<PathBuf> {
-    build_portable_with_hook(options, |_| {})
-}
-
-pub(super) fn build_portable_with_hook<F>(
-    options: &PackagingOptions,
-    mut on_snapshot_chunk: F,
-) -> Result<PathBuf>
-where
-    F: FnMut(u64),
-{
     let binary_name = validate_options(options)?;
 
     let (temporary, file) = TemporaryOutput::create(&options.out)?;
 
     let zip = ZipWriter::new(file);
-    build_archive(zip, options, binary_name, &mut on_snapshot_chunk, temporary)
+    build_archive(zip, options, binary_name, temporary)
 }
 
-fn build_archive<F>(
+fn build_archive(
     mut zip: ZipWriter<std::fs::File>,
     options: &PackagingOptions,
     binary_name: &str,
-    on_snapshot_chunk: &mut F,
     temporary: TemporaryOutput,
-) -> Result<PathBuf>
-where
-    F: FnMut(u64),
-{
+) -> Result<PathBuf> {
     let regular = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .unix_permissions(0o644);
-    let binary_fingerprint = write_binary_and_launchers(
-        &mut zip,
-        &options.binary,
-        binary_name,
-        regular,
-        on_snapshot_chunk,
-    )?;
-    write_documentation_and_manifest(
-        &mut zip,
-        Path::new(env!("CARGO_MANIFEST_DIR")),
-        binary_name,
-        regular,
-    )?;
+    let binary_fingerprint =
+        write_binary_and_launchers(&mut zip, &options.binary, binary_name, regular)?;
+    write_documentation_and_manifest(&mut zip, binary_name, regular)?;
     let file = zip
         .finish()
         .map_err(|error| package_error("could not finish portable archive", error))?;

@@ -48,8 +48,11 @@ constraints, ignores options that `scanimage` marks `[inactive]`, picks the
 nearest advertised discrete or ranged resolution, and rejects a source or color
 request it cannot match. If `scanimage --help -d <device>` fails or lists no
 options, the scan stops with an error instead of guessing option values. A document
-batch uses one `scanimage --batch` process and reads the numbered page files in
-numeric order.
+batch uses one `scanimage --batch` process. `scanimage` writes each side as
+`page_N.png.part` and renames it when the side is complete; Open Scanline then
+decodes and publishes that side and removes it from its private temporary folder
+while the feeder keeps running. The temporary folder therefore holds only the
+sides not yet published, and cancelling keeps the sides already saved.
 
 Without `--paper`, `--width`, or `--height`, Open Scanline sends no scan-area
 options and the backend scans its full default area. A named paper size is sent
@@ -60,7 +63,10 @@ is requested from a device whose sources are all feeders, its single-sided
 feeder (for example `ADF Front`) is used; any other unavailable source is an
 error that lists what the device offers. `scanimage` runs in the C locale, and a
 batch that stops because the feeder is empty (exit status 7) keeps the pages
-already scanned.
+already scanned. `--source` is sent before the resolution and mode options. When
+the requested source is not the one `scanimage --help` was read with, and that
+help marked the page-size or duplex options `[inactive]`, Open Scanline reads the
+help once more with the requested source selected.
 
 Maintenance support is discovered per device with `scanimage -A` and cached for
 the selected GUI device. Open Scanline recognizes only three shapes:
