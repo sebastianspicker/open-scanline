@@ -59,7 +59,7 @@ ureq = { version = "3.1", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23.22", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 quick-xml = "0.41"
 egui = { version = "0.32.3", optional = true }
-lopdf = "0.44"
+lopdf = "0.46"
 stringprep = "0.1"
 rfd = { version = "0.15", optional = true }
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
