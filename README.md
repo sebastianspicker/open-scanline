@@ -7,6 +7,8 @@ and writes out images, searchable PDFs, and multipage TIFF or PDF — all on you
 own machine. It ships as a command-line tool with an optional desktop GUI, plus a
 public Rust library you can embed.
 
+> _Claude was used to polish and proof-read the code and documentation of this repository._
+
 <details>
 <summary>Status and limitations</summary>
 
@@ -146,7 +148,7 @@ Detailed commands and examples are in [the usage guide](docs/usage.md).
 | --- | --- |
 | [Usage](docs/usage.md) | Commands, configuration, OCR, PDF export, and the desktop and plugin modes |
 | [Backends](docs/backends.md) | Platform and scanner requirements, discovery, and optional tools |
-| [Architecture](docs/architecture.md) | Layers, data flow, and compatibility boundaries |
+| [Architecture](docs/architecture.md) | Layers, scan walkthroughs, where state lives, CI, and a code map |
 | [Release notes](docs/release-notes.md) | Public API changes planned for the next release |
 
 ## Repository structure

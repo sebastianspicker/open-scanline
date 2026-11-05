@@ -11,21 +11,41 @@ single Cargo package. It stores settings and output artifacts locally, calls
 installed scanner or media tools when you ask it to, and talks to eSCL scanners on
 the local network. There is no server and no database.
 
+This diagram answers "who calls Open Scanline, and what does it call in turn?":
+
 ```mermaid
 flowchart LR
-    user[User or operator] --> cli[CLI]
-    user --> gui[Desktop GUI]
-    host[Host or bridge] --> plugin[Plugin entry]
-    lib[Library caller] --> facades[Public facades]
-    cli --> workflows[Workflows]
-    gui --> workflows
-    plugin --> workflows
-    facades --> workflows
-    workflows --> infrastructure[Infrastructure adapters]
-    workflows --> domain[Domain values and rules]
+    user((User)) -->|subcommands| cli[CLI]
+    user -->|clicks| gui[Desktop GUI]
+    host[Host or bridge] -->|"runs plugin mode"| plugin[Plugin entry]
+    lib[Library caller] -->|Rust calls| facades[Public facades]
+    cli -->|typed request| workflows[Workflows]
+    gui -->|"job thread"| workflows
+    plugin -->|typed request| workflows
+    facades -->|re-exports| workflows
+    workflows -->|"open, scan, save"| infrastructure[Infrastructure adapters]
+    workflows -->|pure functions| domain[Domain values and rules]
     infrastructure --> domain
-    infrastructure --> external[Files, scanners, optional tools, ONNX worker]
+    infrastructure -->|"exec, HTTP(S), files"| external[Scanners, tools, ONNX worker]
+    classDef focus fill:#fde68a,stroke:#b45309,color:#1f2937
+    class workflows focus
 ```
+
+Every entry point ends in the same workflow functions, so a scan started from the
+CLI, the GUI or the plugin mode runs the same validation, processing and
+publication code. External programs (`scanimage`, PowerShell for WIA, Tesseract,
+the JPEG XL encoder, the ONNX worker) are child processes; eSCL scanners are
+reached over HTTP(S).
+
+Where in the code:
+
+- CLI: [src/main.rs](../src/main.rs) → [src/inbound/cli.rs](../src/inbound/cli.rs) → [src/inbound/cli/handlers/router.rs](../src/inbound/cli/handlers/router.rs)
+- Desktop GUI: [src/inbound/gui/app/runner.rs](../src/inbound/gui/app/runner.rs)
+- Plugin entry: [src/inbound/plugin.rs](../src/inbound/plugin.rs)
+- Public facades: [src/lib.rs](../src/lib.rs) and the top-level `src/*.rs` modules
+- Workflows: [src/workflows/](../src/workflows/)
+- Infrastructure adapters: [src/infrastructure/](../src/infrastructure/)
+- Domain: [src/domain/](../src/domain/)
 
 ## Layers
 
@@ -108,6 +128,112 @@ Scanner artifacts, OCR input, configuration, profiles, and package outputs are
 validated before same-directory atomic publication. Cancellation flows through the
 operation and into command-backed adapters.
 
+### Where state lives
+
+There is no database. Everything persistent is a file:
+
+| Store | Location | Written by |
+| --- | --- | --- |
+| Settings (`AppConfig`) | `config.json` in the platform config directory, or `--config <path>` | [src/infrastructure/config/json.rs](../src/infrastructure/config/json.rs) |
+| OCRS model packs | `ocr-models/` in the platform data directory | [src/infrastructure/media/ocr/model_pack.rs](../src/infrastructure/media/ocr/model_pack.rs) |
+| Scan and process outputs | The path or directory the user names | [src/infrastructure/media/](../src/infrastructure/media/) via [src/workflows/publication.rs](../src/workflows/publication.rs) |
+| Scanner artifacts, page cache | Private temporary directories, removed on drop | [src/infrastructure/runtime/temporary_output.rs](../src/infrastructure/runtime/temporary_output.rs), [src/infrastructure/media/aggregate_cache.rs](../src/infrastructure/media/aggregate_cache.rs) |
+
+The platform directories come from
+[src/infrastructure/runtime/platform.rs](../src/infrastructure/runtime/platform.rs)
+via the `dirs` crate, each with an `open-scanline` subdirectory: `~/.config` and
+`~/.local/share` on Linux, `~/Library/Application Support` for both on macOS, and
+`AppData\Roaming` and `AppData\Local` on Windows.
+
+## User journeys
+
+### `open-scanline scan`
+
+This sequence answers "what happens, file by file, when I run a single scan?":
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant cli as CLI handlers
+    participant single as capture::single
+    participant acq as acquisition
+    participant page as workflows::process
+    participant media as media
+    U->>cli: scan --device mock --out scan.png
+    cli->>cli: parse args, load_config
+    cli->>single: run_scan_to_file(args, options)
+    single->>single: validate output and request
+    single->>acq: open_device_with_policy(id)
+    acq-->>single: AnySession
+    single->>acq: set_params, scan
+    acq-->>single: ImageBuffer
+    single->>page: process_and_publish_page
+    page->>page: pipeline, profile, optional OCR
+    page->>media: save image or PDF
+    media-->>page: temp file renamed to --out
+    page-->>single: published path
+    single->>acq: close
+    single-->>cli: Ok(path)
+    cli-->>U: "wrote scan.png (N bytes)", exit 0
+```
+
+Steps 2–4 turn CLI flags and `config.json` into one `ScanToFileArgs`; explicit
+flags win over configured defaults. Step 4 rejects bad output paths, crop
+rectangles and single-image duplex *before* a device is opened (step 5), so a
+mistake never costs a physical scan. The registry in step 5 picks the backend from
+the device id prefix (`mock`, `file:`, `sane:`, `wia:`, `escl:`). Steps 9–13 are
+shared with `process` and every batch page: the image is written to a temporary
+file next to the destination, checked, and only then renamed into place. Errors
+map to exit code 1, cancellation (Ctrl+C) to 130.
+
+Where in the code:
+
+- Steps 1–3: [src/inbound/cli/handlers/router/routes.rs](../src/inbound/cli/handlers/router/routes.rs) (`scan`), [src/inbound/cli/handlers/scan.rs](../src/inbound/cli/handlers/scan.rs) (`run`)
+- Steps 4–8, 14: [src/workflows/capture/single.rs](../src/workflows/capture/single.rs) (`run_scan_to_file`, `ScanContext`)
+- Steps 5–6: [src/infrastructure/acquisition/registry.rs](../src/infrastructure/acquisition/registry.rs) (`open_device_with_policy`); the session contract is in [src/infrastructure/acquisition/contract.rs](../src/infrastructure/acquisition/contract.rs)
+- Steps 9–10: [src/workflows/process.rs](../src/workflows/process.rs) (`process_and_publish_page`), [src/domain/processing/](../src/domain/processing/)
+- Steps 11–12: [src/workflows/publication.rs](../src/workflows/publication.rs) (`save_final_image_with_searchable_text`), [src/infrastructure/media/codecs.rs](../src/infrastructure/media/codecs.rs) (`save_standard_image_output`)
+
+`batch` follows the same shape through
+[src/workflows/capture/batch.rs](../src/workflows/capture/batch.rs)
+(`run_batch_scan_with_report`): it publishes each side as it arrives, then
+assembles the optional multipage TIFF or PDF from the published page files.
+
+### Scan from the desktop GUI
+
+This sequence answers "how does a button click reach the same workflow without
+freezing the window?":
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant ui as GUI frame loop
+    participant job as Job thread
+    participant single as capture::single
+    U->>ui: Click Scan
+    ui->>ui: start_scan, scan_job_plan
+    ui-)job: spawn_job(plan, cancel flag)
+    job->>single: run_scan_to_file
+    single--)job: progress callbacks
+    job-)ui: GuiJobEvent::Progress over mpsc
+    single-->>job: Ok(path)
+    job-)ui: terminal GuiJobEvent
+    ui->>ui: drain_job_events, show result
+```
+
+The GUI never scans on its render thread. It builds the same `ScanToFileArgs` the
+CLI builds (step 2), runs the workflow on a worker thread (step 3), and polls an
+`mpsc` channel on each frame (steps 6 and 8). Only one job runs at a time; the
+Cancel button sets the shared flag that the workflow checks between phases.
+
+Where in the code:
+
+- Steps 1–3: [src/inbound/gui/app/acquire.rs](../src/inbound/gui/app/acquire.rs) (`start_scan`, `launch_scan_job`), [src/inbound/gui/app/scan.rs](../src/inbound/gui/app/scan.rs) (`scan_job_plan`)
+- Step 3 thread and channel: [src/inbound/gui/app/jobs.rs](../src/inbound/gui/app/jobs.rs) (`spawn_job`)
+- Steps 6–9: [src/inbound/gui/app/lifecycle.rs](../src/inbound/gui/app/lifecycle.rs) (`drain_job_events`)
+
 ## External contracts
 
 `DeviceSession` is the acquisition-session contract. Its maintenance capability
@@ -151,6 +277,39 @@ an explicitly invoked portable-ZIP step around an already built binary, and
 `Cargo.toml` disables crate publication. Build and package on the intended target
 host, because the packager records — but does not infer — the executable's target
 operating system and architecture.
+
+## Build and CI
+
+This pipeline answers "what checks a change, and what does it produce?":
+
+```mermaid
+flowchart LR
+    trigger["Dependabot PR or<br/>manual dispatch"] --> build["build job<br/>Linux, macOS, Windows"]
+    trigger --> stable["stable job<br/>cargo check"]
+    any["push to main, PR,<br/>weekly, dispatch"] --> audit["audit job<br/>RustSec"]
+    build -->|"fmt, clippy, test"| profiles["Feature profiles<br/>all, core, headless"]
+    profiles -->|"cargo build --release"| binary[Release binary]
+    binary -->|"package"| zip["Portable ZIP<br/>smoke test"]
+    classDef focus fill:#fde68a,stroke:#b45309,color:#1f2937
+    class build focus
+```
+
+The `build` job on Rust 1.91 is the real gate: on each OS it runs rustfmt, Clippy
+with `-D warnings` and the test suite for the all-features and core-only
+profiles, builds release binaries, checks each optional feature on its own, and
+finally packages the core binary and runs the extracted `run.sh` / `run.bat
+--version`. The `stable` job only checks that the code still compiles on the
+latest stable Rust. To save CI minutes, both run only for Dependabot pull
+requests or a manual run; the RustSec dependency audit runs on every push to
+`main`, every pull request and weekly. Nothing is uploaded or deployed: the ZIP
+is built and discarded.
+
+Where in the code:
+
+- [.github/workflows/ci.yml](../.github/workflows/ci.yml)
+- [.github/dependabot.yml](../.github/dependabot.yml)
+- [rust-toolchain.toml](../rust-toolchain.toml) (pinned toolchain), [Cargo.toml](../Cargo.toml) (`gui`, `ocrs`, `onnx` features)
+- Packaging: [src/infrastructure/distribution/](../src/infrastructure/distribution/)
 
 ## Public library surface and placement
 
@@ -205,3 +364,30 @@ source-sized float expansion. Worker identity verification, the private executio
 image, process isolation, and resource limits form the inference boundary. The
 `gui`, `ocrs`, and `onnx` Cargo features select implementations, while
 public facades and CLI parsing stay present in every profile.
+
+## Code map
+
+Read in this order to follow a scan from the command line to the file on disk.
+The [README](../README.md#repository-structure) lists the layers; this table
+names the files inside them.
+
+| Path | Responsibility |
+| --- | --- |
+| [src/main.rs](../src/main.rs) | Executable entry; calls `cli::run_from_env` |
+| [src/inbound/cli/args.rs](../src/inbound/cli/args.rs) | clap definitions for every subcommand |
+| [src/inbound/cli/handlers/router.rs](../src/inbound/cli/handlers/router.rs) | Dispatches each subcommand to its handler |
+| [src/inbound/cli/handlers/scan.rs](../src/inbound/cli/handlers/scan.rs) | Merges flags and config into `ScanToFileArgs` |
+| [src/workflows/capture/single.rs](../src/workflows/capture/single.rs) | Single-scan use case: validate, open, acquire, publish |
+| [src/workflows/capture/batch.rs](../src/workflows/capture/batch.rs) | Batch use case: page stream, naming, multipage outputs |
+| [src/workflows/process.rs](../src/workflows/process.rs) | Shared page kernel: pipeline, profile, OCR, save |
+| [src/workflows/publication.rs](../src/workflows/publication.rs) | Export validation, OCR dispatch, PDF or image choice |
+| [src/infrastructure/acquisition/contract.rs](../src/infrastructure/acquisition/contract.rs) | `DeviceSession` trait every backend implements |
+| [src/infrastructure/acquisition/registry.rs](../src/infrastructure/acquisition/registry.rs) | Device id → backend session |
+| `src/infrastructure/acquisition/{mock,file,sane,wia,escl}.rs` | The five backends |
+| [src/domain/processing/apply.rs](../src/domain/processing/apply.rs) | `apply_pipeline`: the ordered image operations |
+| [src/infrastructure/media/](../src/infrastructure/media/) | Codecs, PDF, TIFF, OCR engines, ICC, page cache |
+| [src/infrastructure/runtime/](../src/infrastructure/runtime/) | Child processes, temp files, atomic publication |
+| [src/infrastructure/config/json.rs](../src/infrastructure/config/json.rs) | Load and save `config.json` |
+| [src/inbound/gui/app/](../src/inbound/gui/app/) | GUI state machine, job threads, discovery |
+| [src/infrastructure/onnx/](../src/infrastructure/onnx/) | ONNX worker launch, identity check, limits |
+| [src/architecture_rules.rs](../src/architecture_rules.rs) | Test that enforces the layer direction |
