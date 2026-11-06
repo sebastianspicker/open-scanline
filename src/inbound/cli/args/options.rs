@@ -1,6 +1,8 @@
 use super::{
-    parse_crop, parse_curves, parse_deskew, parse_hue, parse_levels_gamma, parse_paper,
-    parse_rotate, parse_saturation, CurvePoints, OcrEngineArg, ScanSource,
+    parse_brightness, parse_colorize_mode, parse_contrast, parse_crop, parse_curves,
+    parse_descreen_dpi, parse_deskew, parse_filter_tier, parse_hue, parse_levels_gamma,
+    parse_levels_point, parse_paper, parse_rotate, parse_saturation, parse_sharpen, CurvePoints,
+    OcrEngineArg, ScanSource,
 };
 use crate::domain::acquisition::PaperSize;
 use clap::Args;
@@ -46,9 +48,11 @@ pub(in crate::inbound::cli) struct Adjustments {
     /// Crop as x,y,w,h in source pixels before rotate
     #[arg(long, value_parser = parse_crop, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) crop: Option<[i32; 4]>,
-    #[arg(long, allow_negative_numbers = true)]
+    /// Brightness delta from -100 to 100
+    #[arg(long, value_parser = parse_brightness, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) brightness: Option<i32>,
-    #[arg(long, allow_negative_numbers = true)]
+    /// Contrast delta from -100 to 100
+    #[arg(long, value_parser = parse_contrast, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) contrast: Option<i32>,
     /// Saturation delta from -100 to 100
     #[arg(long, value_parser = parse_saturation, allow_negative_numbers = true)]
@@ -61,9 +65,9 @@ pub(in crate::inbound::cli) struct Adjustments {
     pub(in crate::inbound::cli) curves: Option<CurvePoints>,
     #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) desaturate: Option<bool>,
-    #[arg(long = "levels-black", allow_negative_numbers = true)]
+    #[arg(long = "levels-black", value_parser = parse_levels_point, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_black: Option<i32>,
-    #[arg(long = "levels-white", allow_negative_numbers = true)]
+    #[arg(long = "levels-white", value_parser = parse_levels_point, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_white: Option<i32>,
     #[arg(long = "levels-gamma", value_parser = parse_levels_gamma, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) levels_gamma: Option<f64>,
@@ -72,13 +76,15 @@ pub(in crate::inbound::cli) struct Adjustments {
 #[derive(Debug, Args)]
 pub(in crate::inbound::cli) struct FilterOptions {
     /// Infrared clean tier: off|light|medium|heavy
-    #[arg(long = "infrared-clean")]
+    #[arg(long = "infrared-clean", value_parser = parse_filter_tier)]
     pub(in crate::inbound::cli) infrared_clean: Option<String>,
     #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) descreen: Option<bool>,
-    #[arg(long = "descreen-dpi")]
+    /// Print screen dpi for descreen, 25 to 300
+    #[arg(long = "descreen-dpi", value_parser = parse_descreen_dpi)]
     pub(in crate::inbound::cli) descreen_dpi: Option<i32>,
-    #[arg(long)]
+    /// Sharpen amount from 0 to 5
+    #[arg(long, value_parser = parse_sharpen, allow_negative_numbers = true)]
     pub(in crate::inbound::cli) sharpen: Option<f64>,
     #[arg(long = "film-type")]
     pub(in crate::inbound::cli) film_type: Option<String>,
@@ -86,13 +92,15 @@ pub(in crate::inbound::cli) struct FilterOptions {
     pub(in crate::inbound::cli) restore_colors: Option<bool>,
     #[arg(long = "restore-fading", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) restore_fading: Option<bool>,
-    #[arg(long = "grain-reduction")]
+    /// Grain reduction tier: off|light|medium|heavy
+    #[arg(long = "grain-reduction", value_parser = parse_filter_tier)]
     pub(in crate::inbound::cli) grain_reduction: Option<String>,
     #[arg(long, action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) flatten: Option<bool>,
     #[arg(long = "hole-punch", action = clap::ArgAction::Set, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     pub(in crate::inbound::cli) hole_punch: Option<bool>,
-    #[arg(long = "colorize-mode")]
+    /// Colorize mode: off|sepia|blue
+    #[arg(long = "colorize-mode", value_parser = parse_colorize_mode)]
     pub(in crate::inbound::cli) colorize_mode: Option<String>,
 }
 

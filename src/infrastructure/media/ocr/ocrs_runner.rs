@@ -337,6 +337,52 @@ impl ModelLoader for ProductionLoader {
     }
 }
 
+#[cfg(all(test, feature = "ocrs"))]
+mod engine_cache_tests {
+    use super::*;
+    use crate::domain::image::PixelFormat;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FakeEngine;
+    impl EngineRuntime for FakeEngine {
+        fn recognize(&self, _: &ImageBuffer) -> Result<String> {
+            Ok("text".into())
+        }
+    }
+
+    struct CountingFactory(Arc<AtomicUsize>);
+    impl EngineFactory for CountingFactory {
+        fn construct(&self, _: Vec<u8>, _: Vec<u8>) -> Result<Box<dyn EngineRuntime>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(FakeEngine))
+        }
+    }
+
+    fn pair(key: &str) -> model_pack::VerifiedModelPair {
+        model_pack::VerifiedModelPair {
+            key: key.into(),
+            detection: vec![1],
+            recognition: vec![2],
+        }
+    }
+
+    #[test]
+    fn engine_is_reused_until_the_model_key_changes() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let job = EnabledJob {
+            loader: Arc::new(ProductionLoader),
+            factory: Arc::new(CountingFactory(builds.clone())),
+            cache: Mutex::new(None),
+        };
+        let image = ImageBuffer::new(1, 1, PixelFormat::Rgb8, vec![255; 3]).unwrap();
+        for key in ["a", "a", "a", "b", "b", "a"] {
+            assert_eq!(job.recognize_pair(&image, pair(key), None).unwrap(), "text");
+        }
+        // a, then b, then a again: three builds for six pages.
+        assert_eq!(builds.load(Ordering::SeqCst), 3);
+    }
+}
+
 #[cfg(all(test, not(feature = "ocrs")))]
 mod tests {
     use super::*;

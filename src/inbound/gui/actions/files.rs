@@ -61,6 +61,8 @@ impl GuiState {
         match open_image_file(&path) {
             Ok(path) => {
                 self.open_path_input = path.display().to_string();
+                // A newly opened file is not derived from the last scan's raw.
+                self.last_raw = None;
                 self.set_image_success(path);
             }
             Err(error) => self.set_error(error),
@@ -120,7 +122,14 @@ impl GuiState {
             self.set_error(format!("invalid color controls: {error}"));
             return None;
         }
-        let Some(src) = self.last_image.clone() else {
+        // The saved raw file is unprocessed; the last image already has the
+        // pipeline applied and would stack the effects a second time.
+        let Some(src) = self
+            .last_raw
+            .clone()
+            .filter(|raw| raw.is_file())
+            .or_else(|| self.last_image.clone())
+        else {
             self.set_open_error();
             return None;
         };
@@ -131,8 +140,7 @@ impl GuiState {
                 return None;
             }
         };
-        let mut pipeline = self.pipeline_prefs();
-        pipeline.auto_levels = self.auto_levels;
+        let pipeline = self.pipeline_prefs();
         let export = self.take_export_options();
         let pending_pdf_password = export.pdf_password.clone();
         Some(ReprocessAction {

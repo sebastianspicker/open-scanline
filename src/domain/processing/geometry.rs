@@ -203,7 +203,8 @@ pub fn estimate_skew_degrees(image: &ImageBuffer, max_angle: f64) -> f64 {
     best_projection_angle(&samples, max_angle)
 }
 
-/// Rotate by `angle_degrees` (counter-clockwise) with expand canvas, white fill.
+/// Rotate by `angle_degrees` (positive turns clockwise on screen, y-down) with
+/// expand canvas, white fill.
 /// Nearest-neighbor inverse mapping (pure-fallback path).
 pub fn deskew(image: &ImageBuffer, angle_degrees: f64) -> Result<ImageBuffer> {
     if !angle_degrees.is_finite() {
@@ -231,7 +232,8 @@ pub fn auto_deskew(image: &ImageBuffer, max_angle: f64) -> Result<ImageBuffer> {
     if angle.abs() < 0.05 {
         return Ok(image.clone());
     }
-    deskew(image, angle)
+    // The estimate is the line's own slope; undo it by rotating the other way.
+    deskew(image, -angle)
 }
 
 #[derive(Clone, Copy)]
@@ -273,13 +275,20 @@ fn validate_crop(image: &ImageBuffer, region: Rect) -> Result<()> {
             "crop: unsupported pixel format".into(),
         ));
     }
-    if !has_valid_crop_shape(region) {
-        return Err(ScanError::Invalid("invalid crop region".into()));
-    }
+    validate_crop_region(region)?;
     if !crop_fits_image(image, region) {
         return Err(ScanError::Invalid("crop region out of bounds".into()));
     }
     Ok(())
+}
+
+/// Shape-only crop check (nonnegative origin, positive size), shared with the CLI parser.
+pub fn validate_crop_region(region: Rect) -> Result<()> {
+    if has_valid_crop_shape(region) {
+        Ok(())
+    } else {
+        Err(ScanError::Invalid("invalid crop region".into()))
+    }
 }
 
 fn is_crop_format_supported(pixel_format: PixelFormat) -> bool {
@@ -517,5 +526,25 @@ mod bounds_tests {
             Err(ScanError::Invalid(_))
         ));
         assert!(deskew(&gray(), f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn auto_deskew_removes_the_skew_it_estimates() {
+        let (width, height) = (400usize, 300usize);
+        let slope = 3f64.to_radians().tan();
+        let mut data = vec![255u8; width * height];
+        for base in [60.0, 110.0, 160.0, 210.0] {
+            for x in 20..380 {
+                let y = (base + (x as f64 - 200.0) * slope).round() as usize;
+                data[y * width + x] = 0;
+                data[(y + 1) * width + x] = 0;
+            }
+        }
+        let image =
+            ImageBuffer::new(width as u32, height as u32, PixelFormat::Gray8, data).unwrap();
+        assert!((estimate_skew_degrees(&image, 15.0) - 3.0).abs() <= 1.0);
+        let fixed = auto_deskew(&image, 15.0).unwrap();
+        // The estimator searches in 0.5 degree steps, so one step is the resolution.
+        assert!(estimate_skew_degrees(&fixed, 15.0).abs() <= 0.5);
     }
 }

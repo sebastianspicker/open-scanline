@@ -44,6 +44,7 @@ impl OpenScanlineApp {
                 }
                 Ok(GuiJobEvent::ScanRawPublished(path)) => {
                     received_event = true;
+                    self.state.pending_raw = Some(path.clone());
                     self.update_job_report(|report| report.add_raw_output(path));
                 }
                 Ok(event) => {
@@ -168,6 +169,9 @@ impl OpenScanlineApp {
         } else {
             self.state.set_image_success(path);
         }
+        if let Some(raw) = self.state.pending_raw.take() {
+            self.state.last_raw = Some(raw);
+        }
         if advance_frame {
             self.state.frame_index += 1;
         }
@@ -180,6 +184,7 @@ impl OpenScanlineApp {
     ) {
         self.update_job_report(|report| report.finish_batch(&paths, end));
         if let Some(last) = paths.last() {
+            self.state.last_raw = None;
             self.state.last_image = Some(last.clone());
             self.state.update_histogram();
         }

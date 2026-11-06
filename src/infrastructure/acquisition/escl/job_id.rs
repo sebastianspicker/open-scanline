@@ -17,19 +17,7 @@ fn location_job_id(line: &str) -> Option<String> {
     if !name.eq_ignore_ascii_case("location") {
         return None;
     }
-    scan_job_id(value).or_else(|| relative_location_job_id(value))
-}
-
-fn relative_location_job_id(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.contains("://") {
-        return None;
-    }
-    value
-        .rsplit('/')
-        .next()
-        .filter(|segment| !segment.is_empty())
-        .map(str::to_string)
+    scan_job_id(value)
 }
 
 fn scan_job_id(value: &str) -> Option<String> {

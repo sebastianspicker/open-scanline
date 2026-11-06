@@ -14,6 +14,9 @@ pub(super) fn scan(options: ScanOptions, config_path: Option<&Path>) -> i32 {
         Ok(value) => value,
         Err(code) => return code,
     };
+    if let Err(code) = check_levels(&config, &options.adjustments) {
+        return code;
+    }
     let request = scan_request(options, config, export);
     cancellation::with_registered_token(move |cancellation| scan::run(request, cancellation))
 }
@@ -76,6 +79,9 @@ pub(super) fn process(options: ProcessOptions, config_path: Option<&Path>) -> i3
         Ok(value) => value,
         Err(code) => return code,
     };
+    if let Err(code) = check_levels(&config, &adjustments) {
+        return code;
+    }
     cancellation::with_registered_token(move |cancellation| {
         process::run(
             process::Request {
@@ -119,6 +125,9 @@ pub(super) fn batch(options: BatchOptions, config_path: Option<&Path>) -> i32 {
         Ok(value) => value,
         Err(code) => return code,
     };
+    if let Err(code) = check_levels(&config, &options.adjustments) {
+        return code;
+    }
     let request = batch_request(options, config, export);
     cancellation::with_registered_token(move |cancellation| commands::batch(request, cancellation))
 }
@@ -172,6 +181,18 @@ fn configured_export(
     })?;
     let export = export::build(&config, overrides).map_err(export::report_error)?;
     Ok((config, export))
+}
+
+/// Reject an inverted levels range once `--levels-*` and the configured values are merged.
+fn check_levels(config: &AppConfig, adjustments: &Adjustments) -> Result<(), i32> {
+    crate::domain::processing::validate_levels(
+        adjustments.levels_black.unwrap_or(config.levels_black),
+        adjustments.levels_white.unwrap_or(config.levels_white),
+    )
+    .map_err(|error| {
+        eprintln!("error: {error}");
+        2
+    })
 }
 
 fn pipeline_overrides(

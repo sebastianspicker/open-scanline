@@ -122,9 +122,9 @@ impl DeviceSession for MockDeviceSession {
 }
 
 fn validate_gradient_request(request: &ScanRequest) -> Result<()> {
-    if request.pixel_format != PixelFormat::Rgb8 {
+    if !matches!(request.pixel_format, PixelFormat::Rgb8 | PixelFormat::Gray8) {
         return Err(ScanError::Unsupported(
-            "MockDevice only supports Rgb8".into(),
+            "MockDevice only supports Rgb8 and Gray8".into(),
         ));
     }
     let (width, height) = gradient_extent(request);
@@ -161,18 +161,45 @@ fn validate_gradient_dimensions(width: u32, height: u32) -> Result<()> {
 
 fn gradient_image(request: &ScanRequest) -> Result<ImageBuffer> {
     let (width, height) = gradient_extent(request);
-    let mut buffer = vec![0_u8; (width as usize) * (height as usize) * 3];
     let seed = (request.seed & 0xFF) as u8;
-    for (index, pixel) in buffer.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-        let x = index as u32 % width;
-        let y = index as u32 / width;
-        pixel.copy_from_slice(&gradient_pixel(x, y, width, height, seed));
-    }
-    ImageBuffer::new(width, height, PixelFormat::Rgb8, buffer)
+    let pixels = (0..width as usize * height as usize).map(|index| {
+        gradient_pixel(
+            index as u32 % width,
+            index as u32 / width,
+            width,
+            height,
+            seed,
+        )
+    });
+    let buffer = match request.pixel_format {
+        // The horizontal ramp doubles as the gray gradient.
+        PixelFormat::Gray8 => pixels.map(|pixel| pixel[0]).collect(),
+        _ => pixels.flatten().collect(),
+    };
+    ImageBuffer::new(width, height, request.pixel_format, buffer)
 }
 
 fn gradient_pixel(x: u32, y: u32, width: u32, height: u32, seed: u8) -> [u8; 3] {
     let red = ((x * 255) / width.saturating_sub(1).max(1)) as u8;
     let green = ((y * 255) / height.saturating_sub(1).max(1)) as u8;
     [red, green, seed]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gray_requests_produce_a_gray_gradient() {
+        let request = ScanRequest {
+            pixel_format: PixelFormat::Gray8,
+            width: 4,
+            height: 2,
+            ..ScanRequest::default()
+        };
+        let image = MockDeviceSession::gradient(&request).unwrap();
+        assert_eq!(image.pixel_format, PixelFormat::Gray8);
+        assert_eq!(image.data.len(), 8);
+        assert_eq!((image.data[0], image.data[3]), (0, 255));
+    }
 }

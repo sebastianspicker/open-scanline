@@ -1,5 +1,9 @@
 //! On-disk application config (OSL-CONFIG). No DRM / activation keys.
 
+use crate::domain::processing::{
+    is_disabled, validate_adjustment, validate_descreen_dpi, validate_disableable_choice,
+    validate_filter_tier, validate_levels, validate_sharpen, COLORIZE_MODES,
+};
 use crate::domain::settings::{
     format_curve_points, is_banned_key, parse_curve_points, strip_banned, validate_hue,
     validate_ocr_language, validate_output_name, validate_saturation,
@@ -133,6 +137,11 @@ fn validate_config_formats(config: &AppConfig) -> Result<()> {
 
 fn validate_config_image(config: &AppConfig) -> Result<()> {
     crate::domain::acquisition::validate_scan_dpi(config.default_dpi, config.default_dpi)?;
+    if (config.default_width == 0) != (config.default_height == 0) {
+        return Err(ScanError::Invalid(
+            "config: set both default_width and default_height, or neither".into(),
+        ));
+    }
     // Zero extents mean the device maximum; only explicit axes are bounded.
     crate::domain::image::checked_image_len(
         config.default_width.max(1),
@@ -160,7 +169,37 @@ fn validate_config_processing(config: &AppConfig) -> Result<()> {
         parse_curve_points(&format_curve_points(Some(points)))?;
     }
     validate_config_corrections(config)?;
+    validate_config_adjustments(config)?;
+    validate_config_filters(config)?;
     validate_crop(config.crop)
+}
+
+fn validate_config_adjustments(config: &AppConfig) -> Result<()> {
+    validate_adjustment("config brightness", config.brightness)?;
+    validate_adjustment("config contrast", config.contrast)?;
+    validate_levels(config.levels_black, config.levels_white)?;
+    validate_sharpen(config.sharpen_amount)?;
+    // Older GUI builds saved up to 1200; `descreen` uses at most 300, so
+    // accept those configs instead of refusing the whole file.
+    if !(25..=1200).contains(&config.descreen_dpi) {
+        validate_descreen_dpi(config.descreen_dpi)?;
+    }
+    Ok(())
+}
+
+fn validate_config_filters(config: &AppConfig) -> Result<()> {
+    for (label, value) in [
+        ("config infrared_clean", &config.infrared_clean),
+        ("config grain_reduction", &config.grain_reduction),
+    ] {
+        if let Some(value) = value {
+            validate_filter_tier(label, value)?;
+        }
+    }
+    if let Some(mode) = &config.colorize_mode {
+        validate_disableable_choice("config colorize_mode", mode, COLORIZE_MODES)?;
+    }
+    Ok(())
 }
 
 fn validate_config_corrections(config: &AppConfig) -> Result<()> {
@@ -180,10 +219,7 @@ fn validate_config_corrections(config: &AppConfig) -> Result<()> {
         ));
     }
     if let Some(film) = config.film_type.as_deref().map(str::trim) {
-        let disabled = ["", "off", "none"]
-            .iter()
-            .any(|value| film.eq_ignore_ascii_case(value));
-        if !disabled {
+        if !is_disabled(film) {
             crate::domain::processing::get_film_profile(film)?;
         }
     }
@@ -357,5 +393,42 @@ mod tests {
         let defaults = AppConfig::default();
         assert_eq!((defaults.default_width, defaults.default_height), (0, 0));
         assert!(validate_app_config(&defaults).is_ok());
+    }
+
+    #[test]
+    fn config_rejects_out_of_range_adjustments_and_unknown_filter_modes() {
+        for bad in [
+            json!({"brightness": 500}),
+            json!({"contrast": -101}),
+            json!({"sharpen_amount": -1.0}),
+            json!({"sharpen_amount": 6.0}),
+            json!({"levels_black": 200, "levels_white": 100}),
+            json!({"descreen_dpi": 10}),
+            json!({"grain_reduction": "hevy"}),
+            json!({"infrared_clean": "heavyy"}),
+            json!({"colorize_mode": "red"}),
+        ] {
+            assert!(config_from_value(bad.clone()).is_err(), "{bad}");
+        }
+        assert!(config_from_value(json!({
+            "brightness": -100, "sharpen_amount": 5.0, "descreen_dpi": 300,
+            "grain_reduction": "Heavy", "infrared_clean": "off", "colorize_mode": "blue"
+        }))
+        .is_ok());
+    }
+
+    #[test]
+    fn config_rejects_a_half_set_custom_area() {
+        for bad in [
+            json!({"default_width": 1200, "default_height": 0}),
+            json!({"default_width": 0, "default_height": 900}),
+        ] {
+            let error = config_from_value(bad.clone()).unwrap_err().to_string();
+            assert!(
+                error.contains("both default_width and default_height"),
+                "{error}"
+            );
+        }
+        assert!(config_from_value(json!({"default_width": 1200, "default_height": 900})).is_ok());
     }
 }

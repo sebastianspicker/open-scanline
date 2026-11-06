@@ -261,12 +261,20 @@ fn unknown_result(query: &str, message: &str) -> ResolveResult {
     }
 }
 
+/// First standalone 4-hex token, optionally prefixed `0x` or `vid_`, so
+/// `usb:04b8`, `0x04b8` and `VID_04B8&PID_0122` work but "fi-7160" does not.
 fn extract_vid(lower_query: &str) -> String {
     lower_query
-        .chars()
-        .filter(|character| character.is_ascii_hexdigit())
-        .take(4)
-        .collect()
+        .split(|c: char| c.is_whitespace() || matches!(c, ':' | '&' | ',' | ';' | '/'))
+        .map(|token| {
+            token
+                .strip_prefix("0x")
+                .or_else(|| token.strip_prefix("vid_"))
+                .unwrap_or(token)
+        })
+        .find(|token| token.len() == 4 && token.chars().all(|c| c.is_ascii_hexdigit()))
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn resolve_by_vid(query: &str, vid: &str, entries: &[ManufacturerEntry]) -> Option<ResolveResult> {
@@ -364,5 +372,22 @@ mod tests {
         assert_eq!(result.manufacturer.unwrap().id, "fujitsu");
         assert_eq!(resolve_manufacturer("Fujitsu fi-7160").status, "ok");
         assert!(!token_matches("wifi-x", "fi-"));
+    }
+
+    #[test]
+    fn vid_forms_resolve_and_free_text_is_not_a_vid() {
+        for query in [
+            "04b8",
+            "04B8:0122",
+            "usb:04b8",
+            "0x04b8",
+            "VID_04B8&PID_0122",
+        ] {
+            let result = resolve_manufacturer(query);
+            assert_eq!(result.matched_by.as_deref(), Some("vid"), "{query}");
+            assert_eq!(result.manufacturer.unwrap().usb_vids[0], "04b8", "{query}");
+        }
+        assert_eq!(extract_vid("fujitsu fi-7160"), "");
+        assert_eq!(extract_vid("b04b8x"), "");
     }
 }

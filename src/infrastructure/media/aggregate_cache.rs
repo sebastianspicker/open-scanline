@@ -32,6 +32,8 @@ pub(crate) struct SharedPageLoader {
     used_bytes: usize,
     limit: usize,
     sequence: usize,
+    /// Set once a page did not fit; later new sources skip hashing and just decode.
+    full: bool,
     #[cfg(test)]
     decode_count: usize,
 }
@@ -48,6 +50,7 @@ impl SharedPageLoader {
             used_bytes: 0,
             limit,
             sequence: 0,
+            full: false,
             #[cfg(test)]
             decode_count: 0,
         }
@@ -71,7 +74,9 @@ impl SharedPageLoader {
         F: FnOnce(&Path) -> Result<ImageBuffer>,
     {
         check_cancellation(cancellation)?;
-        if self.storage.is_none() {
+        // shortcut: one page that did not fit stops caching of later (smaller) pages too;
+        // sources already cached still take the hashing path.
+        if self.storage.is_none() || (self.full && !self.entries.contains_key(source)) {
             #[cfg(test)]
             {
                 self.decode_count += 1;
@@ -155,6 +160,7 @@ impl SharedPageLoader {
             return Ok(());
         };
         if self.used_bytes.saturating_add(bytes) > self.limit {
+            self.full = true;
             return Ok(());
         }
         let path = storage
@@ -451,7 +457,23 @@ mod tests {
         let _ = std::fs::remove_file(second);
 
         std::fs::remove_file(&source).unwrap();
-        assert!(loader.load_with(&source, None, |_| Ok(fixture(1))).is_err());
+        // The cache is full here, so the missing source surfaces from the decoder.
+        assert!(loader.load_with(&source, None, |p| load_image(p)).is_err());
+    }
+
+    #[test]
+    fn full_cache_decodes_without_hashing() {
+        let source = scratch_source("full", b"source");
+        let mut loader = SharedPageLoader::with_limit(1);
+        loader.load_with(&source, None, |_| Ok(fixture(1))).unwrap();
+        assert!(loader.full);
+        // A hash would fail on this missing path; the decoder closure ignores it.
+        let missing = source.with_extension("missing");
+        let image = loader
+            .load_with(&missing, None, |_| Ok(fixture(2)))
+            .unwrap();
+        assert_eq!(image, fixture(2));
+        let _ = std::fs::remove_file(source);
     }
 
     #[test]

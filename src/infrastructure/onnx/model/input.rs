@@ -6,6 +6,25 @@ use tract_onnx::prelude::Tensor;
 const MAX_ONNX_INPUT_ELEMENTS: usize = 16 * 1024 * 1024;
 const MAX_ONNX_BATCH: usize = 16;
 
+/// Image size for a dynamic-shape model: scaled down, aspect kept, so `3*h*w` fits the input cap.
+pub(super) fn dynamic_input_size(height: usize, width: usize) -> (usize, usize) {
+    let (mut h, mut w) = (height.max(1), width.max(1));
+    if 3 * h * w > MAX_ONNX_INPUT_ELEMENTS {
+        let scale = (MAX_ONNX_INPUT_ELEMENTS as f64 / (3 * h * w) as f64).sqrt();
+        h = ((h as f64 * scale) as usize).max(1);
+        w = ((w as f64 * scale) as usize).max(1);
+        // Float rounding must never leave the product above the cap.
+        while 3 * h * w > MAX_ONNX_INPUT_ELEMENTS && h.max(w) > 1 {
+            if h >= w {
+                h -= 1;
+            } else {
+                w -= 1;
+            }
+        }
+    }
+    (h, w)
+}
+
 #[derive(Debug)]
 struct InputDimensions {
     batch: usize,
@@ -266,6 +285,14 @@ fn normalize(sample: u8, normalization: OnnxNormalization) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dynamic_size_fits_under_the_cap_and_keeps_aspect() {
+        assert_eq!(dynamic_input_size(100, 200), (100, 200));
+        let (h, w) = dynamic_input_size(3508, 2480);
+        assert!(3 * h * w <= MAX_ONNX_INPUT_ELEMENTS && h < 3508 && w < 2480);
+        assert!((h as f64 / w as f64 - 3508.0 / 2480.0).abs() < 0.01);
+    }
 
     #[test]
     fn one_channel_input_is_grey_in_both_layouts() {

@@ -7,7 +7,7 @@ impl GuiState {
             load_config_and_translation(config_path);
         let resolved = resolve_defaults(&config);
         let (devices, device) = devices_and_selection(&config);
-        build_gui_state!(
+        let mut state = build_gui_state!(
             path,
             config,
             lang,
@@ -19,6 +19,8 @@ impl GuiState {
             device.clone(),
             DeviceMaintenanceCapabilities::unsupported("Loading maintenance capabilities"),
             configured_output_dir(&config)
-        )
+        );
+        state.frame_index = state.first_free_frame_index();
+        state
     }
 }

@@ -11,23 +11,81 @@ fn clamp_f(v: f64) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
 }
 
-fn norm_amount(amount: Option<&str>, default: &str) -> Option<&'static str> {
-    let value = amount?.trim().to_ascii_lowercase();
-    (!matches!(value.as_str(), "" | "off" | "none" | "false" | "0" | "no")).then(|| {
-        match value.as_str() {
-            "light" | "l" | "low" => "light",
-            "heavy" | "h" | "high" | "strong" => "heavy",
-            "true" | "on" | "yes" | "1" => bool_tier(default),
-            _ => "medium",
-        }
-    })
+/// Accepted tiers for `infrared_clean` and `grain_reduction`.
+pub const FILTER_TIERS: &[&str] = &["light", "medium", "heavy"];
+/// Accepted tint modes for `colorize`.
+/// `warm` and `cool` are the GUI names for `sepia` and `blue`.
+pub const COLORIZE_MODES: &[&str] = &["sepia", "blue", "warm", "cool"];
+
+/// True for the shared "feature off" spellings: empty, `off`, `none`, `false`
+/// (trimmed, case-insensitive).
+pub fn is_disabled(value: &str) -> bool {
+    let value = value.trim();
+    value.is_empty()
+        || ["off", "none", "false"]
+            .iter()
+            .any(|off| value.eq_ignore_ascii_case(off))
 }
 
-fn bool_tier(default: &str) -> &'static str {
-    match default {
-        "light" => "light",
-        "heavy" => "heavy",
-        _ => "medium",
+/// Accept a disabled spelling or one of `allowed` (case-insensitive).
+pub fn validate_disableable_choice(label: &str, value: &str, allowed: &[&str]) -> Result<()> {
+    let value = value.trim();
+    if is_disabled(value) || allowed.iter().any(|a| value.eq_ignore_ascii_case(a)) {
+        return Ok(());
+    }
+    Err(ScanError::Invalid(format!(
+        "{label} must be off or one of: {}",
+        allowed.join(", ")
+    )))
+}
+
+/// Map a tier spelling to its canonical tier; `Ok(None)` means disabled.
+/// The short and boolean aliases are kept for configs saved by older builds.
+fn norm_amount(label: &str, amount: Option<&str>) -> Result<Option<&'static str>> {
+    let Some(value) = amount.map(str::trim) else {
+        return Ok(None);
+    };
+    if is_disabled(value) || matches!(value, "0") || value.eq_ignore_ascii_case("no") {
+        return Ok(None);
+    }
+    let tier = match value.to_ascii_lowercase().as_str() {
+        "light" | "l" | "low" => "light",
+        "medium" | "true" | "on" | "yes" | "1" => "medium",
+        "heavy" | "h" | "high" | "strong" => "heavy",
+        _ => {
+            return Err(ScanError::Invalid(format!(
+                "{label} must be off or one of: {}",
+                FILTER_TIERS.join(", ")
+            )))
+        }
+    };
+    Ok(Some(tier))
+}
+
+/// Accept a disabled spelling, a tier, or one of its legacy aliases.
+pub fn validate_filter_tier(label: &str, value: &str) -> Result<()> {
+    norm_amount(label, Some(value)).map(|_| ())
+}
+
+/// Sharpen amounts are accepted from 0 to 5 (not silently clamped or ignored).
+pub fn validate_sharpen(amount: f64) -> Result<f64> {
+    if amount.is_finite() && (0.0..=5.0).contains(&amount) {
+        Ok(amount)
+    } else {
+        Err(ScanError::Invalid(
+            "sharpen amount must be a finite number from 0 to 5".into(),
+        ))
+    }
+}
+
+/// Descreen print-screen dpi range that `descreen` actually uses.
+pub fn validate_descreen_dpi(dpi: i32) -> Result<i32> {
+    if (25..=300).contains(&dpi) {
+        Ok(dpi)
+    } else {
+        Err(ScanError::Invalid(
+            "descreen dpi must be from 25 to 300".into(),
+        ))
     }
 }
 
@@ -247,7 +305,7 @@ pub fn denoise(image: &ImageBuffer, strength: f64) -> Result<ImageBuffer> {
 
 /// Remove dust/scratches via IR-style residual median inpaint.
 pub fn infrared_clean(image: &ImageBuffer, amount: Option<&str>) -> Result<ImageBuffer> {
-    let tier = match norm_amount(amount, "medium") {
+    let tier = match norm_amount("infrared clean tier", amount)? {
         None => return Ok(image.clone()),
         Some(t) => t,
     };
@@ -272,7 +330,7 @@ pub fn descreen(image: &ImageBuffer, dpi: i32) -> Result<ImageBuffer> {
 
 /// Grain reduction via denoise/median blend.
 pub fn grain_reduction(image: &ImageBuffer, amount: Option<&str>) -> Result<ImageBuffer> {
-    let tier = match norm_amount(amount, "medium") {
+    let tier = match norm_amount("grain reduction tier", amount)? {
         None => return Ok(image.clone()),
         Some(t) => t,
     };
@@ -391,16 +449,71 @@ fn brighten_pixel(out: &mut [u8], index: usize, bpp: usize) {
 
 /// Colorize grayscale / push monochrome toward a tint mode.
 pub fn colorize(image: &ImageBuffer, mode: Option<&str>) -> Result<ImageBuffer> {
-    let mode = mode.unwrap_or("sepia").to_ascii_lowercase();
-    if mode == "off" || mode == "none" {
+    let mode = mode.unwrap_or("sepia").trim().to_ascii_lowercase();
+    if is_disabled(&mode) {
         return Ok(image.clone());
     }
+    validate_disableable_choice("colorize mode", &mode, COLORIZE_MODES)?;
+    let tint = if mode == "cool" {
+        "blue"
+    } else {
+        mode.as_str()
+    };
     ImageBuffer::new(
         image.width,
         image.height,
         PixelFormat::Rgb8,
-        color::colorized(image, &mode),
+        color::colorized(image, tint),
     )
+}
+
+#[cfg(test)]
+mod mode_validation_tests {
+    use super::*;
+
+    fn gray() -> ImageBuffer {
+        ImageBuffer::new(2, 2, PixelFormat::Gray8, vec![10, 90, 170, 250]).unwrap()
+    }
+
+    #[test]
+    fn disabled_spellings_are_shared() {
+        for off in ["", " ", "off", "None", "FALSE"] {
+            assert!(is_disabled(off), "{off:?}");
+        }
+        assert!(!is_disabled("light"));
+    }
+
+    #[test]
+    fn unknown_tiers_and_modes_are_rejected_not_defaulted() {
+        assert!(grain_reduction(&gray(), Some("hevy")).is_err());
+        assert!(infrared_clean(&gray(), Some("heavyy")).is_err());
+        assert!(colorize(&gray(), Some("red")).is_err());
+        for ok in ["light", "Medium", "heavy", "off", "false"] {
+            assert!(grain_reduction(&gray(), Some(ok)).is_ok(), "{ok}");
+        }
+        for ok in ["sepia", "BLUE", "none", "warm", "cool"] {
+            assert!(colorize(&gray(), Some(ok)).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn legacy_tier_aliases_and_gui_tints_keep_working() {
+        let tier = |value| norm_amount("tier", Some(value)).unwrap();
+        assert_eq!(tier("low"), Some("light"));
+        assert_eq!(tier("true"), Some("medium"));
+        assert_eq!(tier("strong"), Some("heavy"));
+        assert_eq!(tier("no"), None);
+        assert_eq!(tier("0"), None);
+        // The GUI offers warm/cool; cool used to fall back to sepia.
+        assert_eq!(
+            colorize(&gray(), Some("cool")).unwrap().data,
+            colorize(&gray(), Some("blue")).unwrap().data
+        );
+        assert_eq!(
+            colorize(&gray(), Some("warm")).unwrap().data,
+            colorize(&gray(), Some("sepia")).unwrap().data
+        );
+    }
 }
 
 #[cfg(test)]

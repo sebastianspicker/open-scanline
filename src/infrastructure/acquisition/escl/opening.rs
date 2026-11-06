@@ -39,7 +39,7 @@ pub(crate) fn canonical_job_path(
             return Some(path);
         }
     }
-    parse_job_id(headers, body).map(|id| format!("/{root}/ScanJobs/{id}"))
+    parse_job_id(headers, body).and_then(|id| job_path(&format!("/{root}/ScanJobs/{id}")))
 }
 
 /// Path of an absolute `http(s)` Location, accepted only as exactly
@@ -50,16 +50,28 @@ pub(crate) fn cross_origin_job_path(location: &str, root: &str) -> Option<String
     }
     let (_, authority_and_path) = absolute_location_parts(location)?;
     let (_, path) = authority_and_path.split_once('/')?;
+    let path = job_path(&format!("/{path}"))?;
+    path[1..]
+        .split('/')
+        .next()?
+        .eq_ignore_ascii_case(root)
+        .then_some(path)
+}
+
+/// The one rule for a job path: exactly `/<root>/ScanJobs/<id>` once a trailing
+/// `/` is trimmed, so a collection path or a `..`/encoded segment never passes.
+pub(crate) fn job_path(path: &str) -> Option<String> {
     let path = path.trim_end_matches('/');
-    let mut segments = path.split('/');
-    let (location_root, jobs, id) = (segments.next()?, segments.next()?, segments.next()?);
+    let mut segments = path.strip_prefix('/')?.split('/');
+    let (root, jobs, id) = (segments.next()?, segments.next()?, segments.next()?);
     let well_formed = segments.next().is_none()
-        && location_root.eq_ignore_ascii_case(root)
         && jobs == "ScanJobs"
-        && !id.is_empty()
+        && ![root, id]
+            .iter()
+            .any(|segment| matches!(*segment, "" | "." | ".."))
         && !path.contains(['?', '#', '%', '\\'])
-        && !matches!(id, "." | "..");
-    well_formed.then(|| format!("/{location_root}/ScanJobs/{id}"))
+        && !path.chars().any(char::is_control);
+    well_formed.then(|| path.to_string())
 }
 
 pub(crate) fn job_location(headers: &str, body: &[u8]) -> Option<String> {
@@ -72,18 +84,23 @@ pub(crate) fn job_location(headers: &str, body: &[u8]) -> Option<String> {
         })
         .or_else(|| {
             let mut reader = Reader::from_reader(body);
-            reader.config_mut().trim_text(true);
             let mut buffer = Vec::new();
             let mut in_job_uri = false;
+            let mut uri = String::new();
             loop {
                 match reader.read_event_into(&mut buffer) {
                     Ok(Event::Start(event)) => {
-                        in_job_uri = local_name(event.name().as_ref()) == "joburi"
+                        in_job_uri = local_name(event.name().as_ref()) == "joburi";
+                        uri.clear();
                     }
-                    Ok(Event::Text(event)) if in_job_uri => {
-                        return event.decode().ok().map(|v| v.into_owned());
+                    Ok(Event::Text(event)) if in_job_uri => uri.push_str(&event.decode().ok()?),
+                    Ok(Event::GeneralRef(event)) if in_job_uri => {
+                        uri.push_str(&general_ref_text(&event)?)
                     }
                     Ok(Event::End(event)) if local_name(event.name().as_ref()) == "joburi" => {
+                        if in_job_uri && !uri.trim().is_empty() {
+                            return Some(uri.trim().to_string());
+                        }
                         in_job_uri = false
                     }
                     Ok(Event::Eof) | Err(_) => return None,
@@ -99,7 +116,7 @@ pub(crate) fn normalize_job_location(location: &str, endpoint: &Endpoint) -> Opt
         return None;
     }
     let path = job_location_path(location, endpoint)?;
-    valid_job_path(&path).then(|| path.trim_end_matches('/').to_string())
+    job_path(&path)
 }
 
 pub(crate) fn invalid_location(location: &str) -> bool {
@@ -133,12 +150,6 @@ pub(crate) fn absolute_job_path(
     let scheme = if secure { "https" } else { "http" };
     (endpoint.secure == secure && parse_endpoint(&format!("{scheme}://{authority}"))? == *endpoint)
         .then(|| format!("/{path}"))
-}
-
-pub(crate) fn valid_job_path(path: &str) -> bool {
-    !path.contains(['?', '#'])
-        && path.contains("/ScanJobs/")
-        && !path.split('/').any(|segment| matches!(segment, "." | ".."))
 }
 
 pub(crate) fn document_path(path: &std::path::Path) -> Result<std::path::PathBuf> {
@@ -213,7 +224,7 @@ pub fn open_with_cancellation(
 }
 
 fn validate_device_id(id: &str) -> Result<()> {
-    if id.starts_with("escl:") || id == "escl" {
+    if id.starts_with("escl:") {
         return Ok(());
     }
     Err(ScanError::DeviceNotFound(format!(
@@ -354,6 +365,42 @@ mod tests {
         ] {
             assert_eq!(cross_origin_job_path(bad, "eSCL"), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn job_location_decodes_entities() {
+        let body = b"<scan:JobUri>/eSCL/ScanJobs/a&amp;b</scan:JobUri>";
+        assert_eq!(
+            job_location("", body).as_deref(),
+            Some("/eSCL/ScanJobs/a&b")
+        );
+    }
+
+    #[test]
+    fn odd_locations_are_rejected_on_every_path() {
+        let same = endpoint();
+        for bad in [
+            "/eSCL/ScanJobs/",
+            "/eSCL/ScanJobs/%2e%2e/x",
+            "/eSCL/ScanJobs/%2e%2e",
+            "/eSCL/ScanJobs/..",
+            "foo/..",
+        ] {
+            assert_eq!(normalize_job_location(bad, &same), None, "{bad}");
+            let headers = location(bad);
+            assert_eq!(
+                canonical_job_path(&headers, b"", "eSCL", &same),
+                None,
+                "{bad}"
+            );
+        }
+        for bad in ["http://h/eSCL/ScanJobs/", "http://h/eSCL/ScanJobs/%2e%2e/x"] {
+            assert_eq!(cross_origin_job_path(bad, "eSCL"), None, "{bad}");
+        }
+        assert_eq!(
+            normalize_job_location("http://printer.local:80/eSCL/ScanJobs/uuid", &same).as_deref(),
+            Some("/eSCL/ScanJobs/uuid")
+        );
     }
 
     #[test]

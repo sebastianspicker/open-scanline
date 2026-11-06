@@ -336,7 +336,13 @@ mod output_absent_tests {
 
     #[test]
     fn existing_output_is_rejected_unless_overwrite_is_set() {
-        let dir = std::env::temp_dir().join(format!("osl-absent-{}", std::process::id()));
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "osl-absent-{}-{}",
+            std::process::id(),
+            u128::from_le_bytes(nonce)
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let existing = dir.join("existing.png");
         std::fs::write(&existing, b"x").unwrap();
@@ -348,6 +354,8 @@ mod output_absent_tests {
         assert!(error.contains("--overwrite"), "{error}");
         ensure_output_absent(&existing, true).unwrap();
         ensure_output_absent(&dir.join("missing.png"), false).unwrap();
+        std::fs::remove_file(&existing).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     #[cfg(any(target_os = "macos", windows))]

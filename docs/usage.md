@@ -89,8 +89,17 @@ cargo run -- process --in scan.png --out corrected.png \
 
 Curve coordinates must be in 0 through 255, and their x coordinates must increase
 strictly. `--rotate` takes multiples of 90 degrees, `--deskew` an angle from -45
-to 45 degrees, and `--levels-gamma` a value above 0; anything else, including
-`nan` or `inf`, exits 2. The same limits apply to `rotate`, `deskew_angle`, and
+to 45 degrees (positive turns the page clockwise), and `--levels-gamma` a value above 0;
+anything else, including `nan` or `inf`, exits 2. Likewise `--brightness` and `--contrast` take
+-100 to 100, `--sharpen` 0 to 5, `--descreen-dpi` 25 to 300, and `--levels-black` must be below
+`--levels-white` (0 to 255); `--grain-reduction` and `--infrared-clean` take `off`, `light`,
+`medium` or `heavy` (older spellings such as `low`, `high` and `true` still work), and
+`--colorize-mode` takes `off`, `sepia` or `blue` (the desktop app's `warm` and `cool` mean the
+same). Config values follow the same limits, except that a saved `descreen_dpi` up to 1200 is
+still accepted (descreening never uses more than 300), and `default_width` and
+`default_height` must be set together or not at all. A configured `default_width` and
+`default_height` are pixels at `default_dpi`; a different `--dpi` scales them. The same limits
+apply to `rotate`, `deskew_angle`, and
 `levels_gamma` in `config.json`, and a configured `film_type` must name a known
 profile (or be empty, `off`, or `none`). An unknown `--film-type` is rejected
 before the scanner starts. `--quality` applies to JPEG and JPEG XL output; for

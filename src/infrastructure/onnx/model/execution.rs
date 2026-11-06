@@ -1,4 +1,4 @@
-use super::input::{image_tensor, resolve_layout};
+use super::input::{dynamic_input_size, image_tensor, resolve_layout};
 use super::types::{OnnxInferenceOptions, OnnxOutputSummary, OnnxReport};
 use super::validation::{
     self, MAX_ONNX_AGGREGATE_TENSOR_BYTES, MAX_ONNX_NODES, MAX_ONNX_OUTPUTS, MAX_ONNX_TENSOR_BYTES,
@@ -65,7 +65,10 @@ fn prepare_model_input(
         .shape
         .as_concrete_finite()
         .map_err(onnx_error)?
-        .unwrap_or_else(|| tvec!(1, 3, image.height as usize, image.width as usize))
+        .unwrap_or_else(|| {
+            let (h, w) = dynamic_input_size(image.height as usize, image.width as usize);
+            tvec!(1, 3, h, w)
+        })
         .into_iter()
         .collect();
     Ok(ModelInput { name, shape })

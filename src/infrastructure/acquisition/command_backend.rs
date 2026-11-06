@@ -169,8 +169,19 @@ fn page_number(path: &Path, extension: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::numbered_page_outputs;
+    use super::{mentions_feeder_exhausted, numbered_page_outputs};
     use crate::infrastructure::runtime::TemporaryOutput;
+
+    #[test]
+    fn feeder_errors_that_are_not_empty_feeders_are_not_exhaustion() {
+        assert!(mentions_feeder_exhausted(
+            "scanimage: sane_start: Document feeder out of documents"
+        ));
+        assert!(!mentions_feeder_exhausted(
+            "scanimage: sane_start: Document feeder jammed"
+        ));
+        assert!(!mentions_feeder_exhausted("Error during device I/O"));
+    }
 
     #[test]
     fn numbered_outputs_sort_by_page_number_and_skip_other_names() {

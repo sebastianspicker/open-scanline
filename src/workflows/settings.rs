@@ -57,11 +57,22 @@ pub fn resolve_scan_extent(
     (
         width
             .or(paper_pixels.map(|extent| extent.0))
-            .unwrap_or(config.default_width),
+            .unwrap_or_else(|| configured_pixels(config.default_width, config, dpi)),
         height
             .or(paper_pixels.map(|extent| extent.1))
-            .unwrap_or(config.default_height),
+            .unwrap_or_else(|| configured_pixels(config.default_height, config, dpi)),
     )
+}
+
+/// Rescale a configured pixel length from `default_dpi` to `dpi`, rounding. On
+/// overflow the value is kept so the usual extent validation rejects the request.
+fn configured_pixels(pixels: u32, config: &AppConfig, dpi: u32) -> u32 {
+    if pixels == 0 || config.default_dpi == 0 || dpi == config.default_dpi {
+        return pixels;
+    }
+    let from = u64::from(config.default_dpi);
+    let scaled = (u64::from(pixels) * u64::from(dpi) + from / 2) / from;
+    u32::try_from(scaled).unwrap_or(pixels)
 }
 
 fn resolve_acquisition_defaults(config: &AppConfig) -> AcquisitionDefaults {
@@ -140,6 +151,7 @@ mod tests {
     #[test]
     fn extent_precedence_is_per_axis() {
         let mut config = AppConfig::default();
+        config.default_dpi = 300;
         assert_eq!(resolve_scan_extent(&config, None, None, None, 300), (0, 0));
         config.default_width = 100;
         config.default_height = 200;
@@ -163,6 +175,23 @@ mod tests {
         assert_eq!(
             resolve_scan_extent(&config, Some(PaperSize::Auto), None, None, 300),
             (100, 200)
+        );
+        config.default_dpi = 150;
+        config.default_width = 1240;
+        config.default_height = 1754;
+        config.paper_size = "auto".into();
+        assert_eq!(
+            resolve_scan_extent(&config, None, None, None, 600),
+            (4960, 7016)
+        );
+        assert_eq!(
+            resolve_scan_extent(&config, None, Some(50), None, 600),
+            (50, 7016)
+        );
+        config.default_width = u32::MAX;
+        assert_eq!(
+            resolve_scan_extent(&config, None, None, None, 600).0,
+            u32::MAX
         );
     }
 }

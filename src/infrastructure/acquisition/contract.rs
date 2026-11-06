@@ -16,9 +16,26 @@ pub struct DeviceInfo {
     pub support_profile: Option<String>,
 }
 
+/// Control characters, and the bidi and zero-width characters that can reorder
+/// or hide text, are dropped from device names.
+fn is_hidden_text_control(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+        )
+}
+
 impl DeviceInfo {
     pub fn new(id: impl Into<String>, name: impl Into<String>, kind: impl Into<String>) -> Self {
-        let name = name.into();
+        // Names can come from the LAN (eSCL); keep escape sequences and
+        // megabyte strings out of terminals and the GUI.
+        let name: String = name
+            .into()
+            .chars()
+            .filter(|character| !is_hidden_text_control(*character))
+            .take(128)
+            .collect();
         let mut device = Self {
             id: id.into(),
             name,
@@ -235,4 +252,20 @@ pub(crate) fn simulated_focus_score(x: f64, y: f64) -> (f64, f64, f64) {
     let distance = ((x_fraction - 0.5).powi(2) + (y_fraction - 0.5).powi(2)).sqrt();
     let focus = ((1.0 - (distance * 1.4).min(1.0)) * 10000.0).round() / 10000.0;
     (x_fraction, y_fraction, focus)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceInfo;
+
+    #[test]
+    fn device_names_lose_control_characters_and_are_bounded() {
+        let hostile = format!("\x1b[2JEpson {}", "x".repeat(10_000));
+        let device = DeviceInfo::new("id", hostile, "kind");
+        assert!(!device.name.chars().any(char::is_control));
+        assert_eq!(device.name.chars().count(), 128);
+        assert!(device.name.starts_with("[2JEpson"));
+        let spoofed = DeviceInfo::new("id", "Epson\u{202E}nacS\u{200B}", "kind");
+        assert_eq!(spoofed.name, "EpsonnacS");
+    }
 }

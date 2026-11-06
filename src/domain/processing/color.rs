@@ -7,6 +7,32 @@ fn clamp_u8(v: i32) -> u8 {
     v.clamp(0, 255) as u8
 }
 
+/// Brightness and contrast are accepted from -100 to 100 (not silently clamped).
+pub fn validate_adjustment(label: &str, value: i32) -> Result<i32> {
+    if (-100..=100).contains(&value) {
+        Ok(value)
+    } else {
+        Err(ScanError::Invalid(format!(
+            "{label} must be from -100 to 100"
+        )))
+    }
+}
+
+/// Levels points must be 0..=255 with black below white.
+pub fn validate_levels(black: i32, white: i32) -> Result<()> {
+    if !(0..=255).contains(&black) || !(0..=255).contains(&white) {
+        return Err(ScanError::Invalid(
+            "levels black and white must be from 0 to 255".into(),
+        ));
+    }
+    if black >= white {
+        return Err(ScanError::Invalid(
+            "levels black must be below levels white".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn adjust_brightness_contrast(
     image: &ImageBuffer,
     brightness: i32,

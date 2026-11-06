@@ -102,6 +102,10 @@ pub(super) struct GuiState {
     /// Structured feedback for the workspace; status remains localized display text.
     pub(super) error_message: Option<String>,
     pub(super) last_image: Option<PathBuf>,
+    /// Raw capture of the last scan, when `save_raw` kept one; reprocessing starts from it.
+    pub(super) last_raw: Option<PathBuf>,
+    /// Raw file published by the running scan, adopted when the scan finishes.
+    pub(super) pending_raw: Option<PathBuf>,
     multipage_session: Option<MultipageExportSession>,
     pub(super) hist_summary: String,
     pub(super) preview: Option<PreviewStatistics>,
@@ -201,6 +205,8 @@ macro_rules! build_gui_state {
             config_recovery_required: $config_load_error.is_some(),
             config_load_error: $config_load_error,
             last_image: None,
+            last_raw: None,
+            pending_raw: None,
             multipage_session: None,
             hist_summary: String::new(),
             preview: None,

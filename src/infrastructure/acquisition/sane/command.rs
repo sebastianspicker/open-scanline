@@ -127,7 +127,17 @@ pub(super) fn selected_source(
         return source_without_constraints(request);
     }
     let selected = simplex_feeder_source(capabilities, request)
-        .or_else(|| matching_value(&capabilities.source_values, source_keywords(request)))
+        .or_else(|| {
+            capabilities
+                .source_values
+                .iter()
+                .map(String::as_str)
+                .find(|value| {
+                    // A Document request must not fall back to the flatbed.
+                    !(request.mode == ScanMode::Document && is_flatbed(value))
+                        && matching_value(&[value.to_string()], source_keywords(request)).is_some()
+                })
+        })
         .or_else(|| duplex_fallback_source(capabilities, request))
         .or_else(|| feeder_only_source(capabilities, request))
         .map(str::to_string);
@@ -149,7 +159,8 @@ fn simplex_feeder_source<'a>(
         .source_values
         .iter()
         .filter(|value| {
-            matching_value(std::slice::from_ref(value), source_keywords(request)).is_some()
+            !is_flatbed(value)
+                && matching_value(std::slice::from_ref(value), source_keywords(request)).is_some()
         })
         .find(|value| is_single_sided(value))
         .map(String::as_str)
@@ -161,17 +172,22 @@ fn is_single_sided(value: &str) -> bool {
 }
 
 const FEEDER_KEYWORDS: &[&str] = &["automatic document feeder", "adf", "feeder", "document"];
+const FLATBED_KEYWORDS: &[&str] = &["flatbed", "platen", "reflective", "document table"];
+
+/// "Document Table" also contains the feeder keyword "document".
+fn is_flatbed(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    FLATBED_KEYWORDS
+        .iter()
+        .any(|keyword| lower.contains(keyword))
+}
 
 /// True when the device advertises a feeder and no flatbed or platen source.
 /// Other sources (canon_dr lists Card sources) don't make it a flatbed.
 pub(super) fn feeder_only(capabilities: &SaneCapabilities) -> bool {
     let values = &capabilities.source_values;
     matching_value(values, FEEDER_KEYWORDS).is_some()
-        && matching_value(
-            values,
-            &["flatbed", "platen", "reflective", "document table"],
-        )
-        .is_none()
+        && matching_value(values, FLATBED_KEYWORDS).is_none()
 }
 
 /// A sheet-fed device has no flatbed, so the flatbed default would always
@@ -218,7 +234,7 @@ fn source_without_constraints(request: &ScanRequest) -> Result<Option<String>> {
 fn source_keywords(request: &ScanRequest) -> &'static [&'static str] {
     match (request.mode, request.duplex) {
         (ScanMode::Document, true) => &["duplex", "adf-duplex", "adf duplex"],
-        (ScanMode::Reflective, _) => &["flatbed", "platen", "reflective", "document table"],
+        (ScanMode::Reflective, _) => FLATBED_KEYWORDS,
         (ScanMode::Document, false) => &["automatic document feeder", "adf", "feeder", "document"],
         (ScanMode::Film, _) => &["transparency", "tpu", "film", "negative", "slide"],
     }
@@ -232,10 +248,19 @@ fn duplex_fallback_source<'a>(
     {
         return None;
     }
-    matching_value(
-        &capabilities.source_values,
-        &["automatic document feeder", "adf", "feeder", "document"],
-    )
+    // "Document Table" is Epson's flatbed; it must never satisfy a feeder request.
+    capabilities
+        .source_values
+        .iter()
+        .filter(|value| !is_flatbed(value))
+        .find(|value| {
+            matching_value(
+                std::slice::from_ref(*value),
+                &["automatic document feeder", "adf", "feeder", "document"],
+            )
+            .is_some()
+        })
+        .map(String::as_str)
 }
 
 fn fallback_source(mode: ScanMode) -> &'static str {
@@ -489,6 +514,40 @@ mod tests {
             "    --source Document Table|Automatic Document Feeder [Document Table]\n",
         );
         assert!(!feeder_only(&epson));
+    }
+
+    #[test]
+    fn epson_document_request_selects_the_feeder_not_the_document_table() {
+        let epson = parse_scanimage_help(
+            "    --source Document Table|Automatic Document Feeder [Document Table]\n",
+        );
+        let request = ScanRequest {
+            mode: ScanMode::Document,
+            duplex: false,
+            ..ScanRequest::default()
+        };
+        let args = command_args(&request, Some(&epson));
+        assert!(
+            args.contains(&"--source=Automatic Document Feeder".to_string()),
+            "{args:?}"
+        );
+    }
+
+    #[test]
+    fn epson_duplex_request_selects_the_feeder_not_the_document_table() {
+        let epson = parse_scanimage_help(
+            "    --source Document Table|Automatic Document Feeder [Document Table]\n    --duplex[=(yes|no)] [no]\n",
+        );
+        let request = ScanRequest {
+            mode: ScanMode::Document,
+            duplex: true,
+            ..ScanRequest::default()
+        };
+        let args = command_args(&request, Some(&epson));
+        assert!(
+            args.contains(&"--source=Automatic Document Feeder".to_string()),
+            "{args:?}"
+        );
     }
 
     #[test]

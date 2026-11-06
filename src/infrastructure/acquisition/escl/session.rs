@@ -34,7 +34,13 @@ impl EsclDeviceSession {
         self.session.cancellation_token().unwrap_or_default()
     }
 
-    pub(crate) fn create_job(&self, root: &str, settings: &[u8]) -> Result<ScanJob> {
+    /// On failure also returns the HTTP status, so the caller can tell a wrong
+    /// root (404/405) from a busy or timed-out device.
+    pub(crate) fn create_job(
+        &self,
+        root: &str,
+        settings: &[u8],
+    ) -> std::result::Result<ScanJob, (ScanError, Option<u16>)> {
         let path = format!("/{root}/ScanJobs");
         let cancellation = self.cancellation_token();
         let (status, body, headers) = http_exchange_with_cancellation_result(
@@ -51,22 +57,33 @@ impl EsclDeviceSession {
                 cancellation: Some(cancellation),
             },
         )
-        .map_err(|error| match error {
-            HttpExchangeError::Cancelled => ScanError::Cancelled("scan cancelled".into()),
-            HttpExchangeError::Failed => ScanError::Unsupported(format!(
-                "no response from {}:{}",
-                self.endpoint.host, self.endpoint.port
-            )),
-            HttpExchangeError::CertificatePinMismatch(message) => ScanError::Unsupported(message),
+        .map_err(|error| {
+            let error = match error {
+                HttpExchangeError::Cancelled => ScanError::Cancelled("scan cancelled".into()),
+                HttpExchangeError::Failed => ScanError::Unsupported(format!(
+                    "no response from {}:{}",
+                    self.endpoint.host, self.endpoint.port
+                )),
+                HttpExchangeError::CertificatePinMismatch(message) => {
+                    ScanError::Unsupported(message)
+                }
+            };
+            (error, None)
         })?;
         if status >= 400 {
-            return Err(ScanError::Unsupported(format!(
-                "eSCL rejected job HTTP {status}"
-            )));
+            return Err((
+                ScanError::Unsupported(format!("eSCL rejected job HTTP {status}")),
+                Some(status),
+            ));
         }
         canonical_job_path(&headers, &body, root, &self.endpoint)
             .map(|path| ScanJob { path })
-            .ok_or_else(|| ScanError::Unsupported("eSCL did not return job id".into()))
+            .ok_or_else(|| {
+                (
+                    ScanError::Unsupported("eSCL did not return job id".into()),
+                    None,
+                )
+            })
     }
 
     pub(crate) fn fetch_document(
@@ -239,14 +256,19 @@ impl EsclDeviceSession {
             "eSCL"
         };
         let mut last_error = String::new();
-        for candidate in [root, alternate] {
+        for (attempt, candidate) in [root, alternate].into_iter().enumerate() {
             if self.is_cancelled() {
                 return Err(ScanError::Cancelled("scan cancelled".into()));
             }
             match self.create_job(candidate, settings) {
                 Ok(job) => return Ok(job),
-                Err(error @ ScanError::Cancelled(_)) => return Err(error),
-                Err(error) => last_error = error.to_string(),
+                Err((error @ ScanError::Cancelled(_), _)) => return Err(error),
+                // A timeout or 503 may mean the job exists; a second POST could
+                // start another one and would hide the real error.
+                Err((error, status)) if attempt == 0 && !tries_alternate_root(status) => {
+                    return Err(error)
+                }
+                Err((error, _)) => last_error = error.to_string(),
             }
         }
         Err(ScanError::Unsupported(format!(
@@ -595,9 +617,23 @@ pub(crate) fn region_in_three_hundredths(
     (x, y, width, height)
 }
 
+/// Only HTTP 404/405 mean the device serves the other root (`Scan`/`eSCL`).
+fn tries_alternate_root(status: Option<u16>) -> bool {
+    matches!(status, Some(404 | 405))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_missing_root_tries_the_alternate_root() {
+        assert!(tries_alternate_root(Some(404)));
+        assert!(tries_alternate_root(Some(405)));
+        for status in [Some(409), Some(503), Some(500), Some(200), None] {
+            assert!(!tries_alternate_root(status), "{status:?}");
+        }
+    }
 
     #[test]
     fn retry_delay_doubles_from_250ms_and_caps_at_2s() {

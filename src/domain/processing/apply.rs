@@ -191,7 +191,7 @@ fn apply_cleanup_filters(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<Im
 }
 
 fn apply_infrared_cleanup(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageBuffer> {
-    if let Some(tier) = enabled_value(prefs.infrared_clean.as_deref(), &["off", "none", "false"]) {
+    if let Some(tier) = enabled_value(prefs.infrared_clean.as_deref()) {
         return infrared_clean(&image, Some(tier));
     }
     Ok(image)
@@ -205,7 +205,7 @@ fn apply_descreening(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageB
 }
 
 fn apply_grain_reduction(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageBuffer> {
-    if let Some(tier) = enabled_value(prefs.grain_reduction.as_deref(), &["off", "none"]) {
+    if let Some(tier) = enabled_value(prefs.grain_reduction.as_deref()) {
         return grain_reduction(&image, Some(tier));
     }
     Ok(image)
@@ -248,27 +248,23 @@ fn apply_hole_punch_removal(image: ImageBuffer, prefs: &PipelinePrefs) -> Result
 }
 
 fn apply_colorization(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageBuffer> {
-    if let Some(mode) = enabled_value(prefs.colorize_mode.as_deref(), &["off", "none"]) {
+    if let Some(mode) = enabled_value(prefs.colorize_mode.as_deref()) {
         return colorize(&image, Some(mode));
     }
     Ok(image)
 }
 
 fn apply_film(image: ImageBuffer, prefs: &PipelinePrefs) -> Result<ImageBuffer> {
-    if let Some(film) = enabled_value(prefs.film_type.as_deref(), &["off", "none"]) {
+    if let Some(film) = enabled_value(prefs.film_type.as_deref()) {
         return super::film::convert_film(&image, film);
     }
 
     Ok(image)
 }
 
-fn enabled_value<'a>(value: Option<&'a str>, disabled_values: &[&str]) -> Option<&'a str> {
+fn enabled_value(value: Option<&str>) -> Option<&str> {
     let value = value?.trim();
-    (!value.is_empty()
-        && !disabled_values
-            .iter()
-            .any(|disabled| value.eq_ignore_ascii_case(disabled)))
-    .then_some(value)
+    (!super::is_disabled(value)).then_some(value)
 }
 
 #[cfg(test)]
@@ -290,5 +286,23 @@ mod tests {
         let output = apply_pipeline(&image, &PipelinePrefs::default()).unwrap();
         assert_eq!(output, image);
         assert_ne!(output.data.as_ptr(), image.data.as_ptr());
+    }
+
+    #[test]
+    fn geometry_runs_crop_then_rotate_then_flip() {
+        let image = ImageBuffer::new(3, 2, PixelFormat::Gray8, vec![1, 2, 3, 4, 5, 6]).unwrap();
+        let region = crate::domain::image::Rect::new(1, 0, 2, 2);
+        let prefs = PipelinePrefs {
+            crop: Some(region),
+            rotate: Rotate::R90,
+            flip_h: true,
+            ..PipelinePrefs::default()
+        };
+        let cropped = crop(&image, region).unwrap();
+        let expected = flip_horizontal(&rotate(&cropped, Rotate::R90).unwrap()).unwrap();
+        let flipped_first = rotate(&flip_horizontal(&cropped).unwrap(), Rotate::R90).unwrap();
+        let out = apply_pipeline(&image, &prefs).unwrap();
+        assert_eq!(out, expected);
+        assert_ne!(out, flipped_first, "rotate must precede flip");
     }
 }

@@ -122,26 +122,25 @@ pub(crate) fn normalize_host(host: &str) -> Option<String> {
     if host.is_empty() {
         return None;
     }
-    normalized_ip_address(host).or_else(|| normalized_hostname(host))
-}
-
-fn normalized_ip_address(host: &str) -> Option<String> {
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(address)) => Some(address.to_string()),
-        Ok(IpAddr::V6(_)) => None,
-        Err(_) if numeric_ipv4_candidate(host) => host
-            .parse::<Ipv4Addr>()
-            .ok()
-            .map(|address| address.to_string()),
-        Err(_) => None,
+    if let Ok(address) = host.parse::<Ipv4Addr>() {
+        return Some(address.to_string());
     }
+    // `127.1`, `2130706433` and `0x7f000001` are IPv4 to the system resolver
+    // but are not dotted quads; never treat them as hostnames.
+    if numeric_ipv4_candidate(host) {
+        return None;
+    }
+    normalized_hostname(host)
 }
 
 fn numeric_ipv4_candidate(host: &str) -> bool {
-    host.contains('.')
-        && host
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+    let hex = host
+        .strip_prefix("0x")
+        .or_else(|| host.strip_prefix("0X"))
+        .is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_hexdigit() || b == b'.'));
+    hex || host
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte == b'.')
 }
 
 fn normalized_hostname(host: &str) -> Option<String> {
@@ -526,5 +525,36 @@ impl Transport for CancellableTransport {
 
     fn is_tls(&self) -> bool {
         self.inner.is_tls()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_looking_non_ipv4_hosts_are_rejected() {
+        for bad in [
+            "127.1",
+            "2130706433",
+            "0x7f000001",
+            "1.2.3",
+            "1.2.3.4.5",
+            "256.1.1.1",
+        ] {
+            assert_eq!(parse_endpoint(bad), None, "{bad}");
+        }
+        // Ports out of range and a zero port are refused too.
+        assert_eq!(parse_endpoint("[::1]:0"), None);
+        assert_eq!(parse_endpoint("h:99999"), None);
+    }
+
+    #[test]
+    fn dotted_quads_and_hostnames_are_accepted() {
+        let parsed = parse_endpoint("192.168.1.5:80").unwrap();
+        assert_eq!((parsed.host.as_str(), parsed.port), ("192.168.1.5", 80));
+        let parsed = parse_endpoint("printer.local").unwrap();
+        assert_eq!((parsed.host.as_str(), parsed.port), ("printer.local", 80));
+        assert!(parse_endpoint("[::1]:631").is_some());
     }
 }

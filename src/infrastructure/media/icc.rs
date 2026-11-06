@@ -259,6 +259,17 @@ fn sample_patch_means(image: &ImageBuffer) -> Result<Vec<Rgb>> {
     Ok(means)
 }
 
+/// Gain for one channel; a dead channel or a gain `validate_scanner_profile` rejects is a bad capture.
+fn it8_gain(measured: f64, reference: f64) -> Result<f64> {
+    let gain = reference / measured;
+    if measured <= 1e-9 || !gain.is_finite() || gain > 16.0 {
+        return Err(ScanError::Invalid(
+            "IT8 capture is too dark or a channel is dead; check the lid and lamp".into(),
+        ));
+    }
+    Ok(gain)
+}
+
 /// Fit a simple per-channel gain + gamma profile from scanned IT8 chart.
 pub fn profile_scanner_it8(image: &ImageBuffer) -> Result<Value> {
     let measured = sample_patch_means(image)?;
@@ -278,9 +289,9 @@ pub fn profile_scanner_it8(image: &ImageBuffer) -> Result<Value> {
         sum_rg += refs[i].1;
         sum_rb += refs[i].2;
     }
-    let gain_r = if sum_mr > 1e-9 { sum_rr / sum_mr } else { 1.0 };
-    let gain_g = if sum_mg > 1e-9 { sum_rg / sum_mg } else { 1.0 };
-    let gain_b = if sum_mb > 1e-9 { sum_rb / sum_mb } else { 1.0 };
+    let gain_r = it8_gain(sum_mr, sum_rr)?;
+    let gain_g = it8_gain(sum_mg, sum_rg)?;
+    let gain_b = it8_gain(sum_mb, sum_rb)?;
     Ok(json!({
         "format": PROFILE_FORMAT,
         "version": PROFILE_VERSION,
@@ -401,6 +412,15 @@ mod tests {
             "gamma": [gamma, gamma, gamma],
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn black_it8_capture_is_rejected() {
+        let black = ImageBuffer::new(24, 16, PixelFormat::Rgb8, vec![0; 24 * 16 * 3]).unwrap();
+        assert!(matches!(
+            profile_scanner_it8(&black),
+            Err(ScanError::Invalid(_))
+        ));
     }
 
     #[test]

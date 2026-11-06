@@ -1,4 +1,3 @@
-use crate::domain::export::clear_pdf_password;
 use crate::inbound::cli::args::ExportOptions;
 use crate::infrastructure::config::AppConfig;
 use std::fs::File;
@@ -15,16 +14,17 @@ pub(super) fn build(
         pdf_searchable,
         pdf_password,
         pdf_password_file,
-        allow_insecure_password_argv,
+        allow_insecure_password_argv: _,
         ocr_lang,
         ocr_engine,
         scanner_profile,
     } = overrides;
-    let pdf_password = resolve_pdf_password(
-        pdf_password,
-        pdf_password_file.as_deref(),
-        allow_insecure_password_argv,
-    )?;
+    // clap already rejects --pdf-password with --pdf-password-file or without
+    // --allow-insecure-password-argv.
+    let pdf_password = match pdf_password_file {
+        Some(path) => Some(read_pdf_password(&path)?),
+        None => pdf_password,
+    };
     let ocr_language = ocr_lang.unwrap_or_else(|| config.ocr_language.clone());
     crate::domain::settings::validate_ocr_language(&ocr_language)
         .map_err(|error| error.to_string())?;
@@ -49,25 +49,6 @@ fn ocr_engine_from_config(value: &str) -> Result<crate::OcrEngine, String> {
     value
         .parse()
         .map_err(|_| "config OCR engine must be offline, ocrs, or tesseract".into())
-}
-
-fn resolve_pdf_password(
-    mut pdf_password: Option<String>,
-    pdf_password_file: Option<&Path>,
-    allow_insecure_password_argv: bool,
-) -> Result<Option<String>, String> {
-    if pdf_password.is_some() && pdf_password_file.is_some() {
-        clear_pdf_password(&mut pdf_password);
-        return Err("--pdf-password conflicts with --pdf-password-file".into());
-    }
-    if pdf_password.is_some() && !allow_insecure_password_argv {
-        clear_pdf_password(&mut pdf_password);
-        return Err("--pdf-password requires --allow-insecure-password-argv".into());
-    }
-    match pdf_password_file {
-        Some(path) => read_pdf_password(path).map(Some),
-        None => Ok(pdf_password),
-    }
 }
 
 fn read_pdf_password(path: &Path) -> Result<String, String> {

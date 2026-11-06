@@ -217,7 +217,8 @@ fn disabled_or(value: &str, extra_sentinels: &[&str]) -> Option<String> {
         return None;
     }
     let lower = trimmed.to_ascii_lowercase();
-    if lower == "off" || lower == "none" || extra_sentinels.contains(&lower.as_str()) {
+    if crate::domain::processing::is_disabled(trimmed) || extra_sentinels.contains(&lower.as_str())
+    {
         None
     } else {
         Some(trimmed.to_string())

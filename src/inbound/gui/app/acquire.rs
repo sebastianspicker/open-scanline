@@ -28,6 +28,9 @@ impl OpenScanlineApp {
                 .set_error(format!("invalid color controls: {error}"));
             return;
         }
+        // A new scan or preview replaces the image the old raw file belongs to.
+        self.state.last_raw = None;
+        self.state.pending_raw = None;
         let cancel = Arc::new(AtomicBool::new(false));
         let Some(plan) = self.scan_job_plan(preview, Arc::clone(&cancel)) else {
             return;

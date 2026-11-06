@@ -48,6 +48,63 @@ fn parse_deskew(value: &str) -> Result<f64, String> {
     }
 }
 
+fn parse_int(value: &str, label: &str) -> Result<i32, String> {
+    value
+        .parse::<i32>()
+        .map_err(|_| format!("{label} must be a whole number"))
+}
+
+fn parse_brightness(value: &str) -> Result<i32, String> {
+    crate::domain::processing::validate_adjustment("brightness", parse_int(value, "brightness")?)
+        .map_err(|error| error.to_string())
+}
+
+fn parse_contrast(value: &str) -> Result<i32, String> {
+    crate::domain::processing::validate_adjustment("contrast", parse_int(value, "contrast")?)
+        .map_err(|error| error.to_string())
+}
+
+/// Levels points are checked 0..=255 here; black < white is checked once the
+/// configured value is known (`validate_levels`).
+fn parse_levels_point(value: &str) -> Result<i32, String> {
+    match parse_int(value, "levels value")? {
+        point @ 0..=255 => Ok(point),
+        _ => Err("levels black and white must be from 0 to 255".into()),
+    }
+}
+
+fn parse_sharpen(value: &str) -> Result<f64, String> {
+    let amount = value
+        .parse::<f64>()
+        .map_err(|_| "sharpen must be a number from 0 to 5".to_string())?;
+    crate::domain::processing::validate_sharpen(amount).map_err(|error| error.to_string())
+}
+
+fn parse_descreen_dpi(value: &str) -> Result<i32, String> {
+    crate::domain::processing::validate_descreen_dpi(parse_int(value, "descreen dpi")?)
+        .map_err(|error| error.to_string())
+}
+
+fn parse_choice(value: &str, label: &str, allowed: &[&str]) -> Result<String, String> {
+    crate::domain::processing::validate_disableable_choice(label, value, allowed)
+        .map_err(|error| error.to_string())?;
+    Ok(value.to_string())
+}
+
+fn parse_filter_tier(value: &str) -> Result<String, String> {
+    crate::domain::processing::validate_filter_tier("tier", value)
+        .map_err(|error| error.to_string())?;
+    Ok(value.to_string())
+}
+
+fn parse_colorize_mode(value: &str) -> Result<String, String> {
+    parse_choice(
+        value,
+        "colorize mode",
+        crate::domain::processing::COLORIZE_MODES,
+    )
+}
+
 fn parse_crop(value: &str) -> Result<[i32; 4], String> {
     let crop = crate::domain::image::parse_crop_components(value).map_err(|error| match error {
         crate::domain::image::CropParseError::ComponentCount => "crop must be x,y,w,h".to_string(),
@@ -55,9 +112,12 @@ fn parse_crop(value: &str) -> Result<[i32; 4], String> {
             "crop must be x,y,w,h integers".to_string()
         }
     })?;
-    if crop[2] <= 0 || crop[3] <= 0 {
-        return Err("crop width and height must be positive".into());
-    }
+    // Negative extents cannot become a `u32` size; reject them before the domain check.
+    let (Ok(width), Ok(height)) = (u32::try_from(crop[2]), u32::try_from(crop[3])) else {
+        return Err("invalid crop region".into());
+    };
+    let region = crate::domain::image::Rect::new(crop[0], crop[1], width, height);
+    crate::domain::processing::validate_crop_region(region).map_err(|error| error.to_string())?;
     Ok(crop)
 }
 
@@ -501,5 +561,67 @@ mod crop_and_overwrite_tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn out_of_range_numbers_and_unknown_modes_are_rejected_by_the_parser() {
+        let parse = |flag: &str, value: &str| {
+            Cli::try_parse_from([
+                "open-scanline",
+                "process",
+                "--in",
+                "a.png",
+                "--out",
+                "b.png",
+                flag,
+                value,
+            ])
+        };
+        for (flag, good) in [
+            ("--brightness", "-100"),
+            ("--contrast", "100"),
+            ("--sharpen", "5"),
+            ("--descreen-dpi", "300"),
+            ("--levels-white", "255"),
+            ("--grain-reduction", "off"),
+            ("--infrared-clean", "Heavy"),
+            ("--colorize-mode", "blue"),
+        ] {
+            assert!(parse(flag, good).is_ok(), "{flag} {good}");
+        }
+        for (flag, bad) in [
+            ("--brightness", "500"),
+            ("--contrast", "-101"),
+            ("--sharpen", "-1"),
+            ("--sharpen", "6"),
+            ("--descreen-dpi", "10"),
+            ("--levels-black", "256"),
+            ("--grain-reduction", "hevy"),
+            ("--infrared-clean", "heavyy"),
+            ("--colorize-mode", "red"),
+            ("--crop", "-1,0,5,5"),
+            ("--crop", "0,-1,5,5"),
+        ] {
+            assert!(parse(flag, bad).is_err(), "{flag} {bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn pdf_password_conflicts_and_requirements_are_enforced_by_clap() {
+        let parse = |extra: &[&str]| {
+            let mut args = vec!["open-scanline", "process", "--in", "a", "--out", "b.pdf"];
+            args.extend_from_slice(extra);
+            Cli::try_parse_from(args)
+        };
+        assert!(parse(&["--pdf-password", "x"]).is_err());
+        assert!(parse(&["--pdf-password", "x", "--allow-insecure-password-argv"]).is_ok());
+        assert!(parse(&[
+            "--pdf-password",
+            "x",
+            "--allow-insecure-password-argv",
+            "--pdf-password-file",
+            "p"
+        ])
+        .is_err());
     }
 }

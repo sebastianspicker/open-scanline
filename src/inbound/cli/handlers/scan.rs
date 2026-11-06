@@ -272,3 +272,35 @@ fn report_scan_error(error: crate::error::ScanError) -> i32 {
     print_verbose_hint();
     1
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_overrides_beat_configured_flip_and_grain_tier() {
+        let config = AppConfig {
+            flip_h: true,
+            grain_reduction: Some("light".into()),
+            ..AppConfig::default()
+        };
+        let kept = pipeline_with_overrides(&config, &PipelineOverrides::default());
+        assert!(kept.flip_h);
+        assert_eq!(kept.grain_reduction.as_deref(), Some("light"));
+
+        let overrides = PipelineOverrides {
+            geometry: GeometryOverrides {
+                flip_h: Some(false),
+                ..GeometryOverrides::default()
+            },
+            filters: FilterOverrides {
+                grain_reduction: Some("off".into()),
+                ..FilterOverrides::default()
+            },
+            ..PipelineOverrides::default()
+        };
+        let pipeline = pipeline_with_overrides(&config, &overrides);
+        assert!(!pipeline.flip_h);
+        assert_eq!(pipeline.grain_reduction, None);
+    }
+}

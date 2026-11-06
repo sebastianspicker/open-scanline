@@ -104,8 +104,10 @@ impl WiaDeviceSession {
                 let mut paths =
                     numbered_page_outputs(output.directory(), "png").unwrap_or_default();
                 paths.truncate(max_pages as usize);
-                self.salvage_materialized_pages(paths, emit);
-                return Err(error);
+                return Err(with_salvage_error(
+                    error,
+                    self.salvage_materialized_pages(paths, emit),
+                ));
             }
         };
         self.finish_com_pages(&output, artifact_quota, &command_output, max_pages, emit)
@@ -129,8 +131,10 @@ impl WiaDeviceSession {
                 return Err(failure);
             }
             paths.truncate(max_pages as usize);
-            self.salvage_materialized_pages(paths, emit);
-            return Err(failure);
+            return Err(with_salvage_error(
+                failure,
+                self.salvage_materialized_pages(paths, emit),
+            ));
         }
         super::super::command_backend::validate_batch_page_count(paths.len(), max_pages, "WIA")?;
         let emitted = self.emit_materialized_pages(paths, emit)?;
@@ -177,17 +181,16 @@ impl WiaDeviceSession {
 
     /// Emit the pages of a failed batch in order, stopping at the first page
     /// that cannot be decoded or published (typically the interrupted one).
-    /// The caller reports the batch failure itself, as the SANE adapter does.
+    /// The caller reports the batch failure itself, as the SANE adapter does,
+    /// and appends the returned stop error so a lost page is not silent.
     fn salvage_materialized_pages(
         &self,
         paths: Vec<std::path::PathBuf>,
         emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
-    ) {
-        for path in paths {
-            if self.emit_materialized_pages(vec![path], emit).is_err() {
-                break;
-            }
-        }
+    ) -> Option<ScanError> {
+        paths
+            .into_iter()
+            .find_map(|path| self.emit_materialized_pages(vec![path], emit).err())
     }
 
     fn emit_materialized_pages(
@@ -564,5 +567,12 @@ mod tests {
         assert_eq!(hit.len(), 1);
         let none = list_for_open("wia:a", Vec::new, None::<fn() -> Vec<DeviceInfo>>);
         assert!(none.is_empty());
+    }
+}
+
+fn with_salvage_error(error: ScanError, salvage: Option<ScanError>) -> ScanError {
+    match salvage {
+        Some(stop) => ScanError::Unsupported(format!("{error}; page salvage stopped: {stop}")),
+        None => error,
     }
 }

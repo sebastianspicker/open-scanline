@@ -17,15 +17,18 @@ pub use auto::{
 };
 pub use color::{
     adjust_brightness_contrast, adjust_hue, adjust_levels, adjust_saturation, apply_curves,
-    auto_levels, desaturate, gray_mean, histogram, invert, rgb_channel_means, white_balance,
+    auto_levels, desaturate, gray_mean, histogram, invert, rgb_channel_means, validate_adjustment,
+    validate_levels, white_balance,
 };
 pub use film::{convert_film, get_film_profile, list_film_profiles, FilmProfile};
 pub use filters::{
     box_blur, colorize, denoise, descreen, flatten, grain_reduction, hole_punch_removal,
-    infrared_clean, median_filter, restore_colors, restore_fading, sharpen,
+    infrared_clean, is_disabled, median_filter, restore_colors, restore_fading, sharpen,
+    validate_descreen_dpi, validate_disableable_choice, validate_filter_tier, validate_sharpen,
+    COLORIZE_MODES,
 };
 pub use geometry::{
     auto_deskew, crop, deskew, estimate_skew_degrees, flip_horizontal, flip_vertical,
-    resize_nearest, rotate,
+    resize_nearest, rotate, validate_crop_region,
 };
 pub use plan::PipelinePrefs;

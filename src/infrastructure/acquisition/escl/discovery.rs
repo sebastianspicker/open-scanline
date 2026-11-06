@@ -328,8 +328,16 @@ pub fn list_devices() -> Vec<DeviceInfo> {
         return devices.clone();
     }
     let devices = std::panic::catch_unwind(|| discover_devices_locked(32)).unwrap_or_default();
-    *cached = Some(devices);
-    cached.as_ref().cloned().unwrap_or_default()
+    store_non_empty(&mut cached, &devices);
+    devices
+}
+
+/// An empty listing (scanner asleep, Wi-Fi still joining) must not stick for
+/// the whole process, so only a non-empty one is cached.
+fn store_non_empty(cache: &mut Option<Vec<DeviceInfo>>, devices: &[DeviceInfo]) {
+    if !devices.is_empty() {
+        *cache = Some(devices.to_vec());
+    }
 }
 
 /// Perform one fresh bounded discovery and replace the process cache.
@@ -378,17 +386,19 @@ pub fn list_escl_devices_safe_with_cancellation(
     if cancellation.is_cancelled() {
         return Vec::new();
     }
-    let cached = ESCL_DEVICE_CACHE
+    let mut cached = ESCL_DEVICE_CACHE
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .as_ref()
-        .cloned();
-    if let Some(devices) = cached {
-        return devices;
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(devices) = cached.as_ref() {
+        return devices.clone();
     }
-    std::panic::catch_unwind(|| discover_devices_locked_with_cancellation(32, Some(cancellation)))
-        .unwrap_or_default()
+    let devices = std::panic::catch_unwind(|| {
+        discover_devices_locked_with_cancellation(32, Some(cancellation))
+    })
+    .unwrap_or_default();
+    store_non_empty(&mut cached, &devices);
+    devices
 }
 
 #[cfg(test)]
@@ -401,6 +411,17 @@ mod tests {
             port,
             secure: false,
         }
+    }
+
+    #[test]
+    fn an_empty_listing_is_never_cached() {
+        let mut cache = None;
+        store_non_empty(&mut cache, &[]);
+        assert!(cache.is_none());
+        store_non_empty(&mut cache, &[DeviceInfo::new("escl:a:80", "A", "escl")]);
+        assert_eq!(cache.as_ref().map(Vec::len), Some(1));
+        store_non_empty(&mut cache, &[]);
+        assert_eq!(cache.as_ref().map(Vec::len), Some(1));
     }
 
     #[test]

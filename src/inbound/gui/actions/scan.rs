@@ -25,7 +25,7 @@ impl GuiState {
     ) -> crate::error::Result<ScanToFileArgs> {
         let out = self.scan_output_path(preview)?;
         let mut pipeline = self.pipeline_prefs();
-        let invert_colors = self.invert_colors || pipeline.invert;
+        let invert_colors = self.invert_colors;
         pipeline.invert = false;
         let cancel_requested = Arc::clone(&self.cancel_requested);
         let (width, height, dpi) = self.scan_geometry(preview);
@@ -33,6 +33,12 @@ impl GuiState {
         // preview must select the same physical area.
         if dpi != self.dpi {
             pipeline.crop = pipeline.crop.map(|crop| scale_rect(crop, dpi, self.dpi));
+        } else if preview {
+            // mock/file previews keep the dpi but shrink the extent.
+            let full = self.requested_extent(self.dpi);
+            pipeline.crop = pipeline
+                .crop
+                .and_then(|crop| rescale_crop(crop, full, (width, height)));
         }
         Ok(ScanToFileArgs {
             device: Some(self.device.clone()),
@@ -157,4 +163,44 @@ fn scale_rect(
         scale_pixels(rect.width, to_dpi, from_dpi).max(1),
         scale_pixels(rect.height, to_dpi, from_dpi).max(1),
     )
+}
+
+/// Map a crop from the `full` scan extent onto a smaller `preview` extent. With
+/// an unknown (zero) full axis the preview drops the crop instead of failing.
+fn rescale_crop(
+    rect: crate::domain::image::Rect,
+    full: (u32, u32),
+    preview: (u32, u32),
+) -> Option<crate::domain::image::Rect> {
+    if full == preview {
+        return Some(rect);
+    }
+    if full.0 == 0 || full.1 == 0 {
+        return None;
+    }
+    let x = |value: i32| scale_pixels(value.max(0) as u32, preview.0, full.0) as i32;
+    let y = |value: i32| scale_pixels(value.max(0) as u32, preview.1, full.1) as i32;
+    Some(crate::domain::image::Rect::new(
+        x(rect.x),
+        y(rect.y),
+        scale_pixels(rect.width, preview.0, full.0).max(1),
+        scale_pixels(rect.height, preview.1, full.1).max(1),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rescale_crop;
+    use crate::domain::image::Rect;
+
+    #[test]
+    fn preview_crop_follows_the_extent_ratio() {
+        let crop = Rect::new(100, 100, 800, 600);
+        assert_eq!(rescale_crop(crop, (1280, 960), (1280, 960)), Some(crop));
+        assert_eq!(
+            rescale_crop(crop, (1280, 960), (320, 240)),
+            Some(Rect::new(25, 25, 200, 150))
+        );
+        assert_eq!(rescale_crop(crop, (0, 0), (320, 240)), None);
+    }
 }

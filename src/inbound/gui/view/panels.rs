@@ -190,7 +190,7 @@ fn render_filter_tab(ui: &mut egui::Ui, state: &mut super::super::state::GuiStat
     );
     ui.checkbox(&mut state.descreen, "Descreen");
     if state.descreen {
-        ui.add(egui::Slider::new(&mut state.descreen_dpi, 50..=1200).text("Descreen DPI"));
+        ui.add(egui::Slider::new(&mut state.descreen_dpi, 25..=300).text("Descreen DPI"));
     }
     ui.checkbox(
         &mut state.restore_colors,
@@ -259,12 +259,15 @@ fn render_color_tab(ui: &mut egui::Ui, state: &mut super::super::state::GuiState
     );
     ui.checkbox(&mut state.auto_levels, state.translator.t("auto_levels"));
     ui.add(
-        egui::Slider::new(&mut state.levels_black, 0..=254)
+        egui::Slider::new(&mut state.levels_black, 0..=(state.levels_white - 1).max(0))
             .text(state.translator.t("color.levels")),
     );
     ui.add(
-        egui::Slider::new(&mut state.levels_white, 1..=255)
-            .text(state.translator.t("color.levels")),
+        egui::Slider::new(
+            &mut state.levels_white,
+            (state.levels_black + 1).min(255)..=255,
+        )
+        .text(state.translator.t("color.levels")),
     );
     ui.add(
         egui::Slider::new(&mut state.levels_gamma, 0.2..=3.0)

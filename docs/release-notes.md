@@ -27,6 +27,24 @@ The package version drops from `1.0.0` to `0.1.0`. `VERSION` is now taken from
   file without `config_version` whose extents are exactly the old 320 × 240
   default resets them to `0`.
 
+### Public API (repo audit fixes)
+
+Changed behaviour:
+
+- `imaging::load_image` applies the EXIF orientation, so a photo tagged
+  "rotate 90" loads upright. `imaging::load_image_with_limits` still returns the
+  stored pixel layout.
+- `pipeline::auto_deskew` now rotates against the estimated skew; it used to
+  double it. `pipeline::deskew` is unchanged: a positive angle turns the page
+  clockwise on screen.
+- `DeviceInfo::new` drops control, bidi and zero-width characters from the name
+  and keeps at most 128 characters.
+- `colorize` returns `ScanError::Invalid` for an unknown mode, and
+  `grain_reduction` and `infrared_clean` do the same for an unknown tier,
+  instead of falling back to sepia or "medium".
+- `escl::parse_job_id` and eSCL job handling accept only job paths of the form
+  `/<root>/ScanJobs/<id>`.
+
 ### Public API (code-quality fixes)
 
 New:

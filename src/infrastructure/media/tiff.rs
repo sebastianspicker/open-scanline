@@ -158,8 +158,12 @@ fn needs_bigtiff(pages: &[PathBuf]) -> bool {
         let (width, height) = image::image_dimensions(page).unwrap_or((0, 0));
         total.saturating_add(u64::from(width) * u64::from(height) * 3)
     });
-    // Headroom for incompressible strips, IFDs and strip tables.
-    total > u64::from(u32::MAX) / 16 * 15
+    exceeds_classic_tiff(total)
+}
+
+/// Headroom for incompressible strips, IFDs and strip tables.
+fn exceeds_classic_tiff(total_bytes: u64) -> bool {
+    total_bytes > u64::from(u32::MAX) / 16 * 15
 }
 
 fn write_tiff_pages<K: TiffKind, L, F>(
@@ -268,6 +272,14 @@ mod tests {
     use crate::infrastructure::runtime::TemporaryOutput;
     use tiff::decoder::{ifd::Value, Decoder};
     use tiff::tags::Tag;
+
+    #[test]
+    fn bigtiff_threshold_is_fifteen_sixteenths_of_four_gib() {
+        let threshold = u64::from(u32::MAX) / 16 * 15;
+        assert!(!exceeds_classic_tiff(threshold));
+        assert!(exceeds_classic_tiff(threshold + 1));
+        assert!(!needs_bigtiff(&[]));
+    }
 
     #[test]
     fn multipage_round_trip_keeps_grey_colour_and_resolution() {

@@ -6,7 +6,7 @@ use crate::infrastructure::runtime::{
     TemporaryOutput,
 };
 use crate::operation::CancellationToken;
-use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageFormat, Rgba};
+use image::{ColorType, DynamicImage, ImageBuffer as ImgBuf, ImageDecoder, ImageFormat, Rgba};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -99,12 +99,14 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<Option<&'static str>> {
     Ok(detect_format_bytes(&head))
 }
 
+/// Decode a file and apply its EXIF orientation, so phone photos load upright.
 pub fn load_image(path: impl AsRef<Path>) -> Result<ImageBuffer> {
-    load_image_with_limits(
-        path,
+    decode_with_limits(
+        path.as_ref(),
         crate::domain::image::MAX_IMAGE_DIMENSION,
         crate::domain::image::MAX_IMAGE_DIMENSION,
         crate::domain::image::MAX_IMAGE_BYTES as u64,
+        true,
     )
 }
 
@@ -120,13 +122,25 @@ impl crate::infrastructure::runtime::ImageDecoder for NativeImageDecoder {
 }
 
 /// Decode an image with explicit dimensions and allocation ceilings.
+///
+/// The pixels are returned as stored, without EXIF rotation: eSCL documents
+/// are checked against the requested size, which a rotation would swap.
 pub fn load_image_with_limits(
     path: impl AsRef<Path>,
     max_width: u32,
     max_height: u32,
     max_allocation: u64,
 ) -> Result<ImageBuffer> {
-    let path = path.as_ref();
+    decode_with_limits(path.as_ref(), max_width, max_height, max_allocation, false)
+}
+
+fn decode_with_limits(
+    path: &Path,
+    max_width: u32,
+    max_height: u32,
+    max_allocation: u64,
+    apply_orientation: bool,
+) -> Result<ImageBuffer> {
     if !path.is_file() {
         return Err(ScanError::Other(format!(
             "file not found: {}",
@@ -139,7 +153,24 @@ pub fn load_image_with_limits(
     limits.max_image_height = Some(max_height);
     limits.max_alloc = Some(max_allocation);
     reader.limits(limits);
-    dynamic_to_buffer(reader.decode()?)
+    if !apply_orientation {
+        return dynamic_to_buffer(reader.decode()?);
+    }
+    let mut decoder = reader.into_decoder()?;
+    // `into_decoder` checks only the dimensions; `decode()` would also reserve
+    // the buffer against `max_alloc`, so do that here.
+    if decoder.total_bytes() > max_allocation {
+        return Err(
+            image::ImageError::Limits(image::error::LimitError::from_kind(
+                image::error::LimitErrorKind::InsufficientMemory,
+            ))
+            .into(),
+        );
+    }
+    let orientation = decoder.orientation()?;
+    let mut decoded = DynamicImage::from_decoder(decoder)?;
+    decoded.apply_orientation(orientation);
+    dynamic_to_buffer(decoded)
 }
 
 /// Grey sources (any depth, with or without alpha) become Gray8, everything
@@ -535,6 +566,31 @@ mod tests {
 
     fn rgb(w: u32, h: u32) -> ImageBuffer {
         ImageBuffer::new(w, h, PixelFormat::Rgb8, vec![90; (w * h * 3) as usize]).unwrap()
+    }
+
+    #[test]
+    fn exif_orientation_is_applied_on_load() {
+        let dir = TemporaryOutput::new("exif-orientation-test", "tmp").unwrap();
+        let path = dir.directory().join("a.jpg");
+        save_image(&path, &rgb(10, 6), None, None).unwrap();
+        let jpeg = std::fs::read(&path).unwrap();
+        // APP1 Exif segment: big-endian TIFF with one IFD0 entry, Orientation (0x0112) = 6.
+        let mut exif =
+            b"Exif\0\0MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06\0\0\0\0\0\0".to_vec();
+        let mut segment = vec![0xFF, 0xE1];
+        segment.extend(((exif.len() + 2) as u16).to_be_bytes());
+        segment.append(&mut exif);
+        let mut tagged = jpeg[..2].to_vec();
+        tagged.extend(segment);
+        tagged.extend(&jpeg[2..]);
+        std::fs::write(&path, tagged).unwrap();
+        let loaded = load_image(&path).unwrap();
+        assert_eq!((loaded.width, loaded.height), (6, 10));
+        // The orienting path still enforces the allocation cap.
+        assert!(decode_with_limits(&path, 100, 100, 16, true).is_err());
+        // The size-checked eSCL path keeps the stored pixel layout.
+        let stored = load_image_with_limits(&path, 100, 100, 1 << 20).unwrap();
+        assert_eq!((stored.width, stored.height), (10, 6));
     }
 
     #[test]

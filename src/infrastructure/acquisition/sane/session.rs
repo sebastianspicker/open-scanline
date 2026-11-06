@@ -433,7 +433,8 @@ impl SaneDeviceSession {
             )?;
             emit(image)?;
             *emitted += 1;
-            std::fs::remove_file(&page)?;
+            // The page is already published; the temp folder is removed anyway.
+            let _ = std::fs::remove_file(&page);
         }
         Ok(())
     }

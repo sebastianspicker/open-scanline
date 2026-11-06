@@ -42,6 +42,12 @@ pub(super) fn run_command_with_capture_limit(
             .map(|arg| truncate_chars(arg, 200))
             .collect::<Vec<_>>()
     );
+    // A cancel that arrived between two runs must not start (then kill) a child.
+    if let Some(error) =
+        supervision_interruption(cancelled, cancellation, cancellation_message, None)
+    {
+        return Err(error);
+    }
     let started = Instant::now();
     let (child, containment) = platform::spawn_contained_command(spec).map_err(|error| {
         crate::debug_log::debug_log!("exec", "{command_name} spawn error: {error}");
@@ -276,4 +282,33 @@ fn terminate_child_and_readers(
     // the inherited pipe after escaping its process group; dropping a handle
     // detaches the reader instead of making cancellation wait indefinitely.
     drop(readers);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::runtime::command::CommandOutputLimits;
+    use crate::infrastructure::runtime::seams::CommandSpec;
+
+    #[test]
+    fn a_cancelled_run_spawns_nothing() {
+        let spec = CommandSpec {
+            program: "/nonexistent/open-scanline-test-program".into(),
+            args: Vec::new(),
+        };
+        let result = run_command_with_capture_limit(
+            &spec,
+            Duration::from_secs(1),
+            &Mutex::new(true),
+            None,
+            "test",
+            "cancelled by test",
+            CommandOutputLimits {
+                capture_bytes: 1024,
+                artifacts: None,
+            },
+        );
+        // A spawn attempt would surface as `Unsupported("... failed to start")`.
+        assert!(matches!(result, Err(ScanError::Cancelled(_))), "{result:?}");
+    }
 }

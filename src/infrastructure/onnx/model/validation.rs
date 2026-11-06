@@ -1,4 +1,5 @@
 use crate::error::{Result, ScanError};
+use std::io::Read;
 use std::path::Path;
 use tract_onnx::prelude::*;
 
@@ -17,10 +18,10 @@ struct ProtoBudget {
 }
 
 pub(super) fn load_model(path: &Path) -> Result<InferenceModel> {
-    validate_model_path(path)?;
+    let bytes = read_model_bytes(path)?;
     let framework = tract_onnx::onnx();
     let proto = framework
-        .proto_model_for_path(path)
+        .proto_model_for_read(&mut bytes.as_slice())
         .map_err(super::execution::onnx_error)?;
     validate_model_proto(&proto)?;
     framework
@@ -28,20 +29,31 @@ pub(super) fn load_model(path: &Path) -> Result<InferenceModel> {
         .map_err(super::execution::onnx_error)
 }
 
-fn validate_model_path(path: &Path) -> Result<()> {
+/// Opens the model once and bounds both the size check and the read on that handle.
+fn read_model_bytes(path: &Path) -> Result<Vec<u8>> {
     if !path.is_file() {
         return Err(ScanError::Invalid(format!(
             "ONNX model not found: {}",
             path.display()
         )));
     }
-    let size = std::fs::metadata(path)?.len();
-    if size > MAX_ONNX_MODEL_BYTES {
-        return Err(ScanError::Unsupported(format!(
+    let file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    let too_big = |size: String| {
+        ScanError::Unsupported(format!(
             "ONNX model is {size} bytes; the safety limit is {MAX_ONNX_MODEL_BYTES} bytes"
-        )));
+        ))
+    };
+    if size > MAX_ONNX_MODEL_BYTES {
+        return Err(too_big(size.to_string()));
     }
-    Ok(())
+    let mut bytes = Vec::new();
+    file.take(MAX_ONNX_MODEL_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_ONNX_MODEL_BYTES {
+        return Err(too_big(format!("more than {MAX_ONNX_MODEL_BYTES}")));
+    }
+    Ok(bytes)
 }
 
 fn validate_model_proto(proto: &tract_onnx::pb::ModelProto) -> Result<()> {

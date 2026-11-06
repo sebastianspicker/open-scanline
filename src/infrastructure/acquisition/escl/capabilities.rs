@@ -187,7 +187,11 @@ impl CapabilityParser {
         }
     }
 
-    fn start(&mut self, name: String) {
+    fn start(&mut self, name: String) -> bool {
+        // Bounds the per-element path scans; real capability trees are ~10 deep.
+        if self.path.len() >= MAX_XML_DEPTH {
+            return false;
+        }
         self.saw_capabilities |= name == "scannercapabilities";
         // `Resolution` is the legacy pair element; eSCL profiles list pairs as
         // `DiscreteResolution` inside `DiscreteResolutions`.
@@ -202,11 +206,12 @@ impl CapabilityParser {
         }
         self.path.push(name);
         self.values.push(String::new());
+        true
     }
 
-    fn set_value(&mut self, value: String) {
+    fn push_text(&mut self, text: &str) {
         if let Some(current) = self.values.last_mut() {
-            *current = value;
+            current.push_str(text);
         }
     }
 
@@ -227,6 +232,7 @@ impl CapabilityParser {
         let _ = self.source(source);
         match name {
             "makeandmodel" => {
+                let value = value.trim();
                 self.capabilities.make_and_model = (!value.is_empty()).then(|| value.into())
             }
             "colormode" => push_unique(&mut self.source(source).color_modes, value),
@@ -293,7 +299,11 @@ impl CapabilityParser {
     }
 
     fn finish_resolution(&mut self, source: Option<CapabilitySource>) {
+        // Zero is not a resolution; `ResolutionRange` rejects it the same way.
         if let Some((Some(x), Some(y))) = self.current_resolution.take() {
+            if x == 0 || y == 0 {
+                return;
+            }
             self.source(source).resolutions.push((x, y));
         }
     }
@@ -314,19 +324,41 @@ fn input_source(value: &str) -> Option<CapabilitySource> {
     }
 }
 
+const MAX_XML_DEPTH: usize = 32;
+
+/// Text of a predefined entity or character reference such as `&amp;`.
+pub(crate) fn general_ref_text(event: &quick_xml::events::BytesRef) -> Option<String> {
+    if let Ok(Some(character)) = event.resolve_char_ref() {
+        return Some(character.to_string());
+    }
+    let text = match event.decode().ok()?.as_ref() {
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "quot" => "\"",
+        "apos" => "'",
+        _ => return None,
+    };
+    Some(text.to_string())
+}
+
 pub(crate) fn parse_escl_capabilities(body: &[u8], root: &str) -> Option<ScannerCapabilities> {
+    // Text is not trimmed by the reader, which would eat the spaces around an
+    // entity (`HP &amp; Co`); values are trimmed where they are used.
     let mut reader = Reader::from_reader(body);
-    reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
     let mut parser = CapabilityParser::new(root);
 
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => parser.start(local_name(event.name().as_ref())),
-            Ok(Event::Text(event)) => parser.set_value(event.decode().ok()?.into_owned()),
-            Ok(Event::CData(event)) => {
-                parser.set_value(String::from_utf8_lossy(event.as_ref()).into_owned())
+            Ok(Event::Start(event)) => {
+                if !parser.start(local_name(event.name().as_ref())) {
+                    return None;
+                }
             }
+            Ok(Event::Text(event)) => parser.push_text(&event.decode().ok()?),
+            Ok(Event::GeneralRef(event)) => parser.push_text(&general_ref_text(&event)?),
+            Ok(Event::CData(event)) => parser.push_text(&String::from_utf8_lossy(event.as_ref())),
             Ok(Event::End(event)) => parser.end(local_name(event.name().as_ref())),
             Ok(Event::Eof) => break,
             Err(_) => return None,
@@ -478,6 +510,32 @@ mod tests {
             dpi_y: dpi,
             ..ScanRequest::default()
         }
+    }
+
+    #[test]
+    fn deeply_nested_xml_is_rejected_quickly() {
+        let xml = "<a>".repeat(100_000);
+        let started = Instant::now();
+        assert!(parse_escl_capabilities(xml.as_bytes(), "eSCL").is_none());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn entities_in_text_are_decoded() {
+        let xml = r#"<scan:ScannerCapabilities xmlns:scan="x" xmlns:pwg="y">
+  <pwg:MakeAndModel>HP &amp; Co Scanner &#x31; &lt;</pwg:MakeAndModel>
+</scan:ScannerCapabilities>"#;
+        let capabilities = parse_escl_capabilities(xml.as_bytes(), "eSCL").unwrap();
+        assert_eq!(
+            capabilities.make_and_model.as_deref(),
+            Some("HP & Co Scanner 1 <")
+        );
+    }
+
+    #[test]
+    fn zero_resolution_pairs_are_skipped() {
+        let xml = DISCRETE.replace("<scan:XResolution>200", "<scan:XResolution>0");
+        assert_eq!(platen(&xml).resolutions, vec![(600, 600)]);
     }
 
     #[test]

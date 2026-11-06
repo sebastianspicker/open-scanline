@@ -127,16 +127,7 @@ fn verify_embedded_regular_file(
     description: &str,
 ) -> Result<()> {
     let entry_name = format!("{PORTABLE_ROOT}/{relative_name}");
-    let matching_entries = (0..archive.len())
-        .filter_map(|index| {
-            archive
-                .by_index(index)
-                .ok()
-                .map(|entry| entry.name().is_ok_and(|name| name == entry_name))
-        })
-        .filter(|matches| *matches)
-        .count();
-    if matching_entries != 1 {
+    if matching_entries(archive, &entry_name) != 1 {
         return Err(ScanError::Other(format!(
             "portable archive must contain exactly one {description} entry named {entry_name}"
         )));
