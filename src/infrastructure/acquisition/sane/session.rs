@@ -12,7 +12,7 @@ use crate::domain::image::ImageBuffer;
 use crate::error::{Result, ScanError};
 use crate::infrastructure::acquisition::batch::{batch_timeout, probe_timeout};
 use crate::infrastructure::acquisition::command_backend::{
-    mentions_feeder_exhausted, numbered_page_outputs,
+    mentions_feeder_exhausted, numbered_page_outputs, page_number,
 };
 use crate::infrastructure::acquisition::{
     opens_simulated_session, simulate_backends, DeviceInfo, DeviceMaintenanceCapabilities,
@@ -412,7 +412,12 @@ impl SaneDeviceSession {
         emitted: &mut u32,
         emit: &mut dyn FnMut(ImageBuffer) -> Result<()>,
     ) -> Result<()> {
-        let pages = numbered_page_outputs(directory, "png")?;
+        // Numbering starts at 1 (`--batch-start=1`), so a page whose delete
+        // failed after it was emitted is skipped instead of emitted again.
+        let pages = numbered_page_outputs(directory, "png")?
+            .into_iter()
+            .filter(|page| page_number(page, "png").is_some_and(|number| number > *emitted))
+            .collect::<Vec<_>>();
         super::super::command_backend::validate_batch_page_count(
             *emitted as usize + pages.len(),
             max_pages,
@@ -817,6 +822,27 @@ mod tests {
             ["page_000001.png", "page_000002.png", "page_000003.png"]
         );
         assert_eq!(std::fs::read_dir(output.directory()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_page_whose_delete_failed_is_not_emitted_again() {
+        let decoder = Arc::new(RecordingDecoder::default());
+        let session = session(PageRunner::new(0, None), decoder.clone());
+        let output = output_dir();
+        // page 1 was emitted earlier but its delete failed, so it is still listed.
+        for number in [1, 2] {
+            std::fs::write(
+                output.directory().join(format!("page_{number:06}.png")),
+                b"x",
+            )
+            .unwrap();
+        }
+        let mut emitted = 1;
+        session
+            .emit_finished_pages(output.directory(), 5, &mut emitted, &mut |_| Ok(()))
+            .unwrap();
+        assert_eq!(emitted, 2);
+        assert_eq!(*decoder.0.lock().unwrap(), ["page_000002.png"]);
     }
 
     #[test]

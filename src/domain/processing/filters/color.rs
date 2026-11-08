@@ -62,9 +62,7 @@ fn rgb_workspace(image: &ImageBuffer) -> Vec<u8> {
 }
 
 fn tint(pixel: &mut [u8], mode: &str) {
-    let luma = ((77u32 * pixel[0] as u32 + 150 * pixel[1] as u32 + 29 * pixel[2] as u32) >> 8)
-        as f64
-        / 255.0;
+    let luma = f64::from(crate::domain::image::luma(pixel[0], pixel[1], pixel[2])) / 255.0;
     let factors = if mode.contains("blue") {
         [0.7, 0.85, 1.15]
     } else {

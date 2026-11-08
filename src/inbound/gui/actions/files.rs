@@ -10,7 +10,7 @@ use super::super::state::MultipageSaveCandidate;
 use crate::domain::export::ExportOptions;
 
 /// Immutable save request assembled before any container or encoder work.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(in crate::inbound::gui) struct SaveAction {
     pub(in crate::inbound::gui) src: PathBuf,
     pub(in crate::inbound::gui) dest: PathBuf,
@@ -26,7 +26,7 @@ pub(in crate::inbound::gui) struct SaveAction {
 /// Only `execute_reprocess_action` (gui-gated) reads every field; without
 /// the `gui` feature this snapshot is assembled but never executed.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(in crate::inbound::gui) struct ReprocessAction {
     pub(in crate::inbound::gui) options: ProcessOptions,
     pub(in crate::inbound::gui) export: ExportOptions,

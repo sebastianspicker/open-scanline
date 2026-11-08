@@ -97,11 +97,11 @@ anything else, including `nan` or `inf`, exits 2. Likewise `--brightness` and `-
 `--colorize-mode` takes `off`, `sepia` or `blue` (the desktop app's `warm` and `cool` mean the
 same). Config values follow the same limits, except that a saved `descreen_dpi` up to 1200 is
 still accepted (descreening never uses more than 300), and `default_width` and
-`default_height` must be set together or not at all. A configured `default_width` and
-`default_height` are pixels at `default_dpi`; a different `--dpi` scales them. The same limits
+`default_height` must be set together or not at all. A configured `default_width`,
+`default_height` and `crop` are pixels at `default_dpi`; a different `--dpi` scales them. The same limits
 apply to `rotate`, `deskew_angle`, and
 `levels_gamma` in `config.json`, and a configured `film_type` must name a known
-profile (or be empty, `off`, or `none`). An unknown `--film-type` is rejected
+profile (or be empty, `off`, `none`, or `false`). An unknown `--film-type` is rejected
 before the scanner starts. `--quality` applies to JPEG and JPEG XL output; for
 other formats it is ignored with a warning.
 

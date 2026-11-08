@@ -102,17 +102,24 @@ pub(crate) fn mdns_endpoints_with_cancellation(
         return Vec::new();
     };
     let mut endpoints = Vec::new();
-    for (service, secure_service) in [
+    // Start all three browses first so they share one `wait` window.
+    let browses: Vec<_> = [
         ("_uscan._tcp.local.", false),
         ("_uscans._tcp.local.", true),
         ("_scanner._tcp.local.", false),
-    ] {
-        let Ok(receiver) = daemon.browse(service) else {
-            continue;
-        };
+    ]
+    .into_iter()
+    .filter_map(|(service, secure)| Some((service, secure, daemon.browse(service).ok()?)))
+    .collect();
+    let deadline = std::time::Instant::now() + wait;
+    for (service, secure_service, receiver) in browses {
+        // Later receivers drain what arrived during the shared window.
+        let remaining = deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .max(Duration::from_millis(25));
         endpoints.extend(resolved_mdns_endpoints_with_cancellation(
             &receiver,
-            wait,
+            remaining,
             secure_service,
             cancellation,
         ));

@@ -269,6 +269,9 @@ impl ImageLayout {
     }
 }
 
+/// The `ScanError::Invalid` text for a crop outside the image; capture rewords it.
+pub(crate) const CROP_OUT_OF_BOUNDS: &str = "crop region out of bounds";
+
 fn validate_crop(image: &ImageBuffer, region: Rect) -> Result<()> {
     if !is_crop_format_supported(image.pixel_format) {
         return Err(ScanError::Unsupported(
@@ -277,7 +280,7 @@ fn validate_crop(image: &ImageBuffer, region: Rect) -> Result<()> {
     }
     validate_crop_region(region)?;
     if !crop_fits_image(image, region) {
-        return Err(ScanError::Invalid("crop region out of bounds".into()));
+        return Err(ScanError::Invalid(CROP_OUT_OF_BOUNDS.into()));
     }
     Ok(())
 }
@@ -345,17 +348,19 @@ fn luma_at(image: &ImageBuffer, offset: usize) -> u8 {
     if image.bpp() == 1 {
         image.data[offset]
     } else {
-        let red = image.data[offset] as u32;
-        let green = image.data[offset + 1] as u32;
-        let blue = image.data[offset + 2] as u32;
-        ((77 * red + 150 * green + 29 * blue) >> 8) as u8
+        crate::domain::image::luma(
+            image.data[offset],
+            image.data[offset + 1],
+            image.data[offset + 2],
+        )
     }
 }
 
 fn best_projection_angle(samples: &[(i32, i32)], max_angle: f64) -> f64 {
     let mut best_angle = 0.0;
     let mut best_score = -1.0;
-    let max_steps = (max_angle * 2.0) as i32;
+    // A skew beyond 45° is a rotation; this also bounds infinite input (NaN gives 0 steps).
+    let max_steps = (max_angle.clamp(0.0, 45.0) * 2.0) as i32;
     for candidate in -max_steps..=max_steps {
         let angle = candidate as f64 * 0.5;
         if let Some(score) = projection_variance(samples, angle) {
@@ -546,5 +551,8 @@ mod bounds_tests {
         let fixed = auto_deskew(&image, 15.0).unwrap();
         // The estimator searches in 0.5 degree steps, so one step is the resolution.
         assert!(estimate_skew_degrees(&fixed, 15.0).abs() <= 0.5);
+        // An unbounded search range is capped instead of looping ~4e9 times.
+        assert!(estimate_skew_degrees(&image, f64::INFINITY).abs() <= 45.0);
+        assert_eq!(estimate_skew_degrees(&image, f64::NAN), 0.0);
     }
 }

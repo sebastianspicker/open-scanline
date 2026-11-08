@@ -6,6 +6,7 @@ mod color;
 mod film;
 mod filters;
 mod geometry;
+pub(crate) use geometry::CROP_OUT_OF_BOUNDS;
 mod plan;
 
 pub use apply::apply_pipeline;

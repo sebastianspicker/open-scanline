@@ -12,7 +12,7 @@ mod tiff;
 
 pub use codecs::{
     convert_image, detect_format, detect_format_bytes, is_png_magic, load_image,
-    load_image_with_limits, read_magic, save_image, save_image_with_cancellation,
+    load_image_with_limits, read_dpi, read_magic, save_image, save_image_with_cancellation,
     supported_extensions, to_rgb_bytes, validate_png_magic, NativeImageDecoder, PNG_MAGIC,
 };
 pub use icc::*;

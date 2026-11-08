@@ -146,14 +146,9 @@ fn validate_scan_args(args: &ScanToFileArgs, pipeline: &PipelinePrefs) -> Result
 
 /// Reject an unknown film type before the device is opened.
 pub(super) fn validate_film_type(pipeline: &PipelinePrefs) -> Result<()> {
-    let film = pipeline.film_type.as_deref().map(str::trim);
-    match film {
-        Some(film)
-            if !film.is_empty()
-                && !film.eq_ignore_ascii_case("off")
-                && !film.eq_ignore_ascii_case("none") =>
-        {
-            crate::domain::processing::get_film_profile(film).map(|_| ())
+    match pipeline.film_type.as_deref() {
+        Some(film) if !crate::domain::processing::is_disabled(film) => {
+            crate::domain::processing::get_film_profile(film.trim()).map(|_| ())
         }
         _ => Ok(()),
     }
@@ -318,7 +313,9 @@ impl<'args> ScanContext<'args> {
         // A device rounds the region to its own geometry, so a slightly
         // smaller image is not an error; only an explicit rejection is reworded.
         match acquired {
-            Err(ScanError::Invalid(message)) if message == "crop region out of bounds" => {
+            Err(ScanError::Invalid(message))
+                if message == crate::domain::processing::CROP_OUT_OF_BOUNDS =>
+            {
                 Err(ScanError::Invalid(format!(
                     "crop {},{},{},{} exceeds the scan size delivered by the device (requested {}x{}; 0 means the device maximum)",
                     region.x, region.y, region.width, region.height, self.args.width, self.args.height
@@ -378,6 +375,17 @@ impl<'args> ScanContext<'args> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn film_type_accepts_every_disabled_spelling() {
+        for off in ["", "off", "NONE", "false"] {
+            let pipeline = PipelinePrefs {
+                film_type: Some(off.into()),
+                ..PipelinePrefs::default()
+            };
+            assert!(validate_film_type(&pipeline).is_ok(), "{off:?}");
+        }
+    }
 
     #[test]
     fn crop_bounds_check_does_not_overflow() {

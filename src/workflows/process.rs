@@ -46,7 +46,7 @@ pub fn process_image_file(options: &ProcessOptions, run: ProcessRunOptions) -> R
             destination: &options.dst,
             pipeline: &options.pipeline,
             extra_white_balance: false,
-            dpi: None,
+            dpi: crate::infrastructure::media::read_dpi(&options.src),
             quality: options.quality,
             export: &export,
             cancellation: run.cancellation.as_ref(),
@@ -139,4 +139,29 @@ pub(crate) struct PageWorkflowRequest<'a> {
 pub(crate) struct PagePublication {
     pub(crate) path: PathBuf,
     pub(crate) searchable_text: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::image::{ImageBuffer, PixelFormat};
+    use crate::infrastructure::media::{read_dpi, save_image};
+    use crate::infrastructure::runtime::TemporaryOutput;
+
+    #[test]
+    fn process_keeps_the_source_density() {
+        let dir = TemporaryOutput::new("process-dpi-test", "png").unwrap();
+        let src = dir.directory().join("scan.png");
+        let page = ImageBuffer::new(4, 3, PixelFormat::Gray8, vec![90; 12]).unwrap();
+        save_image(&src, &page, Some(300), None).unwrap();
+        let options = ProcessOptions {
+            src,
+            dst: dir.directory().join("out.png"),
+            pipeline: PipelinePrefs::default(),
+            quality: None,
+            overwrite: false,
+        };
+        let out = process_image_file(&options, ProcessRunOptions::default()).unwrap();
+        assert_eq!(read_dpi(out), Some(300));
+    }
 }

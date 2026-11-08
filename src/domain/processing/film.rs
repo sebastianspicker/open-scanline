@@ -212,8 +212,7 @@ fn desaturate_bw(data: &mut [u8], bpp: usize, kind: &str) {
     }
 
     for pixel in data.chunks_exact_mut(bpp) {
-        let luma =
-            ((77u32 * pixel[0] as u32 + 150 * pixel[1] as u32 + 29 * pixel[2] as u32) >> 8) as u8;
+        let luma = crate::domain::image::luma(pixel[0], pixel[1], pixel[2]);
         pixel[0] = luma;
         pixel[1] = luma;
         pixel[2] = luma;

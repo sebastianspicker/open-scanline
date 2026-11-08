@@ -67,8 +67,8 @@ impl GuiState {
         let (width, height, dpi) = self.scan_geometry(true);
         let request = ScanRequest {
             device_id: self.device.clone(),
-            width: width.min(160),
-            height: height.min(120),
+            width,
+            height,
             dpi_x: dpi,
             dpi_y: dpi,
             seed: 1,
@@ -148,6 +148,21 @@ mod tests {
             device_result_status("focus", "d", &json!({})),
             "focus d: done"
         );
+    }
+
+    #[test]
+    fn exposure_meters_the_whole_preview_area() {
+        let mut state = GuiState::new(None);
+        state.device = "sane:test".into();
+        state.custom_area = false;
+        state.paper = crate::domain::acquisition::PaperSize::A4;
+        state.do_exposure();
+        let Some(DeviceJob::Exposure(_, request)) = &state.device_job else {
+            panic!("no exposure job");
+        };
+        let (width, height, _) = state.scan_geometry(true);
+        assert!(width > 160 && height > 120, "{width}x{height}");
+        assert_eq!((request.width, request.height), (width, height));
     }
 
     #[test]

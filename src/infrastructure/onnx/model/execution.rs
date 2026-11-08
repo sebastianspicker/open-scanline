@@ -59,19 +59,34 @@ fn prepare_model_input(
             "ONNX input '{requested}' not found; model input is '{name}'"
         )));
     }
-    let shape = model
-        .input_fact(0)
-        .map_err(onnx_error)?
-        .shape
-        .as_concrete_finite()
-        .map_err(onnx_error)?
-        .unwrap_or_else(|| {
-            let (h, w) = dynamic_input_size(image.height as usize, image.width as usize);
-            tvec!(1, 3, h, w)
-        })
-        .into_iter()
-        .collect();
+    let fact = model.input_fact(0).map_err(onnx_error)?;
+    let dims: Vec<Option<usize>> = if fact.shape.is_open() {
+        Vec::new()
+    } else {
+        fact.shape
+            .dims()
+            .map(|dim| {
+                tract_onnx::tract_hir::infer::Factoid::concretize(dim)
+                    .and_then(|dim| usize::try_from(dim.as_i64()?).ok())
+            })
+            .collect()
+    };
+    let shape = input_shape(&dims, image);
     Ok(ModelInput { name, shape })
+}
+
+/// Fixed axes stay as the model declares them; a symbolic axis (such as a
+/// batch `N`) takes the image-derived value for that axis only.
+fn input_shape(dims: &[Option<usize>], image: &ImageBuffer) -> Vec<usize> {
+    let (h, w) = dynamic_input_size(image.height as usize, image.width as usize);
+    let fallback = [1, 3, h, w];
+    if dims.iter().all(Option::is_none) {
+        return fallback.to_vec();
+    }
+    dims.iter()
+        .enumerate()
+        .map(|(axis, dim)| dim.unwrap_or(fallback.get(axis).copied().unwrap_or(1)))
+        .collect()
 }
 
 fn run_model(model: InferenceModel, tensor: Tensor) -> Result<Vec<OnnxOutputSummary>> {
@@ -261,4 +276,21 @@ fn numeric_summary(tensor: &Tensor) -> Result<NumericSummary> {
     let max = view.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
     let mean = view.iter().map(|value| *value as f64).sum::<f64>() / view.len() as f64;
     Ok((Some(min), Some(max), Some(mean), sample))
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+    use crate::domain::image::PixelFormat;
+
+    #[test]
+    fn only_symbolic_axes_take_the_image_size() {
+        let image = ImageBuffer::new(100, 50, PixelFormat::Rgb8, vec![0; 100 * 50 * 3]).unwrap();
+        assert_eq!(
+            input_shape(&[None, Some(3), Some(224), Some(224)], &image),
+            [1, 3, 224, 224]
+        );
+        assert_eq!(input_shape(&[None; 4], &image), [1, 3, 50, 100]);
+        assert_eq!(input_shape(&[], &image), [1, 3, 50, 100]);
+    }
 }

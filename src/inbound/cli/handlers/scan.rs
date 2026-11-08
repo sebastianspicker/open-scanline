@@ -6,7 +6,7 @@ use crate::inbound::cli::args::ScanSource;
 use crate::infrastructure::config::AppConfig;
 use crate::operation::CancellationToken;
 use crate::workflows::capture::single::{self, CaptureOptions, ScanToFileArgs};
-use crate::workflows::settings::resolve_scan_extent;
+use crate::workflows::settings::{configured_crop, resolve_scan_extent};
 use std::path::PathBuf;
 
 pub(super) struct Request {
@@ -83,6 +83,13 @@ pub(super) struct FilterOverrides {
 
 pub(super) fn run(request: Request, cancellation: CancellationToken) -> i32 {
     let mut pipeline = pipeline_with_overrides(&request.config, &request.overrides);
+    if request.overrides.geometry.crop.is_none() {
+        let dpi = request
+            .acquisition
+            .dpi
+            .unwrap_or(request.config.default_dpi);
+        pipeline.crop = configured_crop(&request.config, dpi);
+    }
     apply_explicit_bool(&mut pipeline.auto_crop, request.auto_crop);
     apply_explicit_bool(&mut pipeline.auto_orient, request.auto_orient);
 
@@ -136,7 +143,8 @@ fn scan_args(
             .source
             .map(ScanSource::mode)
             .unwrap_or(config.scan_mode),
-        duplex: acquisition.duplex.unwrap_or(config.duplex),
+        // The saved duplex default is for batches; a single scan returns one side.
+        duplex: acquisition.duplex.unwrap_or(false),
         pipeline,
         invert_colors: acquisition.invert.unwrap_or(config.invert_colors),
         use_preview: false,
@@ -302,5 +310,35 @@ mod tests {
         let pipeline = pipeline_with_overrides(&config, &overrides);
         assert!(!pipeline.flip_h);
         assert_eq!(pipeline.grain_reduction, None);
+    }
+
+    fn acquisition(duplex: Option<bool>) -> Acquisition {
+        Acquisition {
+            device: Some("mock".into()),
+            allow_unlisted_escl: false,
+            out: PathBuf::from("out.png"),
+            width: None,
+            height: None,
+            paper: None,
+            seed: 1,
+            dpi: None,
+            source: None,
+            duplex,
+            invert: None,
+            raw_out: None,
+            overwrite: false,
+        }
+    }
+
+    #[test]
+    fn saved_duplex_default_does_not_reach_a_single_scan() {
+        let config = AppConfig {
+            duplex: true,
+            ..AppConfig::default()
+        };
+        let args = scan_args(acquisition(None), config.clone(), PipelinePrefs::default());
+        assert!(!args.duplex);
+        let args = scan_args(acquisition(Some(true)), config, PipelinePrefs::default());
+        assert!(args.duplex);
     }
 }

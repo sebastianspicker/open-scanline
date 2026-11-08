@@ -435,10 +435,11 @@ fn brighten_corner(out: &mut [u8], width: i32, height: i32, bpp: usize, cx: i32,
 
 fn brighten_pixel(out: &mut [u8], index: usize, bpp: usize) {
     let luma = if bpp >= 3 {
-        (77 * u32::from(out[index])
-            + 150 * u32::from(out[index + 1])
-            + 29 * u32::from(out[index + 2]))
-            >> 8
+        u32::from(crate::domain::image::luma(
+            out[index],
+            out[index + 1],
+            out[index + 2],
+        ))
     } else {
         u32::from(out[index])
     };

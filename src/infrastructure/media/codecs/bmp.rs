@@ -11,9 +11,11 @@ pub(super) fn write_bmp(image: &ImageBuffer, output: &Path) -> Result<()> {
         .truncate(true)
         .open(output)?;
     let mut writer = BufWriter::with_capacity(64 * 1024, file);
+    // The encoder asserts an exact length; the buffer may be longer.
+    let len = image.width as usize * image.height as usize * image.bpp();
     image::codecs::bmp::BmpEncoder::new(&mut writer)
         .encode(
-            &image.data,
+            &image.data[..len],
             image.width,
             image.height,
             image_color_type(image.pixel_format).into(),

@@ -99,6 +99,59 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<Option<&'static str>> {
     Ok(detect_format_bytes(&head))
 }
 
+/// The density a PNG (`pHYs`), JPEG (JFIF) or TIFF file stores, in dots per
+/// inch. `None` when there is none, it is implausible, or the format is other.
+pub fn read_dpi(path: impl AsRef<Path>) -> Option<u32> {
+    let path = path.as_ref();
+    let mut head = [0u8; 16];
+    let read = std::fs::File::open(path).ok()?.read(&mut head).ok()?;
+    let dpi = match &head[..read] {
+        [0x89, b'P', b'N', b'G', ..] => {
+            let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+            let dims = ::png::Decoder::new(file)
+                .read_info()
+                .ok()?
+                .info()
+                .pixel_dims?;
+            if dims.unit != ::png::Unit::Meter {
+                return None;
+            }
+            f64::from(dims.xppu) * 0.0254
+        }
+        [0xFF, 0xD8, 0xFF, 0xE0, _, _, b'J', b'F', b'I', b'F', 0, _, _, unit, high, low] => {
+            let density = f64::from(u16::from_be_bytes([*high, *low]));
+            match unit {
+                1 => density,
+                2 => density * 2.54,
+                _ => return None,
+            }
+        }
+        [b'I', b'I', 42 | 43, 0, ..] | [b'M', b'M', 0, 42 | 43, ..] => {
+            let file = std::fs::File::open(path).ok()?;
+            let mut decoder = ::tiff::decoder::Decoder::new(file).ok()?;
+            let ::tiff::decoder::ifd::Value::Rational(numerator, denominator) =
+                decoder.get_tag(::tiff::tags::Tag::XResolution).ok()?
+            else {
+                return None;
+            };
+            let per_unit = f64::from(numerator) / f64::from(denominator.max(1));
+            match decoder
+                .get_tag_u32(::tiff::tags::Tag::ResolutionUnit)
+                .unwrap_or(2)
+            {
+                2 => per_unit,
+                3 => per_unit * 2.54,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    let dpi = dpi.round();
+    (f64::from(crate::domain::acquisition::MIN_SCAN_DPI)..=f64::from(u16::MAX))
+        .contains(&dpi)
+        .then_some(dpi as u32)
+}
+
 /// Decode a file and apply its EXIF orientation, so phone photos load upright.
 pub fn load_image(path: impl AsRef<Path>) -> Result<ImageBuffer> {
     decode_with_limits(
@@ -313,9 +366,10 @@ fn write_standard_image(
     let rgb;
     let (data, color) = if format == ImageFormat::Gif && image.pixel_format == PixelFormat::Gray8 {
         rgb = to_rgb_bytes(image)?;
-        (&rgb, ColorType::Rgb8)
+        (rgb.as_slice(), ColorType::Rgb8)
     } else {
-        (&image.data, image_color_type(image.pixel_format))
+        let len = image.width as usize * image.height as usize * image.bpp();
+        (&image.data[..len], image_color_type(image.pixel_format))
     };
     image::save_buffer_with_format(output, data, image.width, image.height, color, format)
         .map_err(|error| ScanError::Image(error.to_string()))
@@ -559,6 +613,34 @@ pub fn to_rgb_bytes(image: &ImageBuffer) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::infrastructure::runtime::TemporaryOutput;
+
+    #[test]
+    fn read_dpi_round_trips_png_jpeg_and_tiff() {
+        let dir = TemporaryOutput::new("dpi-test", "png").unwrap();
+        for ext in ["png", "jpg", "tif"] {
+            let path = dir.directory().join(format!("page.{ext}"));
+            save_image(&path, &grey(4, 3), Some(300), None).unwrap();
+            assert_eq!(read_dpi(&path), Some(300), "{ext}");
+            let bare = dir.directory().join(format!("bare.{ext}"));
+            save_image(&bare, &grey(4, 3), None, None).unwrap();
+            assert_ne!(read_dpi(&bare), Some(300), "{ext}");
+        }
+    }
+
+    #[test]
+    fn writers_accept_a_buffer_longer_than_its_pixels() {
+        let dir = TemporaryOutput::new("oversize-test", "png").unwrap();
+        let image = ImageBuffer {
+            width: 2,
+            height: 1,
+            pixel_format: PixelFormat::Gray8,
+            data: vec![1, 2, 3],
+        };
+        for ext in ["bmp", "gif", "webp", "png", "jpg", "tif"] {
+            let path = dir.directory().join(format!("x.{ext}"));
+            assert!(save_image(&path, &image, None, None).is_ok(), "{ext}");
+        }
+    }
 
     fn grey(w: u32, h: u32) -> ImageBuffer {
         ImageBuffer::new(w, h, PixelFormat::Gray8, vec![90; (w * h) as usize]).unwrap()

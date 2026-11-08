@@ -65,10 +65,7 @@ pub fn desaturate(image: &ImageBuffer) -> Result<ImageBuffer> {
     }
     let mut out = vec![0u8; image.data.len()];
     for i in (0..image.data.len()).step_by(3) {
-        let r = image.data[i] as u32;
-        let g = image.data[i + 1] as u32;
-        let b = image.data[i + 2] as u32;
-        let y = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
+        let y = crate::domain::image::luma(image.data[i], image.data[i + 1], image.data[i + 2]);
         out[i] = y;
         out[i + 1] = y;
         out[i + 2] = y;
@@ -236,7 +233,7 @@ pub fn adjust_saturation(image: &ImageBuffer, saturation: f64) -> Result<ImageBu
         let r = image.data[i] as i32;
         let g = image.data[i + 1] as i32;
         let b = image.data[i + 2] as i32;
-        let y = ((77 * r + 150 * g + 29 * b) >> 8) as f64;
+        let y = f64::from(crate::domain::image::luma(r as u8, g as u8, b as u8));
         out[i] = clamp_u8((y + (r as f64 - y) * factor).round() as i32);
         out[i + 1] = clamp_u8((y + (g as f64 - y) * factor).round() as i32);
         out[i + 2] = clamp_u8((y + (b as f64 - y) * factor).round() as i32);
@@ -413,8 +410,7 @@ pub fn histogram(image: &ImageBuffer) -> Result<serde_json::Value> {
                 rh[r] += 1;
                 gh[g] += 1;
                 bh[b] += 1;
-                let luma = (77 * r + 150 * g + 29 * b) >> 8;
-                lh[luma.min(255)] += 1;
+                lh[usize::from(crate::domain::image::luma(r as u8, g as u8, b as u8))] += 1;
             }
             Ok(json!({
                 "r": rh,

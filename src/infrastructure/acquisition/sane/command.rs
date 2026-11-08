@@ -133,8 +133,12 @@ pub(super) fn selected_source(
                 .iter()
                 .map(String::as_str)
                 .find(|value| {
-                    // A Document request must not fall back to the flatbed.
-                    !(request.mode == ScanMode::Document && is_flatbed(value))
+                    let document = request.mode == ScanMode::Document;
+                    // A Document request must not fall back to the flatbed, and a
+                    // simplex one must not get a source that returns two sides.
+                    let excluded = document
+                        && (is_flatbed(value) || (!request.duplex && !is_single_sided(value)));
+                    !excluded
                         && matching_value(&[value.to_string()], source_keywords(request)).is_some()
                 })
         })
@@ -207,7 +211,6 @@ fn feeder_only_source<'a>(
     };
     feeders()
         .find(|value| is_single_sided(value))
-        .or_else(|| feeders().next())
         .map(String::as_str)
 }
 
@@ -322,7 +325,13 @@ fn select_color_mode<'a>(
     if capabilities.mode_values.is_empty() {
         return empty_mode_selection(request);
     }
-    matching_value(&capabilities.mode_values, color_keywords(request))
+    let (values, keywords) = (&capabilities.mode_values, color_keywords(request));
+    // Epson lists "Gray[Error Diffusion]" (dithered) before "True Gray"; a plain value wins.
+    values
+        .iter()
+        .filter(|value| !value.contains('['))
+        .find_map(|value| matching_value(std::slice::from_ref(value), keywords))
+        .or_else(|| matching_value(values, keywords))
         .map(Some)
         .ok_or_else(|| {
             ScanError::Unsupported(
@@ -485,6 +494,42 @@ mod tests {
                 "{mode:?}: {args:?}"
             );
         }
+    }
+
+    #[test]
+    fn single_sided_requests_never_fall_back_to_a_duplex_only_feeder() {
+        let capabilities = parse_scanimage_help("    --source ADF Duplex|ADF Back [ADF Duplex]\n");
+        for mode in [ScanMode::Document, ScanMode::Reflective] {
+            let request = ScanRequest {
+                mode,
+                ..ScanRequest::default()
+            };
+            let result = build_scanimage_command(
+                Path::new("scanimage"),
+                "dev",
+                &request,
+                Path::new("out.png"),
+                Some(&capabilities),
+            );
+            assert!(
+                result.is_err(),
+                "{mode:?}: {:?}",
+                result.map(|spec| spec.args)
+            );
+        }
+    }
+
+    #[test]
+    fn gray_requests_prefer_a_plain_gray_mode_over_a_dithered_one() {
+        let capabilities = parse_scanimage_help(
+            "    --mode Black & White|Gray[Error Diffusion]|True Gray|24bit Color [24bit Color]\n",
+        );
+        let request = ScanRequest {
+            pixel_format: PixelFormat::Gray8,
+            ..ScanRequest::default()
+        };
+        let args = command_args(&request, Some(&capabilities));
+        assert!(args.contains(&"--mode=True Gray".to_string()), "{args:?}");
     }
 
     #[test]

@@ -276,3 +276,23 @@ fn strip_banned_object(map: &serde_json::Map<String, Value>) -> serde_json::Map<
         .map(|(key, value)| (key.clone(), strip_banned(value)))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_names_are_one_portable_file_name() {
+        for good in ["scan", "Brief 2026-11-08", "a.b", "COM10", "console"] {
+            assert_eq!(validate_output_name(good).ok(), Some(good), "{good:?}");
+        }
+        let too_long = "a".repeat(MAX_OUTPUT_NAME_BYTES + 1);
+        let bad = [
+            "", ".", "..", "a/b", "a\\b", "../x", "x.", "x ", "a:b", "a\u{7}b", "CON", "con.txt",
+            "COM1", "lpt9.pdf", "NUL", &too_long,
+        ];
+        for bad in bad {
+            assert!(validate_output_name(bad).is_err(), "{bad:?}");
+        }
+    }
+}

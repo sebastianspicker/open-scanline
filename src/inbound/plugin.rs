@@ -106,7 +106,12 @@ fn run_plugin_mode_inner_with_token(
     cancellation: CancellationToken,
 ) -> Result<i32> {
     check_plugin_cancellation(&cancellation)?;
-    let mut status = plugin_status_with_cancellation(config_path, Some(&cancellation));
+    let mut status = if quiet {
+        // Nothing is printed, so skip the device and backend listings; only "ok" is read.
+        json!({ "ok": load_config(config_path).is_ok() })
+    } else {
+        plugin_status_with_cancellation(config_path, Some(&cancellation))
+    };
     check_plugin_cancellation(&cancellation)?;
     if let Some(scan) = optional_plugin_scan(config_path, out, device, &cancellation)? {
         add_plugin_scan_status(&mut status, scan);

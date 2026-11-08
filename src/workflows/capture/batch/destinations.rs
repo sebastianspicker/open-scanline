@@ -171,3 +171,36 @@ fn validate_named_container_path(path: &Path, label: &str, allowed: &[&str]) -> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::runtime::TemporaryOutput;
+
+    #[test]
+    fn destinations_may_not_alias_each_other_or_a_generated_page() {
+        let dir = TemporaryOutput::new("alias-test", "tif").unwrap();
+        let path = |name: &str| dir.directory().join(name);
+        let pages = [path("page_1.png"), path("page_2.png")];
+
+        let same = [
+            ("multipage output", path("doc.tif")),
+            ("multipage TIFF", path("doc.tif")),
+        ];
+        let error = validate_destination_aliases(&same, &pages).unwrap_err();
+        assert!(
+            error.to_string().contains("aliases multipage output"),
+            "{error}"
+        );
+
+        let on_page = [("contact sheet", path("page_2.png"))];
+        let error = validate_destination_aliases(&on_page, &pages).unwrap_err();
+        assert!(error.to_string().contains("generated page 2"), "{error}");
+
+        let distinct = [
+            ("multipage TIFF", path("doc.tif")),
+            ("multipage PDF", path("doc.pdf")),
+        ];
+        assert!(validate_destination_aliases(&distinct, &pages).is_ok());
+    }
+}

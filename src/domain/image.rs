@@ -176,12 +176,14 @@ pub(crate) fn image_to_luma8(image: &ImageBuffer) -> Result<(u32, u32, Vec<u8>)>
             let mut gray = vec![0_u8; image.data.len() / bytes_per_pixel];
             for (index, output) in gray.iter_mut().enumerate() {
                 let base = index * bytes_per_pixel;
-                let red = image.data[base] as u32;
-                let green = image.data[base + 1] as u32;
-                let blue = image.data[base + 2] as u32;
-                *output = ((77 * red + 150 * green + 29 * blue) >> 8) as u8;
+                *output = luma(image.data[base], image.data[base + 1], image.data[base + 2]);
             }
             Ok((width, height, gray))
         }
     }
+}
+
+/// BT.601 luma in 8-bit fixed point: (77 R + 150 G + 29 B) / 256.
+pub(crate) fn luma(red: u8, green: u8, blue: u8) -> u8 {
+    ((77 * u32::from(red) + 150 * u32::from(green) + 29 * u32::from(blue)) >> 8) as u8
 }

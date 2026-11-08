@@ -154,7 +154,7 @@ pub(crate) fn numbered_page_outputs(directory: &Path, extension: &str) -> Result
     Ok(pages.into_iter().map(|(_, path)| path).collect())
 }
 
-fn page_number(path: &Path, extension: &str) -> Option<u32> {
+pub(crate) fn page_number(path: &Path, extension: &str) -> Option<u32> {
     let digits = path
         .file_name()?
         .to_str()?

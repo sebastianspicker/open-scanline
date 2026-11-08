@@ -449,6 +449,13 @@ fn list_for_open(
     }
 }
 
+fn with_salvage_error(error: ScanError, salvage: Option<ScanError>) -> ScanError {
+    match salvage {
+        Some(stop) => ScanError::Unsupported(format!("{error}; page salvage stopped: {stop}")),
+        None => error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{list_for_open, WiaDeviceSession};
@@ -567,12 +574,5 @@ mod tests {
         assert_eq!(hit.len(), 1);
         let none = list_for_open("wia:a", Vec::new, None::<fn() -> Vec<DeviceInfo>>);
         assert!(none.is_empty());
-    }
-}
-
-fn with_salvage_error(error: ScanError, salvage: Option<ScanError>) -> ScanError {
-    match salvage {
-        Some(stop) => ScanError::Unsupported(format!("{error}; page salvage stopped: {stop}")),
-        None => error,
     }
 }

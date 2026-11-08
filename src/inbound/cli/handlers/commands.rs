@@ -363,6 +363,9 @@ impl BatchRequest {
         scan::apply_explicit_bool(&mut pipeline.invert, self.invert);
         let outputs = self.output_targets(config);
         let dpi = self.dpi.unwrap_or(config.default_dpi);
+        if self.overrides.geometry.crop.is_none() {
+            pipeline.crop = crate::workflows::settings::configured_crop(config, dpi);
+        }
         let (width, height) = resolve_scan_extent(config, self.paper, self.width, self.height, dpi);
         BatchScanArgs {
             device: self
@@ -456,4 +459,48 @@ pub(super) fn package(binary: PathBuf, out: PathBuf) -> i32 {
 pub(super) fn help_text() -> i32 {
     print!("{}", user_manual_text());
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_scales_the_configured_crop_to_its_dpi() {
+        let config = AppConfig {
+            default_dpi: 150,
+            crop: Some([100, 100, 800, 600]),
+            ..AppConfig::default()
+        };
+        let request = BatchRequest {
+            config: config.clone(),
+            device: Some("mock".into()),
+            allow_unlisted_escl: false,
+            out_dir: PathBuf::from("out"),
+            pages: None,
+            width: None,
+            height: None,
+            paper: None,
+            seed: 1,
+            dpi: Some(600),
+            source: None,
+            duplex: None,
+            format: None,
+            overrides: scan::PipelineOverrides::default(),
+            auto_crop: None,
+            auto_orient: None,
+            invert: None,
+            multipage_tiff: None,
+            multipage_pdf: None,
+            multipage_out: None,
+            export: crate::ExportOptions::default(),
+            contact_sheet: None,
+            overwrite: false,
+        };
+        let crop = request.scan_args(&config).pipeline.crop;
+        assert_eq!(
+            crop,
+            Some(crate::domain::image::Rect::new(400, 400, 3200, 2400))
+        );
+    }
 }

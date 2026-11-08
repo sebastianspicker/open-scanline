@@ -66,6 +66,23 @@ pub fn resolve_scan_extent(
 
 /// Rescale a configured pixel length from `default_dpi` to `dpi`, rounding. On
 /// overflow the value is kept so the usual extent validation rejects the request.
+/// The configured crop at the scan `dpi`. Like the configured extent, it is
+/// stored in pixels at `default_dpi`.
+pub fn configured_crop(config: &AppConfig, dpi: u32) -> Option<Rect> {
+    let offset = |pixels: i32| match u32::try_from(pixels) {
+        Ok(pixels) => i32::try_from(configured_pixels(pixels, config, dpi)).unwrap_or(i32::MAX),
+        Err(_) => pixels,
+    };
+    resolve_crop(config.crop).map(|crop| {
+        Rect::new(
+            offset(crop.x),
+            offset(crop.y),
+            configured_pixels(crop.width, config, dpi),
+            configured_pixels(crop.height, config, dpi),
+        )
+    })
+}
+
 fn configured_pixels(pixels: u32, config: &AppConfig, dpi: u32) -> u32 {
     if pixels == 0 || config.default_dpi == 0 || dpi == config.default_dpi {
         return pixels;
@@ -149,9 +166,28 @@ mod tests {
     }
 
     #[test]
+    fn configured_crop_follows_the_scan_dpi() {
+        let config = AppConfig {
+            default_dpi: 150,
+            crop: Some([100, 100, 800, 600]),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            configured_crop(&config, 600),
+            Some(Rect::new(400, 400, 3200, 2400))
+        );
+        assert_eq!(
+            configured_crop(&config, 150),
+            Some(Rect::new(100, 100, 800, 600))
+        );
+    }
+
+    #[test]
     fn extent_precedence_is_per_axis() {
-        let mut config = AppConfig::default();
-        config.default_dpi = 300;
+        let mut config = AppConfig {
+            default_dpi: 300,
+            ..AppConfig::default()
+        };
         assert_eq!(resolve_scan_extent(&config, None, None, None, 300), (0, 0));
         config.default_width = 100;
         config.default_height = 200;
